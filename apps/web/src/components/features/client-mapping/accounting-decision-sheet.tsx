@@ -25,12 +25,13 @@
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Loader2 } from 'lucide-react';
+import { AlertTriangle, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 
+import { absentFromImportText } from '@/components/features/accounting-chart/absent-from-import';
 import {
   AccountingAccountCombobox,
   accountingAccountLabel,
@@ -68,7 +69,7 @@ import { useAccountingChartList } from '@/hooks/use-client-accounting-chart';
 import { useWriteMappingDecision } from '@/hooks/use-client-mapping';
 import { readNotPostableMessage } from '@/lib/accounting-chart-errors';
 import { ApiError } from '@/lib/api/client';
-import type { MappingDestination, MappingListItem } from '@/lib/contracts';
+import type { AccountingAccount, MappingDestination, MappingListItem } from '@/lib/contracts';
 import { formatReferenceMonth } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import {
@@ -136,6 +137,8 @@ export function AccountingDecisionSheet({
   const planProbe = useAccountingChartList(clientId, { page: 1, pageSize: 1 }, { enabled: open });
   const writeMutation = useWriteMappingDecision(clientId, destination.type);
   const [conflict, setConflict] = useState<VigenciaConflict | null>(null);
+  // A conta escolhida NESTA abertura, com o selo da reimportação (86e3qhhrm).
+  const [chosenAccount, setChosenAccount] = useState<AccountingAccount | null>(null);
 
   const form = useForm<MappingAccountingDecisionFormValues>({
     resolver: zodResolver(mappingAccountingDecisionFormSchema),
@@ -148,6 +151,7 @@ export function AccountingDecisionSheet({
     if (open) {
       form.reset(defaultsFor(item, serverCompetence));
       setConflict(null);
+      setChosenAccount(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, item?.categoryCode, item?.sourceType, serverCompetence]);
@@ -177,6 +181,15 @@ export function AccountingDecisionSheet({
           nameResolved: Boolean(item.accountingAccountName),
         })
       : null;
+
+  // A conta que está no campo: a escolhida agora, ou a da decisão vigente (o
+  // servidor manda o selo dela no item). Com o selo, o aviso aparece.
+  const selectedAbsentSince =
+    chosenAccount !== null && chosenAccount.id === accountingAccountId
+      ? (chosenAccount.absentSince ?? null)
+      : !legacy && accountingAccountId !== '' && accountingAccountId === item?.accountingAccountId
+        ? (item.accountingAccountAbsentSince ?? null)
+        : null;
 
   async function onSubmit(values: MappingAccountingDecisionFormValues) {
     if (!item) return;
@@ -355,8 +368,9 @@ export function AccountingDecisionSheet({
                               clientId={clientId}
                               value={field.value === '' ? null : field.value}
                               selectedLabel={currentAccountLabel}
-                              onValueChange={(next) => {
+                              onValueChange={(next, account) => {
                                 field.onChange(next);
+                                setChosenAccount(account);
                                 form.clearErrors('accountingAccountId');
                               }}
                               label="Conta do plano contábil do cliente"
@@ -367,6 +381,23 @@ export function AccountingDecisionSheet({
                             Só contas analíticas e ativas do plano contábil do cliente. Busca pelo
                             início do código.
                           </FormDescription>
+                          {selectedAbsentSince !== null && (
+                            <p
+                              role="status"
+                              data-testid="accounting-decision-absent-warning"
+                              className="bg-warning-muted text-warning ring-warning/30 flex items-start gap-2 rounded-lg p-3 text-sm ring-1 ring-inset"
+                            >
+                              <AlertTriangle
+                                className="mt-0.5 h-4 w-4 shrink-0"
+                                aria-hidden="true"
+                              />
+                              <span>
+                                {absentFromImportText(selectedAbsentSince)}. Ela pode não existir
+                                mais no sistema contábil, e o arquivo contábil chegaria com uma
+                                conta inexistente. Confira no sistema contábil antes de usar.
+                              </span>
+                            </p>
+                          )}
                           <FormMessage />
                         </FormItem>
                       )}

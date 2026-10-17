@@ -2,6 +2,8 @@
 
     - GET  /api/v1/clients/{client_id}/accounting-chart
     - POST /api/v1/clients/{client_id}/accounting-chart/import   (multipart)
+    - POST /api/v1/clients/{client_id}/accounting-chart/import/preview  (multipart, 86e3qhhrm)
+    - GET  /api/v1/clients/{client_id}/accounting-chart/export   (CSV, 86e3qhhrm)
     - POST  /api/v1/clients/{client_id}/accounting-chart/accounts               (86e3nb816)
     - PATCH /api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}  (86e3nb816)
 
@@ -22,6 +24,10 @@ o do sistema contábil de DESTINO, onde o escritório lança.
 O upload é lido em STREAMING com teto (`Settings.max_upload_bytes`) e fica só em
 memória (§3.10). A rota literal `/import` não colide com nada: não há rota com path
 param depois do prefixo.
+
+A EXPORTAÇÃO é leitura (`AccessibleClientDep`, como a lista): quem lê o plano baixa o
+plano. Ela grava 1 linha `export` em `access_audit` (o arquivo sai da plataforma com
+nome de conta, dado do cliente final), como a exportação do de-para.
 """
 
 from __future__ import annotations
@@ -29,10 +35,12 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile
 
+from app.core.audit import AccessAction, record_access
 from app.core.dependencies import (
     AccessibleClientDep,
+    CurrentUserDep,
     DbSessionDep,
     ManageClientAccountingChartDep,
     OpenClientDep,
@@ -42,6 +50,7 @@ from app.db.models.client_accounting_account import (
     MAX_ACCOUNTING_ACCOUNT_CODE_CHARS,
     AccountingAccountType,
 )
+from app.modules.client_accounting_chart.export import EXPORT_MEDIA_TYPE, export_filename
 from app.modules.client_accounting_chart.repository import AccountingChartFilters
 from app.modules.client_accounting_chart.schemas import (
     AccountingAccountCreateRequest,
@@ -52,6 +61,8 @@ from app.modules.client_accounting_chart.schemas import (
     AccountingChartListResponse,
     ChartImportEnvelope,
     ChartImportPayload,
+    ChartImportPreviewEnvelope,
+    ChartImportPreviewPayload,
 )
 from app.modules.client_accounting_chart.service import AccountingChartService
 from app.modules.users.schemas import PaginationMeta
@@ -145,10 +156,13 @@ async def list_accounting_chart(
         "`Nome`/`Grau` nas 10 primeiras linhas e convertido para o modelo (código, `S` = "
         "sintética e vazio = analítica, classificação, nome e grau, que tem de ser a "
         "profundidade da classificação); o CSV nativo do Domínio não é aceito. "
-        "A reimportação casa por código: conta "
-        "nova entra, conta existente atualiza nome, tipo e classificação (e volta a "
-        "ativa), conta que sumiu da planilha vira INATIVA — nunca é apagada. Responde "
-        "as contagens `contas`, `contasNovas`, `contasInativadas`. O nome é cifrado com "
+        "A reimportação casa por código e só adiciona e atualiza: conta "
+        "nova entra ativa, conta existente atualiza nome, tipo e classificação, e a "
+        "conta que não veio na planilha continua como estava (nunca é inativada nem "
+        "apagada) e ganha o selo `absentSince`, que sai quando ela volta. A situação "
+        "da conta não muda pela planilha. Antes de gravar, `POST …/import/preview` "
+        "mostra o que muda. Responde as contagens `contas`, `contasNovas`, "
+        "`contasAlteradas` e `contasAusentes`. O nome é cifrado com "
         "a chave do cliente. Requer `manage_client_accounting_chart` (plataforma, admin "
         "e gerente da carteira; usuários do cliente recebem 403 e a negação fica na "
         "trilha). Cliente encerrado: 409. Recusas, todas 422 e sem gravar nada: "
@@ -185,6 +199,86 @@ async def import_accounting_chart(
     )
     result = await service.import_sheet(client, actor=actor, content=content)
     return ChartImportEnvelope(data=ChartImportPayload.from_result(result))
+
+
+@router.post(
+    "/import/preview",
+    summary=(
+        "Mostra o que a importação desta planilha faria, SEM GRAVAR nada: o mesmo leitor "
+        "e as mesmas recusas 422 de `POST …/import` (modelo da plataforma e plano "
+        "exportado do Domínio). Devolve as contagens (`contasNovas`, `contasAlteradas`, "
+        "`contasSemMudanca`, `contasAusentes`, `contasAusentesEmUso` — as ausentes que "
+        "decisões do de-para, de qualquer vigência, ou a conta do banco usam —, "
+        "`contasQueVoltaram` e `contasInativasNaPlanilha`), `temMudancas` e as listas "
+        "`novas` (como na planilha), `alteradas` (o nome novo e os campos que mudam: "
+        "`nome`, `tipo`, `classificacao`) e `ausentes` (o nome atual, a situação, `inUse` "
+        "e `absentSince`), cada uma com até `listLimit` itens. Mesma permissão da "
+        "importação (`manage_client_accounting_chart`; a negação fica na trilha); "
+        "cliente encerrado 409."
+    ),
+)
+async def preview_accounting_chart_import(
+    request: Request,
+    client: OpenClientDep,
+    actor: ManageClientAccountingChartDep,
+    settings: SettingsDep,
+    service: ServiceDep,
+    file: Annotated[
+        UploadFile,
+        File(
+            description="CSV (`;`, UTF-8), XLSX ou XLS no modelo, ou o plano exportado do Domínio."
+        ),
+    ],
+) -> ChartImportPreviewEnvelope:
+    content = await read_upload_within_limit(
+        file,
+        declared_content_length=parse_content_length(request.headers.get("content-length")),
+        max_bytes=settings.max_upload_bytes,
+    )
+    preview = await service.preview_sheet(client, content=content)
+    return ChartImportPreviewEnvelope(data=ChartImportPreviewPayload.from_preview(preview))
+
+
+@router.get(
+    "/export",
+    summary=(
+        "Baixa o plano contábil do cliente no MODELO DA PLATAFORMA: CSV UTF-8 (com BOM, "
+        "para o Excel), separado por `;`, cabeçalho `codigo_reduzido;nome;tipo;"
+        "classificacao` e todas as contas, ativas e inativas, na ordem do plano. É o "
+        "mesmo formato que `POST …/import` lê: exportar e reimportar o arquivo não muda "
+        "nada. Nome que começaria fórmula no Excel (`= + - @`) sai com um apóstrofo na "
+        "frente, que a importação retira. Plano vazio sai só com o cabeçalho. Visível a "
+        "todo papel com acesso ao cliente; registra a exportação na trilha de acesso. "
+        "Nome de conta que não decifra: 409 `PLANO_CONTABIL_INDECIFRAVEL`."
+    ),
+    response_class=Response,
+    responses={200: {"content": {"text/csv": {}}}},
+)
+async def export_accounting_chart(
+    client: AccessibleClientDep,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+    service: ServiceDep,
+) -> Response:
+    content, _ = await service.export_csv(client)
+    # A trilha (§4.7): 1 linha `export`, só IDs. Sem `commit` próprio — o fim de
+    # request (`get_db_session`) persiste junto com a resposta.
+    await record_access(
+        db,
+        user_id=UUID(user.id),
+        client_id=client.id,
+        action=AccessAction.EXPORT,
+        user_scope=user.scope,
+        actor_client_id=user.client_id,
+        actor_organization_id=user.organization_id,
+    )
+    return Response(
+        content=content,
+        media_type=EXPORT_MEDIA_TYPE,
+        headers={
+            "Content-Disposition": 'attachment; filename="' + export_filename(client.id) + '"'
+        },
+    )
 
 
 @router.post(

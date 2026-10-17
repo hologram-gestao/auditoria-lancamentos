@@ -726,6 +726,8 @@ const ACCOUNTING_ACCOUNTS = [
     code: '5101',
     classification: '3.1.01.01.001',
     name: 'Receita de aluguéis',
+    // 86e3qhhrm — o selo da reimportação: ativa, lançável, e não veio na última.
+    absentSince: '2026-10-16T13:05:00Z',
   }),
   accountingAccount({
     id: 'acc-700',
@@ -736,6 +738,57 @@ const ACCOUNTING_ACCOUNTS = [
     postable: false,
   }),
 ];
+
+/** 86e3qhhrm — as prévias da importação, no formato do servidor. */
+const ACCOUNTING_PREVIEW_FIRST = {
+  layout: 'modelo',
+  contas: 5,
+  contasNovas: 5,
+  contasAlteradas: 0,
+  contasSemMudanca: 0,
+  contasAusentes: 0,
+  contasAusentesEmUso: 0,
+  contasQueVoltaram: 0,
+  contasInativasNaPlanilha: 0,
+  temMudancas: true,
+  novas: ACCOUNTING_ACCOUNTS.map((a) => ({
+    code: a.code,
+    name: a.name,
+    type: a.type,
+    classification: a.classification,
+  })),
+  alteradas: [],
+  ausentes: [],
+  listLimit: 200,
+};
+const ACCOUNTING_PREVIEW_REIMPORT = {
+  layout: 'modelo',
+  contas: 5,
+  contasNovas: 1,
+  contasAlteradas: 1,
+  contasSemMudanca: 3,
+  contasAusentes: 1,
+  contasAusentesEmUso: 1,
+  contasQueVoltaram: 0,
+  contasInativasNaPlanilha: 1,
+  temMudancas: true,
+  novas: [{ code: '701', name: 'Cliente novo', type: 'analitica', classification: '1.1.2.01.005' }],
+  alteradas: [
+    { accountId: 'acc-5101', code: '5101', name: 'Receita de aluguéis (nova)', changes: ['nome'] },
+  ],
+  ausentes: [
+    {
+      accountId: 'acc-662',
+      code: '662',
+      name: 'Aluguéis a receber - Inquilino D',
+      nameResolved: true,
+      active: true,
+      inUse: true,
+      absentSince: null,
+    },
+  ],
+  listLimit: 200,
+};
 
 /** 86e3nb816 — as duas recusas da gaveta de conta manual, no formato do servidor. */
 const ACCOUNTING_CODE_EXISTS_REFUSAL = {
@@ -2434,6 +2487,23 @@ async function fulfillApi(route: Route): Promise<void> {
   // `{ data, pagination }` — `fulfill` cru, não `json()`. Filtra no mock pelo
   // que a tela manda (tipo, situação e prefixo de código), para o seletor de
   // conta receber só analíticas ativas como o servidor faria.
+  // 86e3qhhrm — a prévia lê o MESMO arquivo e responde as MESMAS recusas da
+  // importação; sem recusa, a 662 (a conta do banco do mock) não veio e está em uso.
+  if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/import/preview`) {
+    if (enviouXls(route)) return recusarXls(route);
+    if (accountingImportOutcome === 'linhas' || accountingImportOutcome === 'dominio') {
+      const error =
+        accountingImportOutcome === 'dominio'
+          ? ACCOUNTING_IMPORT_DOMINIO_REFUSAL
+          : ACCOUNTING_IMPORT_REFUSAL;
+      return route.fulfill({
+        status: 422,
+        contentType: 'application/json',
+        body: JSON.stringify({ error }),
+      });
+    }
+    return json(accountingChartEmpty ? ACCOUNTING_PREVIEW_FIRST : ACCOUNTING_PREVIEW_REIMPORT);
+  }
   if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/import`) {
     if (enviouXls(route)) return recusarXls(route);
     if (accountingImportOutcome === 'linhas' || accountingImportOutcome === 'dominio') {
@@ -2447,8 +2517,13 @@ async function fulfillApi(route: Route): Promise<void> {
         body: JSON.stringify({ error }),
       });
     }
+    const first = accountingChartEmpty;
     accountingChartEmpty = false;
-    return json({ contas: 5, contasNovas: 5, contasInativadas: 0 });
+    return json(
+      first
+        ? { contas: 5, contasNovas: 5, contasAlteradas: 0, contasAusentes: 0 }
+        : { contas: 5, contasNovas: 1, contasAlteradas: 1, contasAusentes: 1 },
+    );
   }
   // 86e3nb816 — conta manual. Código que o plano já tem = 409 no campo; inativar
   // = 422 da conta em uso (com as contagens), para a gaveta mostrar os dois erros.
@@ -9331,7 +9406,7 @@ for (const vp of VIEWPORTS) {
       await aguardarAnimacao(gaveta);
       await expect(gaveta.getByRole('heading', { name: 'Modelo da planilha' })).toBeVisible();
       await gaveta.getByLabel('Planilha (.csv, .xlsx ou .xls)').setInputFiles(PLANILHA_PLANO);
-      await gaveta.getByRole('button', { name: 'Importar', exact: true }).click();
+      await gaveta.getByRole('button', { name: 'Revisar mudanças', exact: true }).click();
 
       const recusa = gaveta.locator('[data-refusal-code="LINHAS_INVALIDAS"]');
       await expect(recusa).toBeVisible();
@@ -9340,8 +9415,8 @@ for (const vp of VIEWPORTS) {
       await expect(recusa.getByRole('row').nth(1)).toContainText('Código reduzido repetido');
       await expect(page.locator('[data-sonner-toast]')).toHaveCount(0);
       expect(await measuredContrast(page, '[data-refusal-code] > p')).toBeGreaterThanOrEqual(4.5);
-      const importar = gaveta.getByRole('button', { name: 'Importar', exact: true });
-      await exigirDentroDaViewport(page, importar, `${vp.label}: "Importar" da gaveta`);
+      const revisar = gaveta.getByRole('button', { name: 'Revisar mudanças', exact: true });
+      await exigirDentroDaViewport(page, revisar, `${vp.label}: "Revisar mudanças" da gaveta`);
 
       await shot(page, `plano-contabil-importacao-recusa-${slugPC16}`);
       await analyze(page, `plano contábil — gaveta com recusa (${vp.label})`);
@@ -9371,7 +9446,7 @@ for (const vp of VIEWPORTS) {
       await analyze(page, `plano contábil — gaveta com a linha do Domínio (${vp.label})`);
 
       await gaveta.getByLabel('Planilha (.csv, .xlsx ou .xls)').setInputFiles(PLANILHA_PLANO);
-      await gaveta.getByRole('button', { name: 'Importar', exact: true }).click();
+      await gaveta.getByRole('button', { name: 'Revisar mudanças', exact: true }).click();
       const recusa = gaveta.locator('[data-refusal-code="LINHAS_INVALIDAS"]');
       await expect(recusa).toBeVisible();
       await expect(recusa).toContainText('reconhecido como o plano de contas exportado do Domínio');
@@ -9385,28 +9460,44 @@ for (const vp of VIEWPORTS) {
       await analyze(page, `plano contábil — recusa do export do Domínio (${vp.label})`);
     });
 
-    test('reimportação pede confirmação ANTES de enviar', async ({ page }) => {
+    test('reimportação: a prévia diz o que muda ANTES de gravar (86e3qhhrm)', async ({ page }) => {
       sessionUser = SYSTEM_MANAGER_USER;
       await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+      // O selo da conta que não veio na última importação, na lista.
+      const selo = page.getByTestId('accounting-account-absent-badge');
+      await expect(selo).toHaveCount(1);
+      await expect(selo).toContainText('Não veio na última importação');
+      await exigirDentroDaViewport(
+        page,
+        page.getByRole('button', { name: 'Baixar planilha' }),
+        `${vp.label}: "Baixar planilha"`,
+      );
 
       await page.getByRole('button', { name: 'Reimportar planilha' }).click();
       const gaveta = page.getByRole('dialog');
       await aguardarAnimacao(gaveta);
-      await gaveta.getByLabel('Planilha (.csv, .xlsx ou .xls)').setInputFiles(PLANILHA_PLANO);
-      await gaveta.getByRole('button', { name: 'Reimportar', exact: true }).click();
-      await expect(gaveta.getByTestId('accounting-chart-reimport-warning')).toHaveAttribute(
-        'role',
-        'alert',
+      await expect(gaveta.getByTestId('accounting-chart-reimport-note')).toContainText(
+        'só adiciona e atualiza',
       );
+      await gaveta.getByLabel('Planilha (.csv, .xlsx ou .xls)').setInputFiles(PLANILHA_PLANO);
+      await gaveta.getByRole('button', { name: 'Revisar mudanças', exact: true }).click();
+
+      const previa = gaveta.getByTestId('accounting-chart-import-preview');
+      await expect(previa).toBeVisible();
+      await expect(gaveta.getByTestId('accounting-chart-preview-absent-note')).toContainText(
+        '1 delas está em uso',
+      );
+      const ausentes = gaveta.getByRole('region', { name: 'Contas que não vieram' });
+      await expect(ausentes).toContainText('662 · Aluguéis a receber - Inquilino D');
       const confirmar = gaveta.getByRole('button', { name: 'Confirmar reimportação' });
       await exigirDentroDaViewport(page, confirmar, `${vp.label}: "Confirmar reimportação"`);
-      await shot(page, `plano-contabil-reimportacao-confirmar-${slugPC16}`);
-      await analyze(page, `plano contábil — confirmação de reimportação (${vp.label})`);
+      await shot(page, `plano-contabil-reimportacao-previa-${slugPC16}`);
+      await analyze(page, `plano contábil — prévia da reimportação (${vp.label})`);
 
       await confirmar.click();
       await expect(page.getByRole('dialog')).toHaveCount(0);
       await expect(page.getByTestId('accounting-chart-import-success')).toContainText(
-        'Plano contábil importado: 5 contas, 5 novas, 0 inativadas.',
+        'Plano contábil importado: 5 contas, 1 nova, 1 alterada, 1 não veio.',
       );
       await aguardarToastEstavel(page);
       expect(await measuredContrast(page, TOAST_TITLE)).toBeGreaterThanOrEqual(4.5);
@@ -11130,7 +11221,8 @@ const XLS_TELAS: {
     slug: 'plano-contabil-importar',
     nome: 'importar plano contábil',
     campo: 'Planilha (.csv, .xlsx ou .xls)',
-    acao: 'Importar',
+    // 86e3qhhrm: a recusa vem da PRÉVIA, o primeiro envio da gaveta.
+    acao: 'Revisar mudanças',
     abrir: async (page) => {
       accountingChartEmpty = true;
       sessionUser = SYSTEM_MANAGER_USER;

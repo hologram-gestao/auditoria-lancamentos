@@ -2,7 +2,7 @@
 código e nada de nome/código em log.
 
 O repositório é falso de propósito: aqui se prova a REGRA (o que vira INSERT, o que
-vira UPDATE, o que é inativado, a cifra com a pk no AAD). O SQL real — Core em lote,
+vira UPDATE, o que ganha o selo de ausente, a cifra com a pk no AAD). O SQL real — Core em lote,
 `client_id` no WHERE, a trava — é provado na integração contra Postgres
 (`tests/integration/test_accounting_chart_endpoints.py`).
 """
@@ -69,7 +69,7 @@ class _FakeRepo:
         self.locked = False
         self.inserts: list[dict[str, Any]] = []
         self.updates: list[dict[str, Any]] = []
-        self.deactivated_with: list[str] | None = None
+        self.marked_absent: list[UUID] | None = None
         self.get_result: ClientAccountingAccount | None = None
         self.get_calls: list[tuple[UUID, UUID]] = []
 
@@ -97,16 +97,21 @@ class _FakeRepo:
     async def update_accounts(self, updates: list[dict[str, Any]]) -> None:
         self.updates.extend(updates)
 
-    async def deactivate_absent(
-        self, client_id: UUID, *, present_codes: list[str], author_id: UUID
+    async def mark_absent(
+        self, client_id: UUID, *, account_ids: list[UUID], author_id: UUID
     ) -> int:
-        self.deactivated_with = list(present_codes)
-        # O que o banco faria: ativas cujo código não veio.
-        return sum(1 for a in self.existing if a.active and a.code not in present_codes)
+        self.marked_absent = list(account_ids)
+        # O que o banco faria: só quem ainda não tinha o selo ganha agora.
+        by_id = {a.id: a for a in self.existing}
+        return sum(1 for a in account_ids if by_id[a].absent_since is None)
 
 
 def _account(
-    *, code: str = "649", account_type: str = "analitica", active: bool = True
+    *,
+    code: str = "649",
+    account_type: str = "analitica",
+    active: bool = True,
+    absent_since: datetime | None = None,
 ) -> ClientAccountingAccount:
     return ClientAccountingAccount(
         id=uuid4(),
@@ -116,7 +121,20 @@ def _account(
         name_iv="0" * 24,
         account_type=account_type,
         active=active,
+        absent_since=absent_since,
     )
+
+
+async def _named(
+    client: _FakeClient, *, code: str, name: str, account_type: str = "analitica", **kw: Any
+) -> ClientAccountingAccount:
+    """Conta existente com o nome CIFRADO de verdade (a diferença o decifra)."""
+    account = _account(code=code, account_type=account_type, **kw)
+    cipher = await load_client_cipher(client, settings=get_settings())
+    account.name_encrypted, account.name_iv = cipher.encrypt(
+        name, field_locator(AAD_ACCOUNTING_ACCOUNT_NAME, account.id)
+    )
+    return account
 
 
 def _actor() -> CurrentUser:
@@ -210,7 +228,7 @@ class TestImportacao:
             actor=_actor(),
             content=_SHEET,
         )
-        assert (result.accounts, result.new, result.inactivated) == (3, 3, 0)
+        assert (result.accounts, result.new, result.updated, result.absent) == (3, 3, 0, 0)
         assert repo.locked
         assert db.commits == 1
         assert repo.updates == []
@@ -228,24 +246,36 @@ class TestImportacao:
             == _SECRET_NAME
         )
 
-    async def test_reimportacao_por_codigo_atualiza_insere_e_inativa(self) -> None:
+    async def test_reimportacao_so_adiciona_e_atualiza_e_nunca_inativa(self) -> None:
+        """86e3qhhrm: a conta que não veio ganha o selo e fica como estava; a situação
+        não muda pela planilha (nem reativa a inativa)."""
         client = await _client_with_dek()
-        banco = _account(code="649")
-        inquilino = _account(code="662", active=False)  # volta a ativa
+        banco = await _named(client, code="649", name="Banco conta movimento")  # igual
+        inquilino = await _named(client, code="662", name="Nome antigo", active=False)
+        volta = await _named(
+            client,
+            code="10",
+            name="Ativo",
+            account_type="sintetica",
+            absent_since=datetime(2026, 10, 1, tzinfo=UTC),
+        )
         sumiu = _account(code="999")
-        ja_inativa = _account(code="998", active=False)
-        repo = _FakeRepo([banco, inquilino, sumiu, ja_inativa])
+        ja_ausente = _account(code="998", absent_since=datetime(2026, 10, 1, tzinfo=UTC))
+        repo = _FakeRepo([banco, inquilino, volta, sumiu, ja_ausente])
         result = await _service(repo).import_sheet(
             client,  # type: ignore[arg-type]
             actor=_actor(),
             content=_SHEET,
         )
-        assert [row["code"] for row in repo.inserts] == ["10"]
-        assert {u["b_id"] for u in repo.updates} == {banco.id, inquilino.id}
+        assert repo.inserts == []
+        # A alterada e a que voltou (para tirar o selo); a igual não é regravada.
+        assert {u["b_id"] for u in repo.updates} == {inquilino.id, volta.id}
         assert all(u["b_client"] == client.id for u in repo.updates)
-        assert repo.deactivated_with == ["649", "662", "10"]
-        # Só a que era ATIVA e sumiu conta como inativada nesta importação.
-        assert (result.accounts, result.new, result.inactivated) == (3, 1, 1)
+        assert all("b_active" not in u for u in repo.updates)
+        assert set(repo.marked_absent or []) == {sumiu.id, ja_ausente.id}
+        assert (result.accounts, result.new, result.updated, result.absent) == (3, 0, 1, 2)
+        # Nada desliga conta: a situação é a de antes.
+        assert (banco.active, inquilino.active, sumiu.active) == (True, False, True)
 
     async def test_planilha_invalida_nao_trava_nem_grava(self) -> None:
         client = await _client_with_dek()
@@ -259,7 +289,7 @@ class TestImportacao:
             )
         assert not repo.locked
         assert repo.inserts == repo.updates == []
-        assert repo.deactivated_with is None
+        assert repo.marked_absent is None
         assert db.commits == 0
 
     async def test_cliente_encerrado_e_409_antes_de_tudo(self) -> None:

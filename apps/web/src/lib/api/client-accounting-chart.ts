@@ -12,7 +12,11 @@
  *   - `GET  /clients/{id}/accounting-chart`        → `{ data: [...], pagination }` — DUAS
  *                                                     chaves: o envelope chega inteiro
  *   - `POST /clients/{id}/accounting-chart/import` → multipart `file`; `{ data: {contas,
- *                                                     contasNovas, contasInativadas} }`
+ *                                                     contasNovas, contasAlteradas,
+ *                                                     contasAusentes} }`
+ *   - `POST /clients/{id}/accounting-chart/import/preview` → multipart `file`; `{ data:
+ *                                                     prévia }`, não grava (86e3qhhrm)
+ *   - `GET  /clients/{id}/accounting-chart/export` → CSV no modelo (86e3qhhrm)
  *   - `POST  /clients/{id}/accounting-chart/accounts`       → `{ data: conta }` (86e3nb816)
  *   - `PATCH /clients/{id}/accounting-chart/accounts/{id}`  → `{ data: conta }` (86e3nb816)
  *   - `GET  /clients/{id}/source-accounts`         → `{ data: [...] }` — chave única: o array
@@ -27,6 +31,7 @@ import type {
   AccountingAccount,
   AccountingAccountCreateRequest,
   AccountingAccountUpdateRequest,
+  AccountingChartImportPreview,
   AccountingChartImportResult,
   AccountingChartListResponse,
   ListAccountingChartQuery,
@@ -36,15 +41,26 @@ import type {
 } from '@/lib/contracts';
 import type { components } from '@/lib/contracts/schema';
 
-import { apiGet, apiPatch, apiPost, apiPostMultipart, apiPutJson } from './client';
+import {
+  apiGet,
+  apiGetBlob,
+  apiPatch,
+  apiPost,
+  apiPostMultipart,
+  apiPutJson,
+  type BlobResponse,
+} from './client';
 
 export type ListAccountingChartParams = ListAccountingChartQuery;
 
 type ImportBody =
   components['schemas']['Body_import_accounting_chart_api_v1_clients__client_id__accounting_chart_import_post'];
+type PreviewBody =
+  components['schemas']['Body_preview_accounting_chart_import_api_v1_clients__client_id__accounting_chart_import_preview_post'];
 
-/** Nome do campo do multipart — travado no contrato pelo `satisfies`. */
-const IMPORT_FIELD = { file: 'file' } as const satisfies Record<keyof ImportBody, string>;
+/** Nome do campo do multipart — travado no contrato pelo `satisfies` (as duas rotas). */
+const IMPORT_FIELD = { file: 'file' } as const satisfies Record<keyof ImportBody, string> &
+  Record<keyof PreviewBody, string>;
 
 /** Teto do `pageSize` no servidor (`le=100`); acima dele a rota responde 422. */
 export const ACCOUNTING_CHART_MAX_PAGE_SIZE = 100;
@@ -92,6 +108,30 @@ export async function importAccountingChart(
     `${clientBase(clientId)}/accounting-chart/import`,
     form,
   );
+}
+
+/**
+ * O que a importação desta planilha faria, SEM GRAVAR (86e3qhhrm): mesma permissão
+ * e mesmas recusas 422 da importação.
+ */
+export async function previewAccountingChartImport(
+  clientId: string,
+  file: File,
+): Promise<AccountingChartImportPreview> {
+  const form = new FormData();
+  form.append(IMPORT_FIELD.file, file);
+  return apiPostMultipart<AccountingChartImportPreview>(
+    `${clientBase(clientId)}/accounting-chart/import/preview`,
+    form,
+  );
+}
+
+/**
+ * O plano inteiro em CSV no modelo da plataforma (86e3qhhrm): o mesmo formato que
+ * a importação lê. Leitura de todo papel com acesso ao cliente.
+ */
+export async function exportAccountingChart(clientId: string): Promise<BlobResponse> {
+  return apiGetBlob(`${clientBase(clientId)}/accounting-chart/export`);
 }
 
 /**

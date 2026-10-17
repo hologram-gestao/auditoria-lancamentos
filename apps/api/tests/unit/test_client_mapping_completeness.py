@@ -105,12 +105,15 @@ class TestCompletude:
 
 
 class TestEventoProps:
-    def test_as_cinco_chaves_exatas(self) -> None:
+    def test_as_seis_chaves_exatas(self) -> None:
+        # 86e3qhhrm: a reimportação não inativa mais; `contas_inativadas` virou as
+        # alteradas e as ausentes.
         assert set(PlanoContabilImportadoProps.model_fields) == {
             "client_id",
             "contas",
             "contas_novas",
-            "contas_inativadas",
+            "contas_alteradas",
+            "contas_ausentes",
             "layout",
         }
 
@@ -125,7 +128,8 @@ class TestEventoProps:
                 client_id=uuid4(),
                 contas=1,
                 contas_novas=1,
-                contas_inativadas=0,
+                contas_alteradas=0,
+                contas_ausentes=0,
                 layout="Contas importação.xlsx",  # type: ignore[arg-type]
             )
 
@@ -135,7 +139,8 @@ class TestEventoProps:
                 client_id=uuid4(),
                 contas=1,
                 contas_novas=1,
-                contas_inativadas=0,
+                contas_alteradas=0,
+                contas_ausentes=0,
                 layout="modelo",
                 codigo="649",  # type: ignore[call-arg]
             )
@@ -180,7 +185,7 @@ class _Repo:
     async def update_accounts(self, rows: Any) -> None:
         return None
 
-    async def deactivate_absent(self, client_id: UUID, **_: Any) -> int:
+    async def mark_absent(self, client_id: UUID, **_: Any) -> int:
         return 0
 
 
@@ -230,11 +235,12 @@ class TestEmissao:
                 "client_id": client.id,
                 "contas": 2,
                 "contas_novas": 2,
-                "contas_inativadas": 0,
+                "contas_alteradas": 0,
+                "contas_ausentes": 0,
                 "layout": "modelo",
             }
         ]
-        assert (result.accounts, result.new, result.inactivated) == (2, 2, 0)
+        assert (result.accounts, result.new, result.updated, result.absent) == (2, 2, 0, 0)
 
     async def test_recusa_nao_emite(self) -> None:
         events = _Events()
@@ -256,6 +262,11 @@ class TestEmissao:
 
         service = UsageEventService(_Repo2())  # type: ignore[arg-type]
         ok = await service.emit_plano_contabil_importado(
-            client_id=uuid4(), contas=-1, contas_novas=0, contas_inativadas=0, layout="modelo"
+            client_id=uuid4(),
+            contas=-1,
+            contas_novas=0,
+            contas_alteradas=0,
+            contas_ausentes=0,
+            layout="modelo",
         )
         assert ok is False

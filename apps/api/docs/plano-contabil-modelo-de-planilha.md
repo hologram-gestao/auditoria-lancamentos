@@ -9,10 +9,12 @@ contas da origem da Sprint 10 (`/chart-of-accounts`, categorias do Omie).
 
 ## Endpoints
 
-| Método | Rota                                                  | Quem                                                                      | O quê                                                                                                                                                    |
-| ------ | ----------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/api/v1/clients/{client_id}/accounting-chart`        | quem alcança o cliente                                                    | lista paginada (`page`, `pageSize` ≤ 100), busca por prefixo de código (`code`), filtros `type` (`analitica`/`sintetica`) e `status` (`ativa`/`inativa`) |
-| `POST` | `/api/v1/clients/{client_id}/accounting-chart/import` | `manage_client_accounting_chart` (plataforma, admin, gerente da carteira) | importa ou reimporta a planilha, tudo ou nada; cliente encerrado = 409                                                                                   |
+| Método | Rota                                                          | Quem                                                                      | O quê                                                                                                                                                    |
+| ------ | ------------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/v1/clients/{client_id}/accounting-chart`                | quem alcança o cliente                                                    | lista paginada (`page`, `pageSize` ≤ 100), busca por prefixo de código (`code`), filtros `type` (`analitica`/`sintetica`) e `status` (`ativa`/`inativa`) |
+| `POST` | `/api/v1/clients/{client_id}/accounting-chart/import`         | `manage_client_accounting_chart` (plataforma, admin, gerente da carteira) | importa ou reimporta a planilha, tudo ou nada; cliente encerrado = 409                                                                                   |
+| `POST` | `/api/v1/clients/{client_id}/accounting-chart/import/preview` | `manage_client_accounting_chart`                                          | mostra o que a importação faria, sem gravar; cliente encerrado = 409                                                                                     |
+| `GET`  | `/api/v1/clients/{client_id}/accounting-chart/export`         | quem alcança o cliente                                                    | baixa o plano neste modelo (CSV), com 1 linha `export` na trilha                                                                                         |
 
 ## O modelo
 
@@ -93,16 +95,39 @@ ordem atravessa a paginação (é SQL) e o seletor de conta do de-para a herda. 
 do Domínio (`tests/fixtures/accounting_chart_dominio/` e `…_dominio_xls/`) saem na ordem do
 arquivo, e um teste de integração exige isso.
 
-## Reimportação
+## Reimportação: só adiciona e atualiza (86e3qhhrm)
 
-Casa por `codigo_reduzido`, numa transação só:
+Casa por `codigo_reduzido`, numa transação só, e **nunca inativa nem apaga** (decisão do
+Pedro, 14/10/2026: o plano exportado pode vir recortado, e uma reimportação parcial
+desligaria contas em uso):
 
 - código novo → conta nova (ativa);
-- código existente → atualiza nome, tipo e classificação, e **volta a ativa** se estava inativa;
-- código que sumiu da planilha → **inativa** (nunca apagada: pode haver decisão do de-para
-  apontando para ela; só não recebe decisão nova).
+- código existente → atualiza nome, tipo e classificação, se mudaram (a igual nem é
+  regravada). A **situação não muda**: a conta inativa que vem na planilha continua inativa
+  (reativar é pela edição da conta);
+- código que não veio na planilha → fica como estava e ganha o selo **"não veio na última
+  importação"** (`absentSince`, a data da primeira importação em que sumiu); o selo sai
+  quando a conta volta numa planilha. A conta com o selo continua lançável: o selo avisa
+  (ela pode não existir mais no sistema contábil), não bloqueia.
 
-Resposta: `{"data": {"contas": N, "contasNovas": N, "contasInativadas": N}}` — só contagens.
+Resposta: `{"data": {"contas": N, "contasNovas": N, "contasAlteradas": N, "contasAusentes": N}}`
+— só contagens.
+
+**Prévia** (`POST …/accounting-chart/import/preview`, mesma permissão e mesmas recusas, não
+grava): as contagens (novas, alteradas, sem mudança, ausentes, ausentes em uso por decisão do
+de-para de qualquer vigência ou pela conta do banco, as que voltaram e as inativas que vieram),
+`temMudancas` e as listas `novas`, `alteradas` (com os campos que mudam) e `ausentes` (com
+`inUse`), até 200 itens cada. A tela mostra a prévia e só importa depois da confirmação.
+
+## Exportação
+
+`GET …/accounting-chart/export` devolve o plano inteiro (ativas e inativas, na ordem do plano)
+neste MESMO modelo: CSV UTF-8 com BOM (para o Excel), `;`, cabeçalho
+`codigo_reduzido;nome;tipo;classificacao`. Exportar e reimportar o arquivo não muda nada. Nome
+que o Excel leria como fórmula (começa com `=`, `+`, `-` ou `@`) sai com um apóstrofo na frente
+(`'- Juros pagos`), e a importação retira esse apóstrofo; o apóstrofo que não guarda fórmula é do
+nome e fica. Plano vazio sai só com o cabeçalho (serve de modelo). Grava 1 linha `export` na
+trilha de acesso; nome que não decifra recusa com 409 `PLANO_CONTABIL_INDECIFRAVEL`.
 
 ## Recusas (todas 422, nenhuma grava nada, nenhuma devolve conteúdo de célula)
 

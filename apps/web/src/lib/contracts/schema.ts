@@ -603,8 +603,42 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Importa (ou reimporta) o plano de contas contábil do cliente a partir de uma planilha no MODELO DA PLATAFORMA — tudo ou nada. Modelo: CSV UTF-8 separado por `;`, XLSX ou XLS (primeira aba), cabeçalho na linha 1 com as colunas `codigo_reduzido`, `nome` e `tipo` (obrigatórias) e `classificacao` (opcional), em qualquer ordem e sem outras colunas; `tipo` é `analitica` ou `sintetica`; código reduzido com letras, dígitos, `.` e `-` (até 20), nome até 200 caracteres, classificação até 40. Exemplo: `codigo_reduzido;nome;tipo` / `649;Banco conta movimento;analitica`. Também aceita o plano de contas EXPORTADO do Domínio em XLSX ou no XLS que o sistema grava, reconhecido pelo cabeçalho `Código`/`T`/`Classificação`/`Nome`/`Grau` nas 10 primeiras linhas e convertido para o modelo (código, `S` = sintética e vazio = analítica, classificação, nome e grau, que tem de ser a profundidade da classificação); o CSV nativo do Domínio não é aceito. A reimportação casa por código: conta nova entra, conta existente atualiza nome, tipo e classificação (e volta a ativa), conta que sumiu da planilha vira INATIVA — nunca é apagada. Responde as contagens `contas`, `contasNovas`, `contasInativadas`. O nome é cifrado com a chave do cliente. Requer `manage_client_accounting_chart` (plataforma, admin e gerente da carteira; usuários do cliente recebem 403 e a negação fica na trilha). Cliente encerrado: 409. Recusas, todas 422 e sem gravar nada: `FORMATO_NAO_SUPORTADO` (não é CSV nem XLSX pelo CONTEÚDO), `ARQUIVO_INVALIDO` (não abre, ou planilha sem nenhuma conta com `details.reason=sem_contas`), `CABECALHO_DIVERGENTE` (`details.missingColumns`/`repeatedColumns` — só colunas do MODELO — mais `details.unexpectedColumnCount`/`foundColumnCount`) e `LINHAS_INVALIDAS` (`details.lines=[{line, reason}]` com `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, `codigo_repetido`, `nome_vazio`, `nome_longo`, `tipo_invalido`, `classificacao_longa` e, no export do Domínio, também `codigo_ausente`, `classificacao_ausente`, `classificacao_repetida`, `grau_ausente`, `grau_divergente`, `linha_irreconhecivel` e `conta_fora_do_bloco` (linha com cara de conta depois do fim das contas: o arquivo inteiro é recusado), e `details.total`) — a resposta nunca traz o conteúdo de uma célula. */
+        /** Importa (ou reimporta) o plano de contas contábil do cliente a partir de uma planilha no MODELO DA PLATAFORMA — tudo ou nada. Modelo: CSV UTF-8 separado por `;`, XLSX ou XLS (primeira aba), cabeçalho na linha 1 com as colunas `codigo_reduzido`, `nome` e `tipo` (obrigatórias) e `classificacao` (opcional), em qualquer ordem e sem outras colunas; `tipo` é `analitica` ou `sintetica`; código reduzido com letras, dígitos, `.` e `-` (até 20), nome até 200 caracteres, classificação até 40. Exemplo: `codigo_reduzido;nome;tipo` / `649;Banco conta movimento;analitica`. Também aceita o plano de contas EXPORTADO do Domínio em XLSX ou no XLS que o sistema grava, reconhecido pelo cabeçalho `Código`/`T`/`Classificação`/`Nome`/`Grau` nas 10 primeiras linhas e convertido para o modelo (código, `S` = sintética e vazio = analítica, classificação, nome e grau, que tem de ser a profundidade da classificação); o CSV nativo do Domínio não é aceito. A reimportação casa por código e só adiciona e atualiza: conta nova entra ativa, conta existente atualiza nome, tipo e classificação, e a conta que não veio na planilha continua como estava (nunca é inativada nem apagada) e ganha o selo `absentSince`, que sai quando ela volta. A situação da conta não muda pela planilha. Antes de gravar, `POST …/import/preview` mostra o que muda. Responde as contagens `contas`, `contasNovas`, `contasAlteradas` e `contasAusentes`. O nome é cifrado com a chave do cliente. Requer `manage_client_accounting_chart` (plataforma, admin e gerente da carteira; usuários do cliente recebem 403 e a negação fica na trilha). Cliente encerrado: 409. Recusas, todas 422 e sem gravar nada: `FORMATO_NAO_SUPORTADO` (não é CSV nem XLSX pelo CONTEÚDO), `ARQUIVO_INVALIDO` (não abre, ou planilha sem nenhuma conta com `details.reason=sem_contas`), `CABECALHO_DIVERGENTE` (`details.missingColumns`/`repeatedColumns` — só colunas do MODELO — mais `details.unexpectedColumnCount`/`foundColumnCount`) e `LINHAS_INVALIDAS` (`details.lines=[{line, reason}]` com `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, `codigo_repetido`, `nome_vazio`, `nome_longo`, `tipo_invalido`, `classificacao_longa` e, no export do Domínio, também `codigo_ausente`, `classificacao_ausente`, `classificacao_repetida`, `grau_ausente`, `grau_divergente`, `linha_irreconhecivel` e `conta_fora_do_bloco` (linha com cara de conta depois do fim das contas: o arquivo inteiro é recusado), e `details.total`) — a resposta nunca traz o conteúdo de uma célula. */
         post: operations["import_accounting_chart_api_v1_clients__client_id__accounting_chart_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/accounting-chart/import/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mostra o que a importação desta planilha faria, SEM GRAVAR nada: o mesmo leitor e as mesmas recusas 422 de `POST …/import` (modelo da plataforma e plano exportado do Domínio). Devolve as contagens (`contasNovas`, `contasAlteradas`, `contasSemMudanca`, `contasAusentes`, `contasAusentesEmUso` — as ausentes que decisões do de-para, de qualquer vigência, ou a conta do banco usam —, `contasQueVoltaram` e `contasInativasNaPlanilha`), `temMudancas` e as listas `novas` (como na planilha), `alteradas` (o nome novo e os campos que mudam: `nome`, `tipo`, `classificacao`) e `ausentes` (o nome atual, a situação, `inUse` e `absentSince`), cada uma com até `listLimit` itens. Mesma permissão da importação (`manage_client_accounting_chart`; a negação fica na trilha); cliente encerrado 409. */
+        post: operations["preview_accounting_chart_import_api_v1_clients__client_id__accounting_chart_import_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/accounting-chart/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Baixa o plano contábil do cliente no MODELO DA PLATAFORMA: CSV UTF-8 (com BOM, para o Excel), separado por `;`, cabeçalho `codigo_reduzido;nome;tipo;classificacao` e todas as contas, ativas e inativas, na ordem do plano. É o mesmo formato que `POST …/import` lê: exportar e reimportar o arquivo não muda nada. Nome que começaria fórmula no Excel (`= + - @`) sai com um apóstrofo na frente, que a importação retira. Plano vazio sai só com o cabeçalho. Visível a todo papel com acesso ao cliente; registra a exportação na trilha de acesso. Nome de conta que não decifra: 409 `PLANO_CONTABIL_INDECIFRAVEL`. */
+        get: operations["export_accounting_chart_api_v1_clients__client_id__accounting_chart_export_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2192,9 +2226,14 @@ export interface components {
             type: components["schemas"]["AccountingAccountType"];
             /**
              * Active
-             * @description `false` = a conta sumiu da última planilha importada. Continua existindo (decisões podem apontar para ela), mas não recebe decisão nova.
+             * @description `false` = a conta foi inativada (pela edição; a reimportação não inativa). Continua existindo (decisões podem apontar para ela), mas não recebe decisão nova.
              */
             active: boolean;
+            /**
+             * Absentsince
+             * @description O selo "não veio na última importação": o instante da importação em que a conta deixou de vir na planilha (a primeira, enquanto ela segue ausente). `null` = veio na última. A conta continua como estava; o selo avisa que ela pode não existir mais no sistema contábil.
+             */
+            absentSince?: string | null;
             /**
              * Postable
              * @description Pode receber decisão NOVA do de-para ou virar conta do banco: analítica E ativa. É o filtro do seletor de conta.
@@ -2275,6 +2314,11 @@ export interface components {
              * @description Nome da conta, decifrado na leitura (nunca guardado na materialização).
              */
             accountingAccountName?: string | null;
+            /**
+             * Accountingaccountabsentsince
+             * @description 86e3qhhrm — a conta não veio na última importação do plano contábil.
+             */
+            accountingAccountAbsentSince?: string | null;
             /**
              * History
              * @description Histórico padrão decifrado (`null` = sem histórico).
@@ -2892,6 +2936,14 @@ export interface components {
              */
             file: string;
         };
+        /** Body_preview_accounting_chart_import_api_v1_clients__client_id__accounting_chart_import_preview_post */
+        Body_preview_accounting_chart_import_api_v1_clients__client_id__accounting_chart_import_preview_post: {
+            /**
+             * File
+             * @description CSV (`;`, UTF-8), XLSX ou XLS no modelo, ou o plano exportado do Domínio.
+             */
+            file: string;
+        };
         /** Body_preview_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_preview_post */
         Body_preview_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_preview_post: {
             /**
@@ -3010,10 +3062,87 @@ export interface components {
              */
             contasNovas: number;
             /**
-             * Contasinativadas
-             * @description Contas que estavam ativas e não vieram nesta planilha: passaram a inativas (nunca são apagadas).
+             * Contasalteradas
+             * @description Contas existentes em que nome, tipo ou classificação mudaram.
              */
-            contasInativadas: number;
+            contasAlteradas: number;
+            /**
+             * Contasausentes
+             * @description Contas do cliente que não vieram nesta planilha: continuam como estavam (nunca são inativadas nem apagadas) e ganham o selo `absentSince`.
+             */
+            contasAusentes: number;
+        };
+        /**
+         * ChartImportPreviewEnvelope
+         * @description Body de `POST /clients/{client_id}/accounting-chart/import/preview`.
+         */
+        ChartImportPreviewEnvelope: {
+            data: components["schemas"]["ChartImportPreviewPayload"];
+        };
+        /**
+         * ChartImportPreviewPayload
+         * @description O que a importação desta planilha faria — nada é gravado.
+         */
+        ChartImportPreviewPayload: {
+            /**
+             * Layout
+             * @description `modelo` da plataforma ou o plano exportado do `dominio`.
+             * @enum {string}
+             */
+            layout: "modelo" | "dominio";
+            /**
+             * Contas
+             * @description Contas na planilha.
+             */
+            contas: number;
+            /** Contasnovas */
+            contasNovas: number;
+            /** Contasalteradas */
+            contasAlteradas: number;
+            /** Contassemmudanca */
+            contasSemMudanca: number;
+            /** Contasausentes */
+            contasAusentes: number;
+            /**
+             * Contasausentesemuso
+             * @description Quantas das ausentes o de-para ou a conta do banco usam.
+             */
+            contasAusentesEmUso: number;
+            /**
+             * Contasquevoltaram
+             * @description Contas com o selo de ausente que vieram nesta planilha (o selo sai).
+             */
+            contasQueVoltaram: number;
+            /**
+             * Contasinativasnaplanilha
+             * @description Contas inativas que vieram na planilha: a importação NÃO as reativa (a situação só muda pela edição da conta).
+             */
+            contasInativasNaPlanilha: number;
+            /**
+             * Temmudancas
+             * @description `false` = importar esta planilha não muda nada no plano.
+             */
+            temMudancas: boolean;
+            /**
+             * Novas
+             * @description Até 200, na ordem da planilha.
+             */
+            novas: components["schemas"]["ChartPreviewNewAccount"][];
+            /**
+             * Alteradas
+             * @description Até 200, na ordem da planilha.
+             */
+            alteradas: components["schemas"]["ChartPreviewChangedAccount"][];
+            /**
+             * Ausentes
+             * @description Até 200: as em uso primeiro, depois na ordem do plano.
+             */
+            ausentes: components["schemas"]["ChartPreviewAbsentAccount"][];
+            /**
+             * Listlimit
+             * @description O teto de cada lista; as contagens são as reais.
+             */
+            listLimit: number;
         };
         /**
          * ChartOfAccountEntryResponse
@@ -3163,6 +3292,71 @@ export interface components {
          * @enum {string}
          */
         ChartOfAccountsStatus: "ativa" | "inativa" | "ausente_na_origem";
+        /**
+         * ChartPreviewAbsentAccount
+         * @description Uma conta do cliente que não veio na planilha: fica como está, com o selo.
+         */
+        ChartPreviewAbsentAccount: {
+            /**
+             * Accountid
+             * Format: uuid
+             */
+            accountId: string;
+            /** Code */
+            code: string;
+            /**
+             * Name
+             * @description O nome atual, decifrado; `[indecifrável]` se não abrir.
+             */
+            name: string;
+            /** Nameresolved */
+            nameResolved: boolean;
+            /** Active */
+            active: boolean;
+            /**
+             * Inuse
+             * @description Decisões do de-para (de qualquer vigência) ou a conta do banco usam a conta: se ela não existe mais no sistema contábil, o arquivo contábil levaria uma conta inexistente.
+             */
+            inUse: boolean;
+            /**
+             * Absentsince
+             * @description Já estava ausente desde esta importação; `null` = ganha o selo agora.
+             */
+            absentSince?: string | null;
+        };
+        /**
+         * ChartPreviewChangedAccount
+         * @description Uma conta existente que a importação alteraria: o nome NOVO e o que muda.
+         */
+        ChartPreviewChangedAccount: {
+            /**
+             * Accountid
+             * Format: uuid
+             */
+            accountId: string;
+            /** Code */
+            code: string;
+            /**
+             * Name
+             * @description O nome como vem na planilha.
+             */
+            name: string;
+            /** Changes */
+            changes: ("nome" | "tipo" | "classificacao")[];
+        };
+        /**
+         * ChartPreviewNewAccount
+         * @description Uma conta que a importação incluiria (como veio na planilha).
+         */
+        ChartPreviewNewAccount: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            type: components["schemas"]["AccountingAccountType"];
+            /** Classification */
+            classification?: string | null;
+        };
         /**
          * CheckDuplicateResponse
          * @description Response de GET /api/v1/reconciliations/check-duplicate.
@@ -5378,6 +5572,11 @@ export interface components {
              * @description S16 — nome da conta, decifrado na leitura (nunca persistido em claro).
              */
             accountingAccountName?: string | null;
+            /**
+             * Accountingaccountabsentsince
+             * @description 86e3qhhrm — a conta não veio na última importação do plano contábil desde este instante: pode não existir mais no sistema contábil. `null` = veio.
+             */
+            accountingAccountAbsentSince?: string | null;
             /**
              * History
              * @description S16 — histórico padrão da vigente, decifrado (`null` = sem histórico).
@@ -9285,6 +9484,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChartImportEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_accounting_chart_import_api_v1_clients__client_id__accounting_chart_import_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_preview_accounting_chart_import_api_v1_clients__client_id__accounting_chart_import_preview_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChartImportPreviewEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_accounting_chart_api_v1_clients__client_id__accounting_chart_export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": unknown;
                 };
             };
             /** @description Validation Error */

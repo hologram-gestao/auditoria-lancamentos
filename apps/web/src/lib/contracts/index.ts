@@ -595,8 +595,20 @@ export type ListAccountingChartQuery = NonNullable<
 >;
 /** `ativa` | `inativa` — o `Literal` do filtro de situação. */
 export type AccountingAccountStatusFilter = NonNullable<ListAccountingChartQuery['status']>;
-/** `{ data: {contas, contasNovas, contasInativadas} }` — chave ÚNICA: chega desempacotado. */
+/**
+ * `{ data: {contas, contasNovas, contasAlteradas, contasAusentes} }` — chave ÚNICA:
+ * chega desempacotado. A reimportação não inativa (86e3qhhrm): a conta que não veio
+ * conta em `contasAusentes` e ganha o selo `absentSince`.
+ */
 export type AccountingChartImportResult = Schemas['ChartImportPayload'];
+/**
+ * A prévia da importação (86e3qhhrm): o que a planilha faria, sem gravar. Chave
+ * ÚNICA `data`: chega desempacotada.
+ */
+export type AccountingChartImportPreview = Schemas['ChartImportPreviewPayload'];
+export type AccountingChartPreviewNewAccount = Schemas['ChartPreviewNewAccount'];
+export type AccountingChartPreviewChangedAccount = Schemas['ChartPreviewChangedAccount'];
+export type AccountingChartPreviewAbsentAccount = Schemas['ChartPreviewAbsentAccount'];
 /**
  * Inclusão manual de UMA conta (86e3nb816): `code`, `name`, `type` e
  * `classification` opcional; a conta nasce ativa. Resposta `{ data: conta }`.

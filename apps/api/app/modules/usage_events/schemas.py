@@ -228,7 +228,7 @@ class UsageEventName(StrEnum):
     #
     # Leitura (quantos clientes têm plano importado, e quanto ele muda):
     #     count(DISTINCT props->>'client_id') WHERE event = 'plano_contabil_importado'
-    #     sum((props->>'contas_inativadas')::int) … (contas que sumiram das planilhas)
+    #     sum((props->>'contas_ausentes')::int) … (contas que não vieram nas planilhas)
     # A métrica da SPRINT (completude de partida) NÃO é evento: sai da própria
     # materialização por consulta (ver HANDOFF, BACK 16.4).
     PLANO_CONTABIL_IMPORTADO = "plano_contabil_importado"
@@ -650,10 +650,12 @@ ChartImportLayout = Literal["modelo", "dominio"]
 
 
 class PlanoContabilImportadoProps(_StrictProps):
-    """`plano_contabil_importado` (S16 BACK 16.4) — as QUATRO chaves do PRD, mais o layout.
+    """`plano_contabil_importado` (S16 BACK 16.4) — o cliente, contagens e o layout.
 
     Só o id do cliente e contagens (`contas` na planilha, `contas_novas` que o cliente
-    não tinha, `contas_inativadas` que eram ativas e sumiram), e `layout` (86e3gkd7y):
+    não tinha, `contas_alteradas` em nome, tipo ou classificação, `contas_ausentes` do
+    cliente que não vieram na planilha; desde a 86e3qhhrm a reimportação não inativa,
+    e a `contas_inativadas` das linhas anteriores virou estas duas), e `layout` (86e3gkd7y):
     de onde veio a planilha, `modelo` da plataforma ou export nativo do `dominio`, em
     vocabulário FECHADO (é o que mede quanto o export nativo é usado). Nenhum `str`
     livre: código e nome de conta não têm onde caber (o guardrail anti-PII trava).
@@ -662,7 +664,8 @@ class PlanoContabilImportadoProps(_StrictProps):
     client_id: UUID
     contas: int = Field(ge=0)
     contas_novas: int = Field(ge=0)
-    contas_inativadas: int = Field(ge=0)
+    contas_alteradas: int = Field(ge=0)
+    contas_ausentes: int = Field(ge=0)
     layout: ChartImportLayout
 
 
