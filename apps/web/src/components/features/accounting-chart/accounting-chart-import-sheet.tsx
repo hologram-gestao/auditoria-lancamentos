@@ -9,7 +9,9 @@
  *
  *   1. **Revisar**: o arquivo vai à PRÉVIA (`POST …/import/preview`, não grava) e
  *      a gaveta mostra o que muda (`AccountingChartImportPreviewPanel`): novas,
- *      alteradas, sem mudança e as que não vieram, com quantas delas estão em uso.
+ *      alteradas, sem mudança e as que não vieram, com quantas delas estão em uso;
+ *      ela entra NO LUGAR do modelo da planilha e rola para a vista (em 390px, sem
+ *      isso, ela ficava abaixo da dobra, atrás do "Confirmar").
  *      O segundo passo mora no rodapé da própria gaveta, e não num `AlertDialog`
  *      empilhado (dois modais do Radix marcam o fundo com `aria-hidden` e o de
  *      cima sai do teclado; front-gate §4);
@@ -27,7 +29,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Eye, Loader2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 
@@ -102,6 +104,13 @@ export function AccountingChartImportSheet({
   const [refusal, setRefusal] = useState<unknown>(null);
   // Segundo passo: a prévia do arquivo escolhido, que a pessoa confirma.
   const [preview, setPreview] = useState<AccountingChartImportPreview | null>(null);
+  // A prévia é o que importa no segundo passo: ela entra no lugar do modelo e vem
+  // para a vista (o rodapé com "Confirmar" fica fixo; sem isto, em 390px a prévia
+  // ficava abaixo da dobra e a pessoa confirmaria sem vê-la).
+  const previewRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (preview !== null) previewRef.current?.scrollIntoView?.({ block: 'start' });
+  }, [preview]);
 
   const form = useForm<AccountingChartImportValues>({
     resolver: zodResolver(accountingChartImportSchema),
@@ -170,7 +179,9 @@ export function AccountingChartImportSheet({
             noValidate
           >
             <SheetBody className="space-y-5">
-              <AccountingChartModel headingId="accounting-chart-import-model" />
+              {preview === null && (
+                <AccountingChartModel headingId="accounting-chart-import-model" />
+              )}
 
               <FormField
                 control={form.control}
@@ -211,7 +222,11 @@ export function AccountingChartImportSheet({
                 </p>
               )}
 
-              {preview !== null && <AccountingChartImportPreviewPanel preview={preview} />}
+              {preview !== null && (
+                <div ref={previewRef}>
+                  <AccountingChartImportPreviewPanel preview={preview} />
+                </div>
+              )}
 
               {refusal !== null && <AccountingChartRefusalNotice error={refusal} />}
             </SheetBody>

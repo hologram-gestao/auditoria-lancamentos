@@ -9485,7 +9485,7 @@ for (const vp of VIEWPORTS) {
       const previa = gaveta.getByTestId('accounting-chart-import-preview');
       await expect(previa).toBeVisible();
       await expect(gaveta.getByTestId('accounting-chart-preview-absent-note')).toContainText(
-        '1 delas está em uso',
+        'Ela está em uso no de-para',
       );
       const ausentes = gaveta.getByRole('region', { name: 'Contas que não vieram' });
       await expect(ausentes).toContainText('662 · Aluguéis a receber - Inquilino D');

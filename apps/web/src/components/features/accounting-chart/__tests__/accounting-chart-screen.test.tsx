@@ -617,6 +617,10 @@ describe('importação', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
 
     const note = await within(dialog).findByTestId('accounting-chart-preview-absent-note');
+    // A prévia entra NO LUGAR do modelo: no segundo passo ela é o que se lê.
+    expect(
+      within(dialog).queryByRole('region', { name: 'Modelo da planilha' }),
+    ).not.toBeInTheDocument();
     expect(note).toHaveTextContent('2 contas não vieram nesta planilha');
     expect(note).toHaveTextContent(/Nenhuma conta é inativada nem apagada/);
     expect(note).toHaveTextContent(/1 delas está em uso no de-para ou como conta do banco/);

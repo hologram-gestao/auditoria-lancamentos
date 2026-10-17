@@ -32,6 +32,12 @@ function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+/** Quantas das ausentes estão em uso, com a concordância de cada caso. */
+function absentInUseText(inUse: number, absent: number): string {
+  if (absent === 1) return 'Ela está em uso no de-para ou como conta do banco.';
+  return `${plural(inUse, 'delas está em uso', 'delas estão em uso')} no de-para ou como conta do banco.`;
+}
+
 /** "649 · Banco conta movimento" — o rótulo de uma conta nas listas da prévia. */
 function accountLine(code: string, name: string): string {
   return `${code} · ${name}`;
@@ -78,14 +84,16 @@ export function AccountingChartImportPreviewPanel({
             </span>
           </p>
           <p>
-            Elas continuam no plano como estão, com o selo &quot;não veio na última
-            importação&quot;. Nenhuma conta é inativada nem apagada pela importação.
+            {preview.contasAusentes === 1
+              ? 'Ela continua no plano como está, com o selo "não veio na última importação".'
+              : 'Elas continuam no plano como estão, com o selo "não veio na última importação".'}{' '}
+            Nenhuma conta é inativada nem apagada pela importação.
           </p>
           {inUse > 0 && (
             <p className="font-medium">
-              {plural(inUse, 'delas está em uso', 'delas estão em uso')} no de-para ou como conta do
-              banco. Se ela não existir mais no sistema contábil, o arquivo contábil vai levar uma
-              conta inexistente: confira antes de gerar.
+              {absentInUseText(inUse, preview.contasAusentes)} Se a conta não existir mais no
+              sistema contábil, o arquivo contábil vai levar uma conta inexistente: confira antes de
+              gerar.
             </p>
           )}
         </div>
