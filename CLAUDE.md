@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19, as sprints do agents-hub (tabela da §8) e os épicos de fora do hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **126/126** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **128/128** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -196,7 +196,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**126** hoje — o arquivo é a fonte, confira com
+      (**128** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -204,7 +204,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **126/126**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **128/128**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
@@ -243,7 +243,12 @@
       AUDITADO depois do alcance ao cliente. As 2 leituras do lançamento como Contas a
       Pagar (86e3n70q0: `GET /clients/{id}/omie/departamentos` e
       `GET /clients/{id}/omie/fornecedores?cnpj=`) também são coleção, sem permissão
-      própria (`AccessibleClientDep`, como as categorias), e a busca nunca grava. Só
+      própria (`AccessibleClientDep`, como as categorias), e a busca nunca grava. As 2
+      do fornecedor pelo NOME (86e3qhhrd) também: a busca ao digitar
+      (`GET /clients/{id}/omie/fornecedores/busca?nome=`, coleção, mesmo guard) e a
+      sugestão por linha (`GET /reconciliations/{id}/omie-postings/fornecedores-sugeridos`,
+      `DETAIL_PK`, o guard do lançamento: `review_export` + `require_session_access`, e
+      as linhas saem do `SELECT` com o `session_id` da sessão autorizada). Só
       auth, tipos de anomalia, `test-connection`, `alert-test`, as 5 rotas de
       `/organizations` (plataforma, sem dado de cliente), `GET /export-layout-templates`
       (modelos declarados no código, iguais para toda organização) e o `POST /leads`
@@ -303,9 +308,12 @@
       caracteres, o teto do `codigo_baixa_integracao`), e `HFN` (fornecedor), a única
       que vem do **CNPJ normalizado**: um fornecedor por CNPJ no Omie do cliente. As
       quatro escritas são idempotentes sobre a chave (2º envio devolve o MESMO id).
-    - **A provisão não é atômica: é máquina de estados com RETOMADA.** Fornecedor (só
-      se o CNPJ não tem cadastro: cadastra com razão social e e-mail da linha; senão o
-      `omie_default_supplier_code` do cliente; senão `fornecedor_pendente`) → título
+    - **A provisão não é atômica: é máquina de estados com RETOMADA.** Fornecedor (o
+      `codigo_fornecedor` da linha, o cadastro que a pessoa ESCOLHEU na tela pelo nome,
+      pela sugestão ou pelo CNPJ, vence tudo e vai sem nova busca, inclusive cadastro do
+      exterior sem CNPJ, 86e3qhhrd; exclusivo com `cnpj_fornecedor`; senão o CNPJ:
+      com cadastro, ele; sem cadastro, cadastra com razão social e e-mail da linha;
+      senão o `omie_default_supplier_code` do cliente; senão `fornecedor_pendente`) → título
       (emissão = data da compra; vencimento e previsão = `invoice_due_date` da sessão,
       ou a data da compra se a sessão não tem; categorias somando o valor dentro de
       0,01, o centavo vai para a última; rateio obrigatório se
@@ -1022,6 +1030,13 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   - UNIQUE que a corrida alcança (duplo clique, duas abas): `ON CONFLICT DO NOTHING` para
     ação idempotente, SAVEPOINT + nome da constraint → 409 para escrita. Checar antes de
     inserir não protege nada sob concorrência.
+- **Busca ao digitar sobre dado do ERP nunca chama o ERP por tecla** (86e3qhhrd): o
+  servidor lê a lista inteira uma vez por TTL para um cache em memória POR CLIENTE, com
+  TRAVA por cliente no miss (várias teclas no primeiro acesso viram UMA leitura), e o
+  "contém" roda no servidor; a tela espera a pausa (`useDebouncedValue`) e o mínimo de
+  caracteres úteis, que é o MESMO dos dois lados. O molde é o diretório de cadastros
+  (`fornecedores_directory_cache.py`): a Omie processa uma requisição por método por
+  app_key e responde `425` à rajada. Nome continua só em memória (§4.5).
 - **"O mês de agora" é no fuso do Brasil**, num lugar só:
   `client_movements/competence.py::current_competence` (UTC-3 fixo, como o export). Em
   UTC, das 21h às 23h59 do último dia o servidor já está no mês seguinte.
@@ -1724,6 +1739,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.98, 16/10/2026. **O fornecedor do título passou a ser buscado pelo NOME e sugerido pela descrição da compra (86e3qhhrd, subtask 1 do épico 86e3qhhr0, reunião com o Gabriel de 14/10).** Na gaveta "Lançar no Omie" e no fornecedor padrão do editar cliente o campo é um só: com letra é nome (a lista de parecidos aparece na pausa da digitação, 350 ms, mínimo de 3 caracteres úteis), só dígitos é CNPJ como antes. A busca é `GET /clients/{id}/omie/fornecedores/busca?nome=`: "contém" por pedaço, sem acento e sem caixa, sobre razão social, nome fantasia e dígitos do CNPJ, só cadastros ATIVOS, no máximo 20 com `total` e `truncated`, quem começa pelo texto primeiro; sai de um diretório em memória por cliente (`OmieFornecedoresDirectoryCache`, 6 h, trava por cliente no miss, `refresh=true` no "Atualizar lista"), lido por `OmieClient.listar_clientes` (o `ListarClientes` capturado em 13/10 sem o `clientesFiltro`, página de 50, teto de 100 páginas, `5113` vira lista vazia). Não houve captura nova: o request é o da captura menos o filtro, e o diretório vazio é inferência do `5113` da busca por CNPJ. A sugestão é `GET /reconciliations/{id}/omie-postings/fornecedores-sugeridos?file_entry_id=…` (até 200 linhas): o servidor decifra a descrição (que nunca vai na URL) e devolve os cadastros com a MAIOR `supplier_affinity`, a mesma do cruzamento, empates incluídos, até 3; só a melhor contagem volta porque "DEMO" sozinho sugeria todo cadastro "DEMO". A pessoa confirma com um clique, nada é aplicado sozinho. O pedido de lançamento ganhou `codigo_fornecedor` (só na provisão, exclusivo com `cnpj_fornecedor`): o cadastro escolhido vai sem nova busca, inclusive fornecedor do exterior sem CNPJ, que só o nome acha; o `SupplierValue` `found` da tela passou a carregar só o cadastro e manda o código também quando veio pela busca por CNPJ. `ClienteOmie` e `OmieFornecedorItem` ganharam `cnpj_cpf` (em memória até a tela, nunca persiste). De carona, um 500 latente vizinho: `omie_default_supplier_code` e `?codigo=` aceitavam inteiro acima do BIGINT; `OMIE_CODE_MAX` é o teto dos três. Regra nova na §7 Backend (busca ao digitar sobre dado do ERP). Endpoints sensíveis 126 → **128** (bateria dos três atacantes nas duas); matriz (**29**) e pares de AAD (**17**) iguais._
 
 _Versão 1.97, 15/10/2026. **O tipo da conciliação deixou de ignorar o arquivo quando o Omie cadastra a conta num tipo que a plataforma não entende (86e3qyu04, bugfix do relato do Gabriel, DM Construções).** O cartão Nubank estava cadastrado no Omie como `AC` (Administradora de Cartões); o mapeamento só conhecia `CR` e `CA` e mandava o resto para `checking` em silêncio, então a fatura (identificada como `credit_card` pelo parser, checksum fechado em 351,50) virou uma conciliação de conta corrente, sem o bloco "Fatura do cartão" na gaveta e sem "Lançar no Omie" na revisão (`isCard` é `account_type === 'credit_card'`). Provado no banco de dev pelo cache de contas (`tipo_conta_corrente = "AC"`) e nas duas sessões do dia (`account_type=checking`, 7 linhas `sem_omie`). Regra nova na §3.16: código conhecido (`CR`, `CA`, `CC`) decide sozinho; desconhecido ou fora do cache deixa o arquivo decidir; `CC` com fatura continua `checking` (sem regressão). Sem rota, permissão nem campo cifrado novo: endpoints sensíveis (**126**), matriz (**29**) e pares de AAD (**17**) iguais. **No mesmo PR, o pagamento duplicado da fatura:** o parser extraía o pagamento DUAS vezes (a linha "Pagamento em 04 AGO" da página 5 e o "Pagamento recebido" do bloco RESUMO da página 4, este com a data da emissão inventada, porque com 2 páginas por bloco o resumo e a lista caem em blocos diferentes); passava porque o checksum do cartão exclui `is_payment`. A regra 12 do `SYSTEM_PROMPT` e a descrição da tool `is_payment` passaram a dizer que o pagamento só sai da LISTA de transações, com a data impressa nele, e que o resumo é totalizador; nada de dedup no código (apagar linha "parecida" na junção seria perda silenciosa). Medido contra a API real com o PDF da DM: baseline 7 linhas e 2 pagamentos; com a regra final, 8 de 8 rodadas com 6 linhas, 1 pagamento e checksum ok. **Lição que custou 12 rodadas:** duas frases da primeira versão faziam o modelo devolver ZERO linhas em todos os blocos, inclusive no da lista (6 rodadas vazias em 9): a NOTA DE BLOCO dizendo que "o pagamento só sai da lista de transações, que pode estar em outro bloco", e a regra "nunca emita linha cuja data não esteja impressa ao lado dela", porque no Nubank a data é o cabeçalho do dia ACIMA do grupo de linhas. A nota ficou como era (o teste `test_tool_schema_consistency.py` trava que ela não fale de resumo nem de "outro bloco") e a regra fala da data "que o documento dá à linha, na própria linha ou no agrupamento por dia". Mudança de prompt se mede com o arquivo real, N rodadas, e com um baseline na mesma sessão._
 

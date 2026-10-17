@@ -439,6 +439,57 @@ class TestFornecedor:
         assert line["supplier_code"] == 4242
         assert omie.n("listar_clientes_por_cnpj") == 0
 
+    async def test_codigo_escolhido_vai_ao_titulo_sem_nova_busca(
+        self,
+        client_with_db: AsyncClient,
+        scenario: Scenario,
+        db_session: AsyncSession,
+        omie: Recorder,
+    ) -> None:
+        """86e3qhhrd: o cadastro escolhido pelo nome (aqui, um do exterior, sem
+        CNPJ) recebe o título como veio, sem `ListarClientes` nem cadastro novo."""
+        scenario.client.omie_default_supplier_code = 4242
+        await db_session.flush()
+        entry = await _seed_entry(db_session, sess=scenario.session)
+        await _login(client_with_db, scenario.admin.email)
+
+        resp = await _post(client_with_db, scenario, _line(entry.id, codigo_fornecedor=700_000_003))
+
+        line = resp.json()["data"]["lines"][0]
+        assert line["status"] == "lancada", line
+        assert line["supplier_code"] == 700_000_003
+        assert omie.n("listar_clientes_por_cnpj") == 0
+        assert omie.n("incluir_cliente") == 0
+        titulo = omie.calls["incluir_conta_pagar"][0]
+        assert titulo.codigo_cliente_fornecedor == 700_000_003
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            {"codigo_fornecedor": 700_000_001, "cnpj_fornecedor": CNPJ_FOUND},
+            {"codigo_fornecedor": 0},
+            {"codigo_fornecedor": 2**63},
+            {"codigo_fornecedor": 700_000_001, "modo": "direto"},
+        ],
+        ids=["com-cnpj", "zero", "acima-do-bigint", "no-direto"],
+    )
+    async def test_codigo_fornecedor_invalido_e_400_sem_escrever(
+        self,
+        client_with_db: AsyncClient,
+        scenario: Scenario,
+        db_session: AsyncSession,
+        omie: Recorder,
+        extra: dict[str, Any],
+    ) -> None:
+        entry = await _seed_entry(db_session, sess=scenario.session)
+        await _login(client_with_db, scenario.admin.email)
+
+        resp = await _post(client_with_db, scenario, _line(entry.id, **extra))
+
+        assert resp.status_code == 400, resp.text
+        assert omie.n("incluir_conta_pagar") == 0
+        assert omie.n("incluir_lanc_cc") == 0
+
     async def test_cnpj_sem_cadastro_e_sem_dados_cai_no_padrao(
         self,
         client_with_db: AsyncClient,
@@ -881,3 +932,98 @@ async def test_provisao_concluida_resolve_a_anomalia_e_nao_casa_a_linha(
     await db_session.refresh(entry)
     assert entry.situation == FileEntrySituation.SEM_OMIE.value
     assert entry.omie_lancamento_id is None
+
+
+# ----------------------------------------------------------------------
+# Sugestão de fornecedor por linha (86e3qhhrd)
+# ----------------------------------------------------------------------
+
+SUGGESTIONS_URL = "/api/v1/reconciliations/{session_id}/omie-postings/fornecedores-sugeridos"
+
+
+@pytest.mark.usefixtures("omie")
+class TestSugestaoDeFornecedor:
+    async def test_sugere_pela_descricao_na_ordem_do_pedido(
+        self,
+        client_with_db: AsyncClient,
+        scenario: Scenario,
+        db_session: AsyncSession,
+    ) -> None:
+        software = await _seed_entry(
+            db_session, sess=scenario.session, day=10, description="SOFTWARE DEMO*ASSINATURA"
+        )
+        cafe = await _seed_entry(db_session, sess=scenario.session, day=11)
+        await _login(client_with_db, scenario.admin.email)
+
+        resp = await client_with_db.get(
+            SUGGESTIONS_URL.format(session_id=scenario.session.id),
+            params=[("file_entry_id", str(cafe.id)), ("file_entry_id", str(software.id))],
+        )
+
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert [d["file_entry_id"] for d in data] == [str(cafe.id), str(software.id)]
+        assert data[0]["sugestoes"] == []
+        assert [s["codigo"] for s in data[1]["sugestoes"]] == [700_000_003]
+
+    async def test_linha_de_outra_conciliacao_nao_volta(
+        self,
+        client_with_db: AsyncClient,
+        scenario: Scenario,
+        db_session: AsyncSession,
+    ) -> None:
+        outra = await _seed_session(
+            db_session, client=scenario.client, creator=scenario.admin, omie_conta_id=900_000_004
+        )
+        alheia = await _seed_entry(db_session, sess=outra, description="SOFTWARE DEMO")
+        propria = await _seed_entry(db_session, sess=scenario.session)
+        await _login(client_with_db, scenario.admin.email)
+
+        resp = await client_with_db.get(
+            SUGGESTIONS_URL.format(session_id=scenario.session.id),
+            params=[("file_entry_id", str(alheia.id)), ("file_entry_id", str(propria.id))],
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert [d["file_entry_id"] for d in resp.json()["data"]] == [str(propria.id)]
+
+    async def test_descricao_nao_vai_para_o_log(
+        self,
+        client_with_db: AsyncClient,
+        scenario: Scenario,
+        db_session: AsyncSession,
+    ) -> None:
+        entry = await _seed_entry(
+            db_session, sess=scenario.session, description="SOFTWARE DEMO*ASSINATURA"
+        )
+        await _login(client_with_db, scenario.admin.email)
+
+        with capture_logs() as logs:
+            resp = await client_with_db.get(
+                SUGGESTIONS_URL.format(session_id=scenario.session.id),
+                params={"file_entry_id": str(entry.id)},
+            )
+
+        assert resp.status_code == 200, resp.text
+        dump = repr(logs)
+        assert "ASSINATURA" not in dump
+        assert "SOFTWARE DEMO GMBH" not in dump
+
+    async def test_cliente_encerrado_e_409(
+        self,
+        client_with_db: AsyncClient,
+        scenario: Scenario,
+        db_session: AsyncSession,
+    ) -> None:
+        from datetime import UTC, datetime
+
+        entry = await _seed_entry(db_session, sess=scenario.session)
+        scenario.client.closed_at = datetime.now(UTC)
+        await db_session.flush()
+        await _login(client_with_db, scenario.admin.email)
+
+        resp = await client_with_db.get(
+            SUGGESTIONS_URL.format(session_id=scenario.session.id),
+            params={"file_entry_id": str(entry.id)},
+        )
+        assert resp.status_code == 409, resp.text

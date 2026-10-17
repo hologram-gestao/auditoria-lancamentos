@@ -56,6 +56,9 @@ vi.mock('@/hooks/use-omie-postings', async (importOriginal) => ({
   }),
   useOmieDepartamentos: () => ({ data: { data: [], total: 0 }, isLoading: false }),
   useFindOmieFornecedor: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useSearchOmieFornecedores: () => ({ data: undefined, isError: false, isFetching: false }),
+  useRefreshOmieFornecedores: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  useOmieSupplierSuggestions: () => ({ data: undefined }),
   useOmieFornecedorByCode: () => ({ data: undefined, isLoading: false }),
   usePostedInSession: () => postedState.value,
   useOpenLancarDrawer: (_sessionId: string, onReady: (targets: unknown[]) => void) => ({

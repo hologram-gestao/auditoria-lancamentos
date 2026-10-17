@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import { Switch } from '@/components/ui/switch';
 import { useOmieFornecedorByCode } from '@/hooks/use-omie-postings';
-import type { OmiePostingMode, OmiePostingState } from '@/lib/contracts';
+import type { OmieFornecedorItem, OmiePostingMode, OmiePostingState } from '@/lib/contracts';
 import {
   initialCategoryParts,
   initialDepartmentParts,
@@ -73,6 +73,8 @@ interface PostingLineEditorProps {
   posting: OmiePostingState | null;
   /** Forma em que a linha está TRAVADA, ou `null` (a pessoa escolhe). */
   lockedMode: OmiePostingMode | null;
+  /** Cadastros sugeridos pela descrição da compra (86e3qhhrd); vazio = nenhum. */
+  supplierSuggestions?: readonly OmieFornecedorItem[];
   context: PostingEditorContext;
 }
 
@@ -83,6 +85,7 @@ export function PostingLineEditor({
   purchaseLabel,
   posting,
   lockedMode,
+  supplierSuggestions,
   context,
 }: PostingLineEditorProps) {
   const isProvision = draft.modo === 'provisionar';
@@ -141,6 +144,7 @@ export function PostingLineEditor({
               value={draft.supplier}
               onChange={(supplier) => onChange({ ...draft, supplier })}
               purchaseLabel={purchaseLabel}
+              suggestions={supplierSuggestions}
               context={context}
             />
           )}
@@ -230,11 +234,13 @@ function SupplierField({
   value,
   onChange,
   purchaseLabel,
+  suggestions,
   context,
 }: {
   value: SupplierValue;
   onChange: (value: SupplierValue) => void;
   purchaseLabel: string;
+  suggestions?: readonly OmieFornecedorItem[];
   context: PostingEditorContext;
 }) {
   const checkboxId = useId();
@@ -265,8 +271,9 @@ function SupplierField({
           value={value}
           onChange={onChange}
           allowRegister
-          label="CNPJ do fornecedor"
+          label="Buscar fornecedor no Omie"
           labelContext={purchaseLabel}
+          suggestions={suggestions}
           disabled={context.disabled}
         />
       )}

@@ -93,8 +93,8 @@ export function DefaultSupplierField<T extends FieldValues>({
             disabled={disabled}
           />
           <FormDescription>
-            Usado quando a compra não tem CNPJ, ou tem um CNPJ sem cadastro no Omie e sem dados para
-            cadastrar.
+            Usado na compra em que ninguém escolheu fornecedor na gaveta de lançamento (nem pelo
+            nome, nem pelo CNPJ).
           </FormDescription>
           <FormMessage />
         </FormItem>
@@ -127,7 +127,7 @@ function DefaultSupplierPicker({
           clientId={clientId}
           value={lookup}
           allowRegister={false}
-          label="CNPJ do fornecedor padrão"
+          label="Buscar o fornecedor padrão no Omie"
           disabled={disabled}
           onChange={(next) => {
             setLookup(next);

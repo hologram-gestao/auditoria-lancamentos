@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import date as _date
 from decimal import Decimal
+from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class OmieLancamentoItem(BaseModel):
@@ -85,7 +86,44 @@ class OmieFornecedorItem(BaseModel):
     codigo: int
     razao_social: str | None = None
     nome_fantasia: str | None = None
+    cnpj_cpf: str | None = Field(
+        None,
+        description=(
+            "CNPJ ou CPF do cadastro como a Omie grava (com máscara); nulo em "
+            "fornecedor do exterior e na busca por código. Só para a pessoa conferir: "
+            "o lançamento recebe o `codigo`."
+        ),
+    )
 
 
 class OmieFornecedorResponse(BaseModel):
     data: OmieFornecedorItem
+
+
+class OmieFornecedorSearchResponse(BaseModel):
+    """Cadastros ATIVOS parecidos com o texto digitado (86e3qhhrd).
+
+    `total` é quantos casaram; `data` traz no máximo o teto da busca, os mais
+    prováveis primeiro. `truncated` diz à tela que vale refinar o texto.
+    """
+
+    data: list[OmieFornecedorItem]
+    total: int
+    truncated: bool
+
+
+class OmieFornecedorSuggestion(BaseModel):
+    """Os cadastros sugeridos para UMA linha da fatura, pela descrição da compra."""
+
+    file_entry_id: UUID
+    sugestoes: list[OmieFornecedorItem]
+
+
+class OmieFornecedorSuggestionResponse(BaseModel):
+    """Uma entrada por linha pedida que existe na conciliação, na ordem do pedido.
+
+    Linha sem nenhum cadastro com afinidade vem com `sugestoes` vazia: "não sei",
+    nunca "não existe" (a pessoa busca pelo nome ou pelo CNPJ).
+    """
+
+    data: list[OmieFornecedorSuggestion]

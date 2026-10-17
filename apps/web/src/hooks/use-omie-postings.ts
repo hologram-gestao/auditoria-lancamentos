@@ -20,19 +20,23 @@
  * (movimentações + anomalias) **e** `['reconciliations', sessionId]` (detalhe/
  * status, que alimentam os totalizadores do topo).
  */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
 
 import { invalidateClientSummary } from '@/hooks/use-client-summary';
 import {
+  fetchOmieSupplierSuggestions,
   findOmieFornecedor,
   listOmieCategorias,
   listOmieDepartamentos,
   postOmieLancamentos,
+  searchOmieFornecedores,
   type FornecedorLookup,
   type OmieCategoriaListResponse,
   type OmieDepartamentoListResponse,
   type OmieFornecedorItem,
+  type OmieFornecedorSearchResponse,
+  type OmieFornecedorSuggestion,
   type OmiePostingBatchPayload,
   type OmiePostingLineRequest,
   type OmiePostingLineResult,
@@ -44,6 +48,14 @@ export const omiePostingKeys = {
   departamentos: (clientId: string) => ['omie-departamentos', clientId] as const,
   fornecedorByCode: (clientId: string, codigo: number) =>
     ['omie-fornecedor', clientId, codigo] as const,
+  /** 86e3qhhrd — busca pelo nome; o prefixo sem o texto apaga todas do cliente. */
+  fornecedorSearch: (clientId: string, nome?: string) =>
+    nome === undefined
+      ? (['omie-fornecedor-busca', clientId] as const)
+      : (['omie-fornecedor-busca', clientId, nome] as const),
+  /** 86e3qhhrd — sugestões por linha, pelo conjunto de linhas (ordenado). */
+  supplierSuggestions: (sessionId: string, entryIds: readonly string[]) =>
+    ['omie-fornecedor-sugestoes', sessionId, [...entryIds].sort().join(',')] as const,
   /**
    * 86e3n70qj — linhas concluídas NESTA visita (id da linha → estado). Fora dos
    * prefixos `['review', …]` e `['reconciliations', …]` de propósito: a
@@ -169,6 +181,75 @@ export function useOmieDepartamentos(clientId: string, options: { enabled?: bool
 export function useFindOmieFornecedor(clientId: string) {
   return useMutation<OmieFornecedorItem, Error, FornecedorLookup>({
     mutationFn: (lookup) => findOmieFornecedor(clientId, lookup),
+    retry: false,
+  });
+}
+
+/** Mínimo de caracteres úteis da busca pelo nome (o mesmo do servidor). */
+export const SUPPLIER_SEARCH_MIN_CHARS = 3;
+
+/** O diretório do servidor vale 6 h; a busca igual na mesma visita não volta lá. */
+const SUPPLIER_SEARCH_STALE_MS = 5 * 60 * 1000;
+
+/** Letras e dígitos do texto, sem acento: o que o servidor conta como "útil". */
+export function supplierSearchUsefulLength(text: string): number {
+  return text
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^0-9a-z]/gi, '').length;
+}
+
+/**
+ * Busca de fornecedor pelo NOME ao digitar (86e3qhhrd). Quem chama passa o texto
+ * JÁ com debounce (`useDebouncedValue`); a busca só sai com 3 caracteres úteis.
+ * O resultado anterior fica na tela enquanto o novo chega (`keepPreviousData`),
+ * para a lista não piscar a cada tecla. `retry: false`: o erro é mostrado com
+ * "Tentar de novo", não repetido em silêncio.
+ */
+export function useSearchOmieFornecedores(clientId: string, nome: string) {
+  const term = nome.trim();
+  return useQuery<OmieFornecedorSearchResponse>({
+    queryKey: omiePostingKeys.fornecedorSearch(clientId, term),
+    queryFn: ({ signal }) => searchOmieFornecedores(clientId, term, { signal }),
+    enabled: clientId.length > 0 && supplierSearchUsefulLength(term) >= SUPPLIER_SEARCH_MIN_CHARS,
+    staleTime: SUPPLIER_SEARCH_STALE_MS,
+    placeholderData: keepPreviousData,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+}
+
+/**
+ * "Atualizar lista": relê o diretório da Omie para o texto atual e descarta as
+ * outras buscas guardadas do cliente (elas leram o diretório antigo).
+ */
+export function useRefreshOmieFornecedores(clientId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<OmieFornecedorSearchResponse, Error, string>({
+    mutationFn: (nome) => searchOmieFornecedores(clientId, nome.trim(), { refresh: true }),
+    retry: false,
+    onSuccess: (data, nome) => {
+      queryClient.removeQueries({ queryKey: omiePostingKeys.fornecedorSearch(clientId) });
+      queryClient.setQueryData(omiePostingKeys.fornecedorSearch(clientId, nome.trim()), data);
+    },
+  });
+}
+
+/**
+ * Sugestões de fornecedor das linhas da gaveta, numa ida só (86e3qhhrd). Falha é
+ * silenciosa de propósito: sugestão é conveniência, a busca manual continua ali.
+ */
+export function useOmieSupplierSuggestions(
+  sessionId: string,
+  entryIds: readonly string[],
+  options: { enabled?: boolean } = {},
+) {
+  return useQuery<OmieFornecedorSuggestion[]>({
+    queryKey: omiePostingKeys.supplierSuggestions(sessionId, entryIds),
+    queryFn: () => fetchOmieSupplierSuggestions(sessionId, entryIds),
+    enabled: sessionId.length > 0 && entryIds.length > 0 && (options.enabled ?? true),
+    staleTime: SUPPLIER_SEARCH_STALE_MS,
+    refetchOnWindowFocus: false,
     retry: false,
   });
 }

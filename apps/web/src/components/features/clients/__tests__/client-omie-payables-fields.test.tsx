@@ -36,9 +36,31 @@ vi.mock('@/hooks/use-client-connections', () => ({
 
 const findMock = vi.fn();
 const byCodeMock = vi.fn();
-vi.mock('@/hooks/use-omie-postings', () => ({
+/** 86e3qhhrd — a busca pelo nome: o fornecedor do exterior para "soft…". */
+const EXTERIOR = {
+  codigo: 700000003,
+  razao_social: 'SOFTWARE DEMO GMBH',
+  nome_fantasia: 'Software Demo',
+  cnpj_cpf: null,
+};
+const searchMock = vi.fn((nome: string) => ({
+  data:
+    nome.trim() === ''
+      ? undefined
+      : nome.toLowerCase().startsWith('soft')
+        ? { data: [EXTERIOR], total: 1, truncated: false }
+        : { data: [], total: 0, truncated: false },
+  isError: false,
+  isFetching: false,
+  refetch: vi.fn(),
+}));
+vi.mock('@/hooks/use-omie-postings', async (importOriginal) => ({
+  // As funções puras (mínimo da busca pelo nome) vêm do módulo real.
+  ...(await importOriginal<Record<string, unknown>>()),
   useFindOmieFornecedor: () => ({ mutateAsync: findMock, isPending: false }),
   useOmieFornecedorByCode: (_clientId: string, codigo: number | null) => byCodeMock(codigo),
+  useSearchOmieFornecedores: (_clientId: string, nome: string) => searchMock(nome),
+  useRefreshOmieFornecedores: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
 }));
 
 vi.mock('@/components/features/organizations/organization-select', () => ({
@@ -211,13 +233,27 @@ describe('Editar cliente', () => {
     render(<EditClientModal open onOpenChange={vi.fn()} client={client()} />);
 
     await user.click(screen.getByRole('button', { name: 'Escolher fornecedor padrão' }));
-    await user.type(screen.getByLabelText('CNPJ do fornecedor padrão'), '98765432000198');
+    await user.type(screen.getByLabelText('Buscar o fornecedor padrão no Omie'), '98765432000198');
     await user.click(screen.getByRole('button', { name: 'Buscar no Omie' }));
 
     expect(findMock).toHaveBeenCalledWith({ cnpj: '98765432000198' });
     expect(await screen.findByText('POSTO DEMO COMBUSTIVEIS LTDA')).toBeInTheDocument();
     const payload = await salvarEdicao(user);
     expect(payload.omie_default_supplier_code).toBe(700000002);
+  });
+
+  it('escolher pelo NOME guarda o código, inclusive de fornecedor sem CNPJ (86e3qhhrd)', async () => {
+    const user = userEvent.setup();
+    render(<EditClientModal open onOpenChange={vi.fn()} client={client()} />);
+
+    await user.click(screen.getByRole('button', { name: 'Escolher fornecedor padrão' }));
+    await user.type(screen.getByLabelText('Buscar o fornecedor padrão no Omie'), 'softw');
+    await user.click(await screen.findByRole('button', { name: /SOFTWARE DEMO GMBH/ }));
+
+    expect(findMock).not.toHaveBeenCalled();
+    expect(await screen.findByText('SOFTWARE DEMO GMBH')).toBeInTheDocument();
+    const payload = await salvarEdicao(user);
+    expect(payload.omie_default_supplier_code).toBe(700000003);
   });
 
   it('CNPJ sem cadastro: o padrão tem de existir no Omie, e nada muda', async () => {
@@ -228,7 +264,7 @@ describe('Editar cliente', () => {
     render(<EditClientModal open onOpenChange={vi.fn()} client={client()} />);
 
     await user.click(screen.getByRole('button', { name: 'Escolher fornecedor padrão' }));
-    await user.type(screen.getByLabelText('CNPJ do fornecedor padrão'), '11222333000181');
+    await user.type(screen.getByLabelText('Buscar o fornecedor padrão no Omie'), '11222333000181');
     await user.click(screen.getByRole('button', { name: 'Buscar no Omie' }));
 
     expect(
@@ -262,7 +298,7 @@ describe('Editar cliente', () => {
     const dialog = screen.getByRole('dialog');
     await assertNoA11yViolations(dialog);
     await user.click(within(dialog).getByRole('button', { name: 'Trocar' }));
-    expect(screen.getByLabelText('CNPJ do fornecedor padrão')).toBeInTheDocument();
+    expect(screen.getByLabelText('Buscar o fornecedor padrão no Omie')).toBeInTheDocument();
     await assertNoA11yViolations(dialog);
   });
 });

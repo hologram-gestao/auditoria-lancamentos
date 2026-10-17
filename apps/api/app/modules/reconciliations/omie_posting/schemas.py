@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.cnpj import normalize_cnpj
 from app.db.models import COD_INT_LANC_MAX_LENGTH
+from app.integrations.omie.schemas import OMIE_CODE_MAX
 
 #: `cCodCateg` é `string20` na Omie (mesmo teto do `cCodIntLanc`).
 COD_CATEGORIA_MAX_LENGTH = COD_INT_LANC_MAX_LENGTH
@@ -161,6 +162,17 @@ class OmiePostingLineRequest(BaseModel):
         max_length=18,
         description="Só na provisão: CNPJ do fornecedor (14 dígitos, com ou sem máscara).",
     )
+    codigo_fornecedor: int | None = Field(
+        None,
+        ge=1,
+        le=OMIE_CODE_MAX,
+        description=(
+            "Só na provisão: o `codigo_cliente_omie` do cadastro que a pessoa escolheu "
+            "(busca pelo nome, sugestão ou busca por CNPJ). O título vai para ESTE "
+            "cadastro, sem nova busca, inclusive fornecedor do exterior sem CNPJ. "
+            "Exclui `cnpj_fornecedor`, `razao_social` e `email`."
+        ),
+    )
     razao_social: str | None = Field(
         None,
         min_length=1,
@@ -230,6 +242,7 @@ class OmiePostingLineRequest(BaseModel):
         provisao_only = {
             "categorias": self.categorias,
             "cnpj_fornecedor": self.cnpj_fornecedor,
+            "codigo_fornecedor": self.codigo_fornecedor,
             "razao_social": self.razao_social,
             "email": self.email,
             "departamentos": self.departamentos,
@@ -246,6 +259,8 @@ class OmiePostingLineRequest(BaseModel):
             raise ValueError("razao_social e email vêm juntos")
         if self.razao_social is not None and self.cnpj_fornecedor is None:
             raise ValueError("cadastrar fornecedor exige o CNPJ")
+        if self.codigo_fornecedor is not None and self.cnpj_fornecedor is not None:
+            raise ValueError("informe codigo_fornecedor OU cnpj_fornecedor")
         if self.categorias is not None:
             codigos = [c.codigo for c in self.categorias]
             if len(set(codigos)) != len(codigos):

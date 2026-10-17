@@ -6,7 +6,9 @@ serviço → cache → client é o de produção. O que estes testes travam:
 - departamentos: só ativos, cache por cliente, envelope `{data, total}`;
 - fornecedor: achado devolve código e nomes; inexistente é 404 tipado; CNPJ
   inválido é 400 sem ecoar o valor; a busca NUNCA cadastra;
-- cliente só-arquivo: 409 `CAPACIDADE_AUSENTE` nas duas;
+- busca pelo nome (86e3qhhrd): "contém" sobre o diretório, só ativos, sem
+  CNPJ inclusive, mínimo de 3 caracteres úteis, e UMA leitura da Omie por TTL;
+- cliente só-arquivo: 409 `CAPACIDADE_AUSENTE` em todas;
 - outro tenant: negado antes de qualquer chamada à Omie (a bateria de endpoints
   sensíveis cobre os três atacantes; aqui, o operador do próprio tenant LÊ).
 """
@@ -149,6 +151,7 @@ class TestFornecedor:
             "codigo": 700_000_001,
             "razao_social": "PAPELARIA DEMO LTDA",
             "nome_fantasia": "Papelaria Demo",
+            "cnpj_cpf": "12.345.678/0001-95",
         }
 
     async def test_not_found_is_typed_404_and_creates_nothing(
@@ -200,6 +203,7 @@ class TestFornecedorPorCodigo:
             "codigo": 700_000_001,
             "razao_social": "PAPELARIA DEMO LTDA",
             "nome_fantasia": None,
+            "cnpj_cpf": None,
         }
 
     async def test_unknown_code_is_typed_404(
@@ -240,10 +244,113 @@ class TestFornecedorPorCodigo:
         assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
+class TestFornecedorPorNome:
+    """`/fornecedores/busca?nome=` (86e3qhhrd): a busca ao digitar."""
+
+    async def test_contains_active_only_with_cnpj(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session)
+        client = await _seed_omie_client(db_session, admin)
+        await _login(client_with_db, admin)
+
+        resp = await client_with_db.get(
+            f"/api/v1/clients/{client.id}/omie/fornecedores/busca", params={"nome": "papel"}
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        # "PAPELARIA ANTIGA DEMO" é inativa no mock: fica fora.
+        assert body == {
+            "data": [
+                {
+                    "codigo": 700_000_001,
+                    "razao_social": "PAPELARIA DEMO LTDA",
+                    "nome_fantasia": "Papelaria Demo",
+                    "cnpj_cpf": "12.345.678/0001-95",
+                }
+            ],
+            "total": 1,
+            "truncated": False,
+        }
+
+    async def test_finds_supplier_without_cnpj_by_name_and_accents(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session)
+        client = await _seed_omie_client(db_session, admin)
+        await _login(client_with_db, admin)
+
+        resp = await client_with_db.get(
+            f"/api/v1/clients/{client.id}/omie/fornecedores/busca",
+            params={"nome": "sóftware"},
+        )
+        assert resp.status_code == 200, resp.text
+        [item] = resp.json()["data"]
+        assert item["codigo"] == 700_000_003
+        assert item["cnpj_cpf"] is None
+
+    async def test_reads_omie_once_and_refresh_rereads(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls: list[int] = []
+        original = mock_client.MockOmieClient.listar_clientes
+
+        async def counting(self: mock_client.MockOmieClient) -> list[object]:
+            calls.append(1)
+            return await original(self)
+
+        monkeypatch.setattr(mock_client.MockOmieClient, "listar_clientes", counting)
+        admin = await _seed_user(db_session)
+        client = await _seed_omie_client(db_session, admin)
+        await _login(client_with_db, admin)
+        url = f"/api/v1/clients/{client.id}/omie/fornecedores/busca"
+
+        for text in ("pap", "papel", "papelaria", "posto"):
+            resp = await client_with_db.get(url, params={"nome": text})
+            assert resp.status_code == 200, resp.text
+        assert len(calls) == 1
+        resp = await client_with_db.get(url, params={"nome": "posto", "refresh": "true"})
+        assert resp.status_code == 200, resp.text
+        assert len(calls) == 2
+
+    @pytest.mark.parametrize("nome", ["ab", "a-b", "  .  "], ids=["curto", "pontuacao", "vazio"])
+    async def test_less_than_three_useful_chars_is_400(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, nome: str
+    ) -> None:
+        admin = await _seed_user(db_session)
+        client = await _seed_omie_client(db_session, admin)
+        await _login(client_with_db, admin)
+
+        resp = await client_with_db.get(
+            f"/api/v1/clients/{client.id}/omie/fornecedores/busca", params={"nome": nome}
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+
+    async def test_code_above_bigint_is_400_not_500(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin = await _seed_user(db_session)
+        client = await _seed_omie_client(db_session, admin)
+        await _login(client_with_db, admin)
+
+        resp = await client_with_db.get(
+            f"/api/v1/clients/{client.id}/omie/fornecedores", params={"codigo": 2**63}
+        )
+        assert resp.status_code == 400, resp.text
+
+
 class TestClienteSoArquivo:
     @pytest.mark.parametrize(
         ("path", "params"),
-        [("departamentos", None), ("fornecedores", {"cnpj": "12345678000195"})],
+        [
+            ("departamentos", None),
+            ("fornecedores", {"cnpj": "12345678000195"}),
+            ("fornecedores/busca", {"nome": "papelaria"}),
+        ],
     )
     async def test_is_409_capacidade_ausente(
         self,
