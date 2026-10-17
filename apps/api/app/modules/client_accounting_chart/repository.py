@@ -202,11 +202,13 @@ class AccountingChartRepository:
         await self._session.execute(insert(_table()), list(rows))
 
     async def update_accounts(self, updates: Sequence[dict[str, Any]]) -> None:
-        """Atualiza nome/tipo/classificação/chave de ordem e REATIVA, por pk, em lote (Core).
+        """Atualiza nome/tipo/classificação/chave de ordem por pk, em lote (Core), e
+        tira o selo de ausente (a conta veio na planilha).
 
         Cada item: `{"b_client", "b_id", "b_ct", "b_iv", "b_type", "b_class",
         "b_sort", "b_author"}`. `client_id` no WHERE junto da pk (§3.15). `updated_at`
         pelo `clock_timestamp()`: o `onupdate` do ORM não vale para UPDATE de Core.
+        A SITUAÇÃO não é tocada (86e3qhhrm): a planilha não reativa nem inativa.
         """
         if not updates:
             return
@@ -220,7 +222,7 @@ class AccountingChartRepository:
                 account_type=bindparam("b_type"),
                 classification=bindparam("b_class"),
                 sort_key=bindparam("b_sort"),
-                active=True,
+                absent_since=None,
                 updated_by=bindparam("b_author"),
                 updated_at=func.clock_timestamp(),
             )
@@ -243,24 +245,65 @@ class AccountingChartRepository:
         )
         await self._session.execute(stmt)
 
-    async def deactivate_absent(
-        self, client_id: UUID, *, present_codes: Collection[str], author_id: UUID
+    async def mark_absent(
+        self, client_id: UUID, *, account_ids: Collection[UUID], author_id: UUID
     ) -> int:
-        """Inativa as contas ATIVAS que não vieram na planilha. **Nunca apaga.**
+        """Põe o selo "não veio na última importação" nas contas pedidas (86e3qhhrm).
 
-        Devolve quantas passaram de ativa a inativa nesta importação (as que já
-        estavam inativas não contam de novo). Conta inativa pode ter decisão
-        apontando para ela (16.2): apagá-la quebraria a decisão.
+        **Nunca inativa nem apaga**: a situação fica como está. Só ganha o selo quem
+        ainda não tem (`absent_since IS NULL`): a data é a da PRIMEIRA importação em
+        que a conta sumiu, e as seguintes não a empurram. `now()` é o instante da
+        TRANSAÇÃO: todas as contas da mesma importação levam a mesma data. Devolve
+        quantas ganharam o selo agora.
         """
+        if not account_ids:
+            return 0
         table = _table()
         stmt = (
             update(table)
             .where(
                 table.c.client_id == client_id,
-                table.c.active.is_(True),
-                table.c.code.not_in(list(present_codes)),
+                table.c.id.in_(list(account_ids)),
+                table.c.absent_since.is_(None),
             )
-            .values(active=False, updated_by=author_id, updated_at=func.clock_timestamp())
+            .values(
+                absent_since=func.now(),
+                updated_by=author_id,
+                updated_at=func.clock_timestamp(),
+            )
             .returning(table.c.id)
         )
         return len((await self._session.execute(stmt)).all())
+
+    async def accounts_in_use(self, client_id: UUID, account_ids: Collection[UUID]) -> set[UUID]:
+        """Quais das contas pedidas têm decisão do de-para (qualquer vigência) ou são
+        conta do banco — a MESMA pergunta de `count_usage`, para um lote, em duas
+        queries. `client_id` no próprio `WHERE` das duas (§3.15).
+        """
+        if not account_ids:
+            return set()
+        ids = list(account_ids)
+        decisions = (
+            select(ClientMappingDecision.accounting_account_id)
+            .where(
+                ClientMappingDecision.client_id == client_id,
+                ClientMappingDecision.accounting_account_id.in_(ids),
+            )
+            .distinct()
+        )
+        bindings = (
+            select(ClientSourceAccountBinding.accounting_account_id)
+            .where(
+                ClientSourceAccountBinding.client_id == client_id,
+                ClientSourceAccountBinding.accounting_account_id.in_(ids),
+            )
+            .distinct()
+        )
+        used: set[UUID] = set()
+        for stmt in (decisions, bindings):
+            used.update(
+                account_id
+                for account_id in (await self._session.execute(stmt)).scalars().all()
+                if account_id is not None
+            )
+        return used

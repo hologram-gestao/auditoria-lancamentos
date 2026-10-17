@@ -322,6 +322,11 @@ _MULTIPART: dict[str, tuple[dict[str, tuple[str, bytes, str]], dict[str, str]]] 
         {"file": ("plano.csv", _PLANO_DA_BATERIA, "text/csv")},
         {},
     ),
+    # 86e3qhhrm: a prévia lê a MESMA planilha válida e não grava.
+    "POST /api/v1/clients/{client_id}/accounting-chart/import/preview": (
+        {"file": ("plano.csv", _PLANO_DA_BATERIA, "text/csv")},
+        {},
+    ),
 }
 
 #: Query string mínima por endpoint.

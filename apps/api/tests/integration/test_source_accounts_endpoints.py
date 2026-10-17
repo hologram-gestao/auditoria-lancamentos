@@ -264,27 +264,33 @@ class TestAssociacao:
         assert vazia.status_code == 400
         assert await _bindings(db_session, world.client) == []
 
-    async def test_conta_inativada_pela_reimportacao_e_422_sem_gravar(
+    async def test_conta_ausente_da_reimportacao_segue_lancavel_e_inativa_e_422(
         self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
     ) -> None:
+        """86e3qhhrm: a reimportação não inativa (a 700 só ganha o selo e continua
+        associável); a conta inativada pela EDIÇÃO é que o validador recusa."""
         sem_700 = b"\n".join(line for line in PLANO.split(b"\n") if not line.startswith(b"700;"))
         reimport = await client_with_db.post(
             f"/api/v1/clients/{world.client.id}/accounting-chart/import",
             files={"file": ("plano.csv", sem_700, "text/csv")},
         )
         assert reimport.status_code == 200, reimport.text
-        # A reimportação inativa por UPDATE em lote do Core, que não toca o identity map;
-        # este teste divide UMA sessão com a API, e a `ClientAccountingAccount` da 700 já
-        # carregada pelo `world` seguiria com `active=True` para o validador. Selecionar a
-        # ENTIDADE com `populate_existing` repovoa a instância (em produção cada request
-        # tem sessão própria e lê do banco). Selecionar só a coluna não repovoa nada.
+        # A marcação é UPDATE em lote do Core, que não toca o identity map; este teste
+        # divide UMA sessão com a API, então a entidade é relida com `populate_existing`.
         stmt = (
             select(ClientAccountingAccount)
             .where(ClientAccountingAccount.id == world.accounts["700"].id)
             .execution_options(populate_existing=True)
         )
-        assert (await db_session.execute(stmt)).scalar_one().active is False
+        conta = (await db_session.execute(stmt)).scalar_one()
+        assert conta.active is True
+        assert conta.absent_since is not None
 
+        edit = await client_with_db.patch(
+            f"/api/v1/clients/{world.client.id}/accounting-chart/accounts/{conta.id}",
+            json={"active": False},
+        )
+        assert edit.status_code == 200, edit.text
         inativa = await _bind(client_with_db, world, world.accounts["700"])
         assert inativa.status_code == 422, inativa.text
         assert inativa.json()["error"]["code"] == "CONTA_CONTABIL_NAO_LANCAVEL"

@@ -1018,8 +1018,26 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         ScopeKind.COLLECTION,
         "app/modules/client_accounting_chart/routes.py",
         f"{_VIA_CLIENT_PATH} + OpenClientDep + ManageClientAccountingChartDep (guard "
-        "auditado); contas gravadas e inativadas com o client_id do path validado, sob "
-        "trava por cliente; cliente encerrado = 409",
+        "auditado); contas gravadas e marcadas como ausentes com o client_id do path "
+        "validado, sob trava por cliente; cliente encerrado = 409",
+    ),
+    # 86e3qhhrm — a prévia da reimportação e a exportação do plano no modelo.
+    SensitiveEndpoint(
+        "POST",
+        "/api/v1/clients/{client_id}/accounting-chart/import/preview",
+        ScopeKind.COLLECTION,
+        "app/modules/client_accounting_chart/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + ManageClientAccountingChartDep (guard "
+        "auditado); compara a planilha com o plano lido por client_id no próprio SELECT "
+        "e não grava nada; nomes decifrados com a DEK do cliente do path",
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/accounting-chart/export",
+        ScopeKind.COLLECTION,
+        "app/modules/client_accounting_chart/routes.py",
+        f"{_VIA_CLIENT_PATH}; o plano lido por client_id no próprio SELECT, nomes "
+        "decifrados com a DEK do cliente do path; 1 linha `export` em access_audit",
     ),
     # 86e3nb816 — inclusão e edição manual de UMA conta, sem reimportar a planilha.
     SensitiveEndpoint(

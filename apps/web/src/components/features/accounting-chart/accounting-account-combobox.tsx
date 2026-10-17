@@ -25,6 +25,8 @@ import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { ACCOUNTING_CHART_MAX_PAGE_SIZE } from '@/lib/api/client-accounting-chart';
 import type { AccountingAccount } from '@/lib/contracts';
 
+import { ABSENT_FROM_IMPORT_LABEL } from './absent-from-import';
+
 /** "649 — Banco conta movimento". Nome indecifrável não entra como se fosse nome. */
 export function accountingAccountLabel(account: {
   code: string;
@@ -74,9 +76,14 @@ export function AccountingAccountCombobox({
 
   const accounts = query.data?.data ?? [];
   const total = query.data?.pagination.total ?? 0;
+  // O selo da reimportação (86e3qhhrm) vai no rótulo da opção: quem escolhe a
+  // conta vê, antes de escolher, que ela pode não existir mais no sistema contábil.
   const options = accounts.map((account) => ({
     value: account.id,
-    label: accountingAccountLabel(account),
+    label:
+      account.absentSince != null
+        ? `${accountingAccountLabel(account)} (${ABSENT_FROM_IMPORT_LABEL.toLowerCase()})`
+        : accountingAccountLabel(account),
   }));
 
   return (

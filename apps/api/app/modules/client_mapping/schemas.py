@@ -445,6 +445,14 @@ class MappingListItem(BaseModel):
         alias="accountingAccountName",
         description="S16 — nome da conta, decifrado na leitura (nunca persistido em claro).",
     )
+    accounting_account_absent_since: datetime | None = Field(
+        default=None,
+        alias="accountingAccountAbsentSince",
+        description=(
+            "86e3qhhrm — a conta não veio na última importação do plano contábil desde "
+            "este instante: pode não existir mais no sistema contábil. `null` = veio."
+        ),
+    )
     history: str | None = Field(
         default=None,
         description="S16 — histórico padrão da vigente, decifrado (`null` = sem histórico).",
@@ -666,6 +674,11 @@ class AccountingCategoryResponse(BaseModel):
         alias="accountingAccountName",
         description="Nome da conta, decifrado na leitura (nunca guardado na materialização).",
     )
+    accounting_account_absent_since: datetime | None = Field(
+        default=None,
+        alias="accountingAccountAbsentSince",
+        description="86e3qhhrm — a conta não veio na última importação do plano contábil.",
+    )
     history: str | None = Field(
         default=None, description="Histórico padrão decifrado (`null` = sem histórico)."
     )
@@ -711,6 +724,7 @@ class AccountingCategoryResponse(BaseModel):
             accounting_account_id=account.id if account else None,
             accounting_account_code=account.code if account else None,
             accounting_account_name=account.name if account else None,
+            accounting_account_absent_since=account.absent_since if account else None,
             history=line.history,
             history_missing=line.history_missing,
             requires_redo=line.legacy_catalog_target,

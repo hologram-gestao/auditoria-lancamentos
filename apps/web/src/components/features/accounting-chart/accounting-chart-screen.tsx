@@ -34,10 +34,16 @@
  * classificação (sintética em cima, as analíticas dela abaixo), e a linha mostra
  * isso com o nome recuado pelo grau (`chart-hierarchy.ts`) e a sintética em peso
  * maior. As outras colunas não mudam; nada é ordenado no cliente.
+ *
+ * **Reimportar não inativa** (86e3qhhrm): a conta que não veio na última planilha
+ * ganha o selo "não veio na última importação" na coluna Situação, e a gaveta de
+ * importação mostra a prévia antes de gravar. "Baixar planilha" (todo papel que lê)
+ * exporta o plano no MESMO modelo da importação.
  */
 
-import { CheckCircle2, Pencil, Plus, Search, Upload, X } from 'lucide-react';
+import { CheckCircle2, Download, Loader2, Pencil, Plus, Search, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -53,11 +59,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { useAccountingChartList } from '@/hooks/use-client-accounting-chart';
+import {
+  useAccountingChartList,
+  useExportAccountingChart,
+} from '@/hooks/use-client-accounting-chart';
 import { useClientDetail } from '@/hooks/use-clients';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { readEnum, readPositiveInt, useUrlState } from '@/hooks/use-url-state';
-import { ApiError } from '@/lib/api/client';
+import { ApiError, NetworkError } from '@/lib/api/client';
 import type { ListAccountingChartParams } from '@/lib/api/client-accounting-chart';
 import { hasPermission } from '@/lib/authz';
 import type {
@@ -66,9 +75,11 @@ import type {
   AccountingAccountType,
   AccountingChartImportResult,
 } from '@/lib/contracts';
+import { triggerBrowserDownload } from '@/lib/download';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 
+import { AbsentFromImportBadge } from './absent-from-import';
 import { AccountingAccountFormSheet } from './accounting-account-form-sheet';
 import { AccountingChartImportSheet, importSuccessMessage } from './accounting-chart-import-sheet';
 import { AccountingChartModel } from './accounting-chart-model';
@@ -147,6 +158,7 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
   // A gaveta da conta: `undefined` fechada, `null` nova conta, conta = edição.
   const [accountForm, setAccountForm] = useState<AccountingAccount | null | undefined>(undefined);
   const [accountFormKey, setAccountFormKey] = useState(0);
+  const exportMutation = useExportAccountingChart(clientId);
 
   if (currentUser === null) return null;
 
@@ -175,6 +187,20 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
   function openAccountForm(account: AccountingAccount | null) {
     setAccountFormKey((k) => k + 1);
     setAccountForm(account);
+  }
+
+  async function handleExport() {
+    try {
+      const { blob, filename } = await exportMutation.mutateAsync();
+      triggerBrowserDownload(blob, filename ?? 'plano-contabil.csv');
+      toast.success('Planilha do plano contábil baixada.');
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError || err instanceof NetworkError
+          ? err.userMessage
+          : 'Não foi possível baixar o plano contábil.',
+      );
+    }
   }
 
   function clearFilters() {
@@ -215,6 +241,22 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          {/* Baixar é leitura: todo papel que vê o plano baixa. Sem plano não há o que baixar. */}
+          {hasPlan && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleExport()}
+              disabled={exportMutation.isPending}
+            >
+              {exportMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Download className="h-4 w-4" aria-hidden="true" />
+              )}
+              {exportMutation.isPending ? 'Baixando…' : 'Baixar planilha'}
+            </Button>
+          )}
           {/* Sem plano, o botão mora no estado vazio, junto do modelo — um só na tela. */}
           {showImport && (
             <Button type="button" variant="outline" onClick={() => openAccountForm(null)}>
@@ -252,10 +294,11 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
               <X className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
-          <dl className="grid grid-cols-3 gap-2">
+          <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Stat label="Contas na planilha" value={lastImport.contas} />
             <Stat label="Novas" value={lastImport.contasNovas} />
-            <Stat label="Inativadas" value={lastImport.contasInativadas} />
+            <Stat label="Alteradas" value={lastImport.contasAlteradas} />
+            <Stat label="Não vieram" value={lastImport.contasAusentes} />
           </dl>
         </div>
       )}
@@ -531,17 +574,22 @@ function AccountRow({
         </span>
       </TableCell>
       <TableCell>
-        <span
-          className={cn(
-            baseBadge,
-            account.active
-              ? 'bg-success-muted text-success ring-success/30'
-              : 'bg-muted text-muted-foreground ring-border',
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span
+            className={cn(
+              baseBadge,
+              account.active
+                ? 'bg-success-muted text-success ring-success/30'
+                : 'bg-muted text-muted-foreground ring-border',
+            )}
+          >
+            <span className="sr-only">Situação: </span>
+            {account.active ? 'Ativa' : 'Inativa'}
+          </span>
+          {account.absentSince != null && (
+            <AbsentFromImportBadge absentSince={account.absentSince} />
           )}
-        >
-          <span className="sr-only">Situação: </span>
-          {account.active ? 'Ativa' : 'Inativa'}
-        </span>
+        </div>
       </TableCell>
       {onEdit !== null && (
         <TableCell className="text-right">

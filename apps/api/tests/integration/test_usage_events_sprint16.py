@@ -129,7 +129,8 @@ class TestEventoDaImportacao:
             "client_id": str(world.client.id),
             "contas": 20,
             "contas_novas": 20,
-            "contas_inativadas": 0,
+            "contas_alteradas": 0,
+            "contas_ausentes": 0,
             "layout": "modelo",
         }
 
@@ -139,7 +140,8 @@ class TestEventoDaImportacao:
         assert again.status_code == 200
         eventos = await _events(db_session, world)
         assert len(eventos) == 2, "sem dedup: cada importação bem-sucedida é uma linha"
-        assert {e.props["contas_inativadas"] for e in eventos} == {0, 19}
+        # 86e3qhhrm: as 19 que não vieram são AUSENTES (com o selo), não inativadas.
+        assert {e.props["contas_ausentes"] for e in eventos} == {0, 19}
 
 
 # ---------------------------------------------------------------------------

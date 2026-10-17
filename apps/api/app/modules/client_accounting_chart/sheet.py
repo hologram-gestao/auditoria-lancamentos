@@ -255,6 +255,29 @@ def parse_account_type(value: Any) -> AccountingAccountType | None:
     return _ACCOUNT_TYPE_SPELLINGS.get(_fold(text))
 
 
+#: O começo de texto que o Excel lê como FÓRMULA ao abrir um CSV. A exportação do
+#: plano (86e3qhhrm) prefixa o nome que começa assim com um apóstrofo, e a leitura da
+#: planilha o tira de volta: exportar e reimportar o mesmo arquivo não muda o nome.
+FORMULA_START = ("=", "+", "-", "@")
+#: O prefixo que neutraliza a fórmula na exportação (e só ele é retirado na leitura).
+FORMULA_GUARD = "'"
+
+
+def neutralize_formula(text: str) -> str:
+    """O nome como vai para o CSV exportado: com o apóstrofo se começaria fórmula."""
+    return FORMULA_GUARD + text if text.startswith(FORMULA_START) else text
+
+
+def restore_formula(text: str) -> str:
+    """O inverso de `neutralize_formula`: tira o apóstrofo SÓ se ele guarda uma fórmula.
+
+    O apóstrofo de um nome que não começaria fórmula (`'Caixa`) é do nome e fica.
+    """
+    if text.startswith(FORMULA_GUARD) and text[1:].startswith(FORMULA_START):
+        return text[1:]
+    return text
+
+
 def _validate_row(
     line: int, cells: dict[str, Any]
 ) -> tuple[ChartSheetRow | None, ChartLineReason | None]:
@@ -267,6 +290,8 @@ def _validate_row(
     if not _CODE_PATTERN.fullmatch(code):
         return None, "codigo_invalido"
     name = _cell_text(cells.get(COLUMN_NAME))
+    if name is not None:
+        name = restore_formula(name)
     if name is None:
         return None, "nome_vazio"
     if len(name) > MAX_ACCOUNTING_ACCOUNT_NAME_CHARS:

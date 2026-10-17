@@ -10,9 +10,11 @@
  *     célula a célula está em `lib/__tests__/authz.test.ts`); a leitura é de todos;
  *   - sem plano: o estado vazio documenta o modelo (colunas e exemplo) e oferece
  *     Importar só a quem pode;
- *   - reimportação sobre plano existente exige confirmação ANTES de enviar,
- *     dizendo que as contas ausentes ficam inativas; sucesso mostra as
- *     contagens DA RESPOSTA;
+ *   - toda importação passa pela PRÉVIA do servidor antes de gravar (86e3qhhrm):
+ *     o arquivo vai a `…/import/preview`, a gaveta mostra o que muda (e quantas
+ *     ausentes estão em uso) e só o "Confirmar" importa; a reimportação não
+ *     inativa, e a ausente aparece com o selo na lista; sucesso mostra as
+ *     contagens DA RESPOSTA; "Baixar planilha" exporta o plano;
  *   - recusa 422 vira ESTADO ramificado por `code` (linha × motivo em
  *     português, colunas nomeadas), nunca toast; só código desconhecido é toast;
  *   - seção da conta do banco: pendente em destaque, slot padrão rotulado, nome
@@ -34,6 +36,11 @@ vi.mock('next/navigation', () => ({
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
+const downloadSpy = vi.fn();
+vi.mock('@/lib/download', () => ({
+  triggerBrowserDownload: (...args: unknown[]) => downloadSpy(...args),
+}));
+
 vi.mock('sonner', () => ({
   toast: {
     success: (...args: unknown[]) => toastSuccess(...args),
@@ -63,6 +70,8 @@ let planTotal = 0;
 /** A sonda ainda não respondeu (a lista pode ter chegado antes). */
 let probeLoading = false;
 const importState = { mutateAsync: vi.fn(), isPending: false };
+const previewState = { mutateAsync: vi.fn(), isPending: false };
+const exportState = { mutateAsync: vi.fn(), isPending: false };
 const sourceState = {
   data: [] as SourceAccountEntry[],
   isLoading: false,
@@ -89,6 +98,8 @@ vi.mock('@/hooks/use-client-accounting-chart', () => ({
     return listState;
   },
   useImportAccountingChart: () => importState,
+  usePreviewAccountingChartImport: () => previewState,
+  useExportAccountingChart: () => exportState,
   useSourceAccounts: () => sourceState,
   useSetSourceAccountBinding: () => bindingState,
   useCreateAccountingAccount: () => createAccountState,
@@ -115,6 +126,7 @@ import { ApiError } from '@/lib/api/client';
 import type { ListAccountingChartParams } from '@/lib/api/client-accounting-chart';
 import type {
   AccountingAccount,
+  AccountingChartImportPreview,
   AccountingChartListResponse,
   AuthenticatedUser,
   SourceAccountEntry,
@@ -168,6 +180,28 @@ function account(overrides: Partial<AccountingAccount> = {}): AccountingAccount 
     active: true,
     postable: true,
     updatedAt: '2026-09-28T10:00:00Z',
+    ...overrides,
+  };
+}
+
+function preview(
+  overrides: Partial<AccountingChartImportPreview> = {},
+): AccountingChartImportPreview {
+  return {
+    layout: 'modelo',
+    contas: 3,
+    contasNovas: 1,
+    contasAlteradas: 1,
+    contasSemMudanca: 1,
+    contasAusentes: 0,
+    contasAusentesEmUso: 0,
+    contasQueVoltaram: 0,
+    contasInativasNaPlanilha: 0,
+    temMudancas: true,
+    novas: [{ code: '701', name: 'Cliente novo', type: 'analitica', classification: '1.1.03' }],
+    alteradas: [{ accountId: 'acc-10', code: '10', name: 'Ativo circulante', changes: ['nome'] }],
+    ausentes: [],
+    listLimit: 200,
     ...overrides,
   };
 }
@@ -231,6 +265,10 @@ beforeEach(() => {
   listState.isError = false;
   importState.mutateAsync = vi.fn();
   importState.isPending = false;
+  previewState.mutateAsync = vi.fn().mockResolvedValue(preview());
+  previewState.isPending = false;
+  exportState.mutateAsync = vi.fn();
+  exportState.isPending = false;
   sourceState.data = [
     {
       sourceType: 'omie',
@@ -261,6 +299,7 @@ beforeEach(() => {
   updateAccountState.mutateAsync = vi.fn();
   toastSuccess.mockClear();
   toastError.mockClear();
+  downloadSpy.mockClear();
 });
 
 describe('gating por capacidade (manage_client_accounting_chart)', () => {
@@ -502,58 +541,132 @@ describe('importação', () => {
     return { user, dialog };
   }
 
-  it('primeira importação envia direto e mostra as contagens DA RESPOSTA', async () => {
+  it('primeira importação passa pela prévia e mostra as contagens DA RESPOSTA', async () => {
     withoutPlan();
-    importState.mutateAsync = vi
+    previewState.mutateAsync = vi
       .fn()
-      .mockResolvedValue({ contas: 32, contasNovas: 32, contasInativadas: 0 });
+      .mockResolvedValue(
+        preview({ contas: 32, contasNovas: 32, contasAlteradas: 0, contasSemMudanca: 0 }),
+      );
+    importState.mutateAsync = vi.fn().mockResolvedValue({
+      contas: 32,
+      contasNovas: 32,
+      contasAlteradas: 0,
+      contasAusentes: 0,
+    });
     render(<AccountingChartScreen clientId="c1" />);
 
     const { user, dialog } = await openAndPick(/Importar planilha/);
-    expect(
-      within(dialog).queryByTestId('accounting-chart-reimport-warning'),
-    ).not.toBeInTheDocument();
-    await user.click(within(dialog).getByRole('button', { name: 'Importar' }));
+    expect(within(dialog).queryByTestId('accounting-chart-reimport-note')).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+
+    // 1º clique: só a PRÉVIA — nada foi gravado.
+    const panel = await within(dialog).findByTestId('accounting-chart-import-preview');
+    expect(previewState.mutateAsync).toHaveBeenCalledTimes(1);
+    expect(importState.mutateAsync).not.toHaveBeenCalled();
+    expect(within(panel).getByText('Novas').nextSibling).toHaveTextContent('32');
+    await user.click(within(dialog).getByRole('button', { name: 'Confirmar importação' }));
 
     await waitFor(() => expect(importState.mutateAsync).toHaveBeenCalledTimes(1));
     expect(toastSuccess).toHaveBeenCalledWith(
-      'Plano contábil importado: 32 contas, 32 novas, 0 inativadas.',
+      'Plano contábil importado: 32 contas, 32 novas, 0 alteradas, 0 não vieram.',
     );
     const success = await screen.findByTestId('accounting-chart-import-success');
     expect(within(success).getByText('Contas na planilha').nextSibling).toHaveTextContent('32');
   });
 
-  it('reimportação exige confirmação ANTES de enviar, dizendo que as ausentes ficam inativas', async () => {
-    importState.mutateAsync = vi
-      .fn()
-      .mockResolvedValue({ contas: 30, contasNovas: 1, contasInativadas: 3 });
+  it('reimportação: a prévia diz que a ausente fica com o selo e quantas estão em uso', async () => {
+    previewState.mutateAsync = vi.fn().mockResolvedValue(
+      preview({
+        contasAusentes: 2,
+        contasAusentesEmUso: 1,
+        ausentes: [
+          {
+            accountId: 'acc-662',
+            code: '662',
+            name: 'Aluguel D',
+            nameResolved: true,
+            active: true,
+            inUse: true,
+            absentSince: null,
+          },
+          {
+            accountId: 'acc-999',
+            code: '999',
+            name: 'Sem uso',
+            nameResolved: true,
+            active: true,
+            inUse: false,
+            absentSince: null,
+          },
+        ],
+      }),
+    );
+    importState.mutateAsync = vi.fn().mockResolvedValue({
+      contas: 30,
+      contasNovas: 1,
+      contasAlteradas: 1,
+      contasAusentes: 2,
+    });
     render(<AccountingChartScreen clientId="c1" />);
 
     const { user, dialog } = await openAndPick(/Reimportar planilha/);
-    expect(within(dialog).getByTestId('accounting-chart-reimport-warning')).toHaveTextContent(
-      /que NÃO estiverem na planilha ficarão inativas/,
+    expect(within(dialog).getByTestId('accounting-chart-reimport-note')).toHaveTextContent(
+      /só adiciona e atualiza/,
     );
-    await user.click(within(dialog).getByRole('button', { name: 'Reimportar' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
 
-    // 1º clique: só troca para o passo de confirmação — nada foi enviado.
+    const note = await within(dialog).findByTestId('accounting-chart-preview-absent-note');
+    // A prévia entra NO LUGAR do modelo: no segundo passo ela é o que se lê.
+    expect(
+      within(dialog).queryByRole('region', { name: 'Modelo da planilha' }),
+    ).not.toBeInTheDocument();
+    expect(note).toHaveTextContent('2 contas não vieram nesta planilha');
+    expect(note).toHaveTextContent(/Nenhuma conta é inativada nem apagada/);
+    expect(note).toHaveTextContent(/1 delas está em uso no de-para ou como conta do banco/);
+    const absentList = within(dialog).getByRole('region', { name: 'Contas que não vieram' });
+    expect(absentList).toHaveTextContent('662 · Aluguel D');
+    expect(absentList).toHaveTextContent('em uso');
     expect(importState.mutateAsync).not.toHaveBeenCalled();
-    expect(within(dialog).getByRole('alert')).toHaveTextContent(/ficarão inativas/);
-    await user.click(within(dialog).getByRole('button', { name: 'Confirmar reimportação' }));
 
+    await user.click(within(dialog).getByRole('button', { name: 'Confirmar reimportação' }));
     await waitFor(() => expect(importState.mutateAsync).toHaveBeenCalledTimes(1));
     expect(toastSuccess).toHaveBeenCalledWith(
-      'Plano contábil importado: 30 contas, 1 nova, 3 inativadas.',
+      'Plano contábil importado: 30 contas, 1 nova, 1 alterada, 2 não vieram.',
     );
   });
 
-  it('"Voltar" no passo de confirmação não envia nada', async () => {
+  it('"Voltar" na prévia não importa nada', async () => {
     render(<AccountingChartScreen clientId="c1" />);
     const { user, dialog } = await openAndPick(/Reimportar planilha/);
-    await user.click(within(dialog).getByRole('button', { name: 'Reimportar' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+    await within(dialog).findByTestId('accounting-chart-import-preview');
     await user.click(within(dialog).getByRole('button', { name: 'Voltar' }));
 
-    expect(within(dialog).getByRole('button', { name: 'Reimportar' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Revisar mudanças' })).toBeInTheDocument();
     expect(importState.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('planilha que não muda nada não oferece importar', async () => {
+    previewState.mutateAsync = vi.fn().mockResolvedValue(
+      preview({
+        contasNovas: 0,
+        contasAlteradas: 0,
+        contasSemMudanca: 3,
+        temMudancas: false,
+        novas: [],
+        alteradas: [],
+      }),
+    );
+    render(<AccountingChartScreen clientId="c1" />);
+    const { user, dialog } = await openAndPick(/Reimportar planilha/);
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+
+    expect(
+      await within(dialog).findByText(/Esta planilha não muda nada no plano contábil/),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: /Confirmar/ })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Fechar sem importar' })).toBeInTheDocument();
   });
 
   it('arquivo com extensão fora do par é recusado no cliente, sem request', async () => {
@@ -563,15 +676,16 @@ describe('importação', () => {
       /Importar planilha/,
       new File(['x'], 'plano.pdf', { type: 'application/pdf' }),
     );
-    await user.click(within(dialog).getByRole('button', { name: 'Importar' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
 
     expect(await within(dialog).findByText(/Envie a planilha em CSV/)).toBeInTheDocument();
+    expect(previewState.mutateAsync).not.toHaveBeenCalled();
     expect(importState.mutateAsync).not.toHaveBeenCalled();
   });
 
   it('LINHAS_INVALIDAS vira tabela linha × motivo em português, sem toast', async () => {
     withoutPlan();
-    importState.mutateAsync = vi.fn().mockRejectedValue(
+    previewState.mutateAsync = vi.fn().mockRejectedValue(
       refusal('LINHAS_INVALIDAS', {
         lines: [
           { line: 3, reason: 'codigo_repetido' },
@@ -582,7 +696,7 @@ describe('importação', () => {
     );
     render(<AccountingChartScreen clientId="c1" />);
     const { user, dialog } = await openAndPick(/Importar planilha/);
-    await user.click(within(dialog).getByRole('button', { name: 'Importar' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
 
     const notice = await within(dialog).findByRole('alert');
     expect(notice).toHaveAttribute('data-refusal-code', 'LINHAS_INVALIDAS');
@@ -622,7 +736,7 @@ describe('importação', () => {
       'linha_irreconhecivel',
       'conta_fora_do_bloco',
     ];
-    importState.mutateAsync = vi.fn().mockRejectedValue(
+    previewState.mutateAsync = vi.fn().mockRejectedValue(
       refusal('LINHAS_INVALIDAS', {
         lines: reasons.map((reason, index) => ({ line: 100 + index, reason })),
         total: reasons.length,
@@ -630,7 +744,7 @@ describe('importação', () => {
     );
     render(<AccountingChartScreen clientId="c1" />);
     const { user, dialog } = await openAndPick(/Importar planilha/);
-    await user.click(within(dialog).getByRole('button', { name: 'Importar' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
 
     const notice = await within(dialog).findByRole('alert');
     for (const reason of reasons) {
@@ -649,7 +763,7 @@ describe('importação', () => {
 
   it('CABECALHO_DIVERGENTE nomeia o que falta e CONTA o que veio da planilha', async () => {
     withoutPlan();
-    importState.mutateAsync = vi.fn().mockRejectedValue(
+    previewState.mutateAsync = vi.fn().mockRejectedValue(
       refusal('CABECALHO_DIVERGENTE', {
         missingColumns: ['tipo'],
         repeatedColumns: [],
@@ -659,7 +773,7 @@ describe('importação', () => {
     );
     render(<AccountingChartScreen clientId="c1" />);
     const { user, dialog } = await openAndPick(/Importar planilha/);
-    await user.click(within(dialog).getByRole('button', { name: 'Importar' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
 
     const notice = await within(dialog).findByRole('alert');
     expect(
@@ -685,7 +799,7 @@ describe('importação', () => {
   it('CABECALHO_DIVERGENTE por coluna REPETIDA nomeia a repetida (é do modelo)', async () => {
     withoutPlan();
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    importState.mutateAsync = vi.fn().mockRejectedValue(
+    previewState.mutateAsync = vi.fn().mockRejectedValue(
       refusal('CABECALHO_DIVERGENTE', {
         missingColumns: [],
         repeatedColumns: ['nome'],
@@ -695,7 +809,7 @@ describe('importação', () => {
     );
     render(<AccountingChartScreen clientId="c1" />);
     const { user, dialog } = await openAndPick(/Importar planilha/);
-    await user.click(within(dialog).getByRole('button', { name: 'Importar' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
 
     const notice = await within(dialog).findByRole('alert');
     // `nome` é nome do MODELO, não texto da planilha: pode ser exibido.
@@ -715,7 +829,7 @@ describe('importação', () => {
 
   it('ARQUIVO_INVALIDO sem contas explica o caso; código desconhecido é o único toast', async () => {
     withoutPlan();
-    importState.mutateAsync = vi
+    previewState.mutateAsync = vi
       .fn()
       .mockRejectedValueOnce(refusal('ARQUIVO_INVALIDO', { reason: 'sem_contas' }))
       .mockRejectedValueOnce(
@@ -727,14 +841,72 @@ describe('importação', () => {
       );
     render(<AccountingChartScreen clientId="c1" />);
     const { user, dialog } = await openAndPick(/Importar planilha/);
-    await user.click(within(dialog).getByRole('button', { name: 'Importar' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
     expect(
       await within(dialog).findByText(/não tem nenhuma conta abaixo do cabeçalho/),
     ).toBeInTheDocument();
     expect(toastError).not.toHaveBeenCalled();
 
-    await user.click(within(dialog).getByRole('button', { name: 'Importar' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith('Erro inesperado.'));
+  });
+});
+
+describe('selo e exportação (86e3qhhrm)', () => {
+  it('a conta que não veio na última importação tem o selo, e continua ativa', () => {
+    withPlan([
+      account(),
+      account({ id: 'acc-662', code: '662', absentSince: '2026-10-16T13:05:00Z' }),
+    ]);
+    render(<AccountingChartScreen clientId="c1" />);
+
+    const badges = screen.getAllByTestId('accounting-account-absent-badge');
+    expect(badges).toHaveLength(1);
+    expect(badges[0]).toHaveTextContent('Não veio na última importação');
+    const row = badges[0]?.closest('tr');
+    expect(row).toHaveTextContent('662');
+    expect(row).toHaveTextContent('Ativa');
+  });
+
+  it.each([
+    ['gerente', null],
+    ['operador do cliente', clientOperator],
+  ])('%s baixa a planilha do plano (leitura)', async (_label, user) => {
+    if (user !== null) authState.user = user;
+    const blob = new Blob(['codigo_reduzido;nome;tipo;classificacao\r\n']);
+    exportState.mutateAsync = vi
+      .fn()
+      .mockResolvedValue({ blob, filename: 'plano-contabil-12345678.csv' });
+    render(<AccountingChartScreen clientId="c1" />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Baixar planilha' }));
+
+    await waitFor(() =>
+      expect(downloadSpy).toHaveBeenCalledWith(blob, 'plano-contabil-12345678.csv'),
+    );
+    expect(toastSuccess).toHaveBeenCalledWith('Planilha do plano contábil baixada.');
+  });
+
+  it('sem plano não há o que baixar', () => {
+    withoutPlan();
+    render(<AccountingChartScreen clientId="c1" />);
+    expect(screen.queryByRole('button', { name: 'Baixar planilha' })).not.toBeInTheDocument();
+  });
+
+  it('falha ao baixar vira toast com a mensagem do servidor', async () => {
+    exportState.mutateAsync = vi.fn().mockRejectedValue(
+      new ApiError(409, {
+        code: 'PLANO_CONTABIL_INDECIFRAVEL',
+        message: 'x',
+        userMessage: 'Não foi possível exportar o plano contábil.',
+      }),
+    );
+    render(<AccountingChartScreen clientId="c1" />);
+    await userEvent.click(screen.getByRole('button', { name: 'Baixar planilha' }));
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith('Não foi possível exportar o plano contábil.'),
+    );
+    expect(downloadSpy).not.toHaveBeenCalled();
   });
 });
 

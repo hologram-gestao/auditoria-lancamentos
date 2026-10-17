@@ -484,6 +484,48 @@ describe('troca de seletor por destino', () => {
   });
 });
 
+describe('conta com o selo "não veio na última importação" (86e3qhhrm)', () => {
+  it('a conta vigente com o selo mostra o aviso ao abrir a gaveta', async () => {
+    listState.data = listWith([item({ accountingAccountAbsentSince: '2026-10-16T13:05:00Z' })]);
+    const { dialog } = await openDecision('Alterar a categoria 2.01.01');
+
+    expect(within(dialog).getByTestId('accounting-decision-absent-warning')).toHaveTextContent(
+      /Não veio na última importação desde .*pode não existir mais no sistema contábil/,
+    );
+  });
+
+  it('sem o selo, nenhum aviso; escolher uma conta com o selo mostra o aviso', async () => {
+    planAccounts.push({
+      id: 'acc-662',
+      code: '662',
+      classification: '4.1.02',
+      name: 'Aluguel antigo',
+      nameResolved: true,
+      type: 'analitica',
+      active: true,
+      postable: true,
+      absentSince: '2026-10-16T13:05:00Z',
+      updatedAt: '2026-10-16T13:05:00Z',
+    });
+    const { user, dialog } = await openDecision('Alterar a categoria 2.01.01');
+    expect(
+      within(dialog).queryByTestId('accounting-decision-absent-warning'),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      within(dialog).getByRole('button', { name: /Conta do plano contábil do cliente: 5101/ }),
+    );
+    // O rótulo da opção já avisa antes de escolher.
+    await user.click(
+      await screen.findByRole('option', {
+        name: '662 — Aluguel antigo (não veio na última importação)',
+      }),
+    );
+
+    expect(within(dialog).getByTestId('accounting-decision-absent-warning')).toBeInTheDocument();
+  });
+});
+
 describe('histórico padrão — limite do contrato', () => {
   it('acima de 500 caracteres: erro de validação e nenhum request', async () => {
     const { user, dialog } = await openDecision('Alterar a categoria 2.01.01');
