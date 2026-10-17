@@ -1988,6 +1988,8 @@ class TestPlanoContabilRoundTrip:
             # 86e3n70p9 (`b2f7c9e41d06`): a chave da ordem da classificação, em claro
             # como o código (é derivada dele e da classificação, nunca do nome).
             "sort_key",
+            # 86e3qhhrm (`a94a539e1d34`): o selo "não veio na última importação", só data.
+            "absent_since",
         )
         assert _columns(url, "client_accounting_accounts", *columns) == len(columns)
         assert _scalar(
@@ -2797,3 +2799,42 @@ class TestMaquinaDeEstadosDoLancamentoRoundTrip:
                 "UPDATE reconciliation_omie_postings SET kind = 'direto' WHERE id = :pid",
                 pid=posting_id,
             )
+
+
+class TestSeloDeAusenteRoundTrip:
+    """86e3qhhrm — `absent_since` sobe, desce de verdade (sem levar a conta) e sobe."""
+
+    def test_ciclo_converge_e_a_conta_fica(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        assert _columns(url, "client_accounting_accounts", "absent_since") == 1
+        assert (
+            _scalar(
+                url,
+                "SELECT is_nullable || ':' || data_type FROM information_schema.columns "
+                "WHERE table_name = 'client_accounting_accounts' "
+                "AND column_name = 'absent_since'",
+            )
+            == "YES:timestamp with time zone"
+        )
+        client_id = _seed_client_row(url)
+        _execute(
+            url,
+            _INSERT_CLASSIFIED_ACCOUNT,
+            cid=client_id,
+            code="649",
+            classification="1.1.1.02.001",
+            iv="0" * 24,
+            uid=_creator_of(url, client_id),
+        )
+
+        for _ in range(2):
+            command.downgrade(alembic_cfg, "d9f3b6a2e815")
+            assert _columns(url, "client_accounting_accounts", "absent_since") == 0
+            assert _scalar(url, "SELECT count(*) FROM client_accounting_accounts") == 1
+            command.upgrade(alembic_cfg, "head")
+
+        assert _columns(url, "client_accounting_accounts", "absent_since") == 1
+        assert "a94a539e1d34" in _revisions_in_chain(alembic_cfg)
