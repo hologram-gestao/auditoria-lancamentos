@@ -621,6 +621,31 @@ export type AccountingAccountCreateRequest = Schemas['AccountingAccountCreateReq
 export type AccountingAccountUpdateRequest = Schemas['AccountingAccountUpdateRequest'];
 
 /**
+ * Vínculo conta ↔ cliente/fornecedor (86e3qhhrn): `cliente` | `fornecedor`, de que
+ * relatório do Domínio o vínculo veio. Enum FECHADO.
+ */
+export type AccountingPartyType = Schemas['AccountingPartyType'];
+/**
+ * A resposta da importação de uma RELAÇÃO DE CLIENTES/FORNECEDORES: o tipo, as
+ * contagens e as linhas que ficaram SEM vínculo (`naoVinculadas`, com motivo fechado e o
+ * código da conta; nunca o documento). Chave ÚNICA `data`: chega desempacotada.
+ */
+export type AccountingPartiesImportResult = Schemas['PartiesImportPayload'];
+export type AccountingPartySkippedLine = Schemas['PartySkippedLine'];
+/**
+ * Uma conta do plano COM vínculo: tipo e documento MASCARADO (`documentMasked`,
+ * `null` quando não decifrou). O documento inteiro nunca sai da API.
+ */
+export type AccountingPartyLink = Schemas['PartyLinkResponse'];
+/** `{ data, pagination, summary }` — TRÊS chaves: o `apiGet` entrega o objeto inteiro. */
+export type AccountingPartyLinksListResponse = Schemas['PartyLinksListResponse'];
+export type AccountingPartyLinksSummary = Schemas['PartyLinksSummaryPayload'];
+/** Query real de `GET …/accounting-chart/parties` (`page`, `pageSize`, `type`). */
+export type ListAccountingPartiesQuery = NonNullable<
+  paths['/api/v1/clients/{client_id}/accounting-chart/parties']['get']['parameters']['query']
+>;
+
+/**
  * Uma conta de ORIGEM (ou o slot da conta PADRÃO, `sourceAccountId: null`) com
  * a conta contábil do banco associada ou `pending: true`.
  */

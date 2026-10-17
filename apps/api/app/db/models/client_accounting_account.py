@@ -122,6 +122,49 @@ def accounting_account_type_check() -> str:
     return f"account_type IN ({values})"
 
 
+class AccountingPartyType(StrEnum):
+    """De que relatório do Domínio veio o vínculo conta ↔ pessoa (86e3qhhrn).
+
+    Fonte ÚNICA do CHECK `party_type`. `cliente` vem da "RELAÇÃO DE CLIENTES" e
+    `fornecedor` da "RELAÇÃO DE FORNECEDORES"; a conta que aparece nos dois fica com o
+    tipo do ÚLTIMO relatório importado (a mesma pessoa pode ser as duas coisas).
+    """
+
+    CLIENTE = "cliente"
+    FORNECEDOR = "fornecedor"
+
+
+#: Rótulos dos CHECKs do vínculo (86e3qhhrn) — a `NAMING_CONVENTION` prefixa
+#: `ck_client_accounting_accounts_`.
+ACCOUNTING_ACCOUNT_PARTY_PAIR_CK_LABEL = "party_pair"
+ACCOUNTING_ACCOUNT_PARTY_TYPE_CK_LABEL = "party_type"
+ACCOUNTING_ACCOUNT_PARTY_PAIR_CONSTRAINT = (
+    f"ck_client_accounting_accounts_{ACCOUNTING_ACCOUNT_PARTY_PAIR_CK_LABEL}"
+)
+ACCOUNTING_ACCOUNT_PARTY_TYPE_CONSTRAINT = (
+    f"ck_client_accounting_accounts_{ACCOUNTING_ACCOUNT_PARTY_TYPE_CK_LABEL}"
+)
+
+
+def accounting_account_party_pair_check() -> str:
+    """Predicado SQL do CHECK do vínculo — copiado na migration.
+
+    O documento cifrado, o IV dele e o tipo do vínculo vivem e morrem JUNTOS: ou a
+    conta tem os três (vinculada) ou nenhum (sem vínculo). Um `party_type` sem
+    documento seria um vínculo com ninguém.
+    """
+    return (
+        "(party_document_encrypted IS NULL) = (party_document_iv IS NULL) "
+        "AND (party_document_encrypted IS NULL) = (party_type IS NULL)"
+    )
+
+
+def accounting_account_party_type_check() -> str:
+    """Predicado SQL do CHECK do tipo do vínculo, montado do enum — copiado na migration."""
+    values = ", ".join(f"'{member.value}'" for member in AccountingPartyType)
+    return f"party_type IS NULL OR party_type IN ({values})"
+
+
 class ClientAccountingAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Uma conta do plano contábil do cliente."""
 
@@ -135,6 +178,14 @@ class ClientAccountingAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         CheckConstraint(
             text(accounting_account_type_check()), name=ACCOUNTING_ACCOUNT_TYPE_CK_LABEL
+        ),
+        CheckConstraint(
+            text(accounting_account_party_pair_check()),
+            name=ACCOUNTING_ACCOUNT_PARTY_PAIR_CK_LABEL,
+        ),
+        CheckConstraint(
+            text(accounting_account_party_type_check()),
+            name=ACCOUNTING_ACCOUNT_PARTY_TYPE_CK_LABEL,
         ),
         Index(IX_ACCOUNTING_ACCOUNT_CLIENT_SORT_KEY, "client_id", "sort_key"),
     )
@@ -189,6 +240,18 @@ class ClientAccountingAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     #: segue ausente fica a data da PRIMEIRA importação em que sumiu; limpa quando
     #: ela volta. A conta continua ativa: o selo avisa, não bloqueia.
     absent_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # ---- vínculo conta ↔ cliente/fornecedor (86e3qhhrn) -------------------------
+    #: O CNPJ ou CPF da pessoa a quem a conta pertence no sistema contábil, como veio
+    #: da "RELAÇÃO DE CLIENTES/FORNECEDORES" do Domínio. SEMPRE cifrado com a DEK do
+    #: cliente (`AAD_ACCOUNTING_ACCOUNT_PARTY_DOCUMENT`, pk da conta no AAD): documento
+    #: é dado do cliente final (§4.5). Só os 11 ou 14 dígitos, sem máscara. Nula =
+    #: conta sem vínculo. O CHECK `party_pair` amarra documento, IV e tipo.
+    party_document_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    party_document_iv: Mapped[str | None] = mapped_column(String(IV_HEX_LENGTH), nullable=True)
+    #: `cliente` ou `fornecedor` (`AccountingPartyType`): de que relatório veio o
+    #: vínculo. Em claro: é vocabulário fechado, não identifica ninguém.
+    party_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     #: Quem importou a planilha que criou/atualizou a linha. RESTRICT (ADR-074-BE):
     #: por isso a exclusão definitiva apaga o plano ANTES dos usuários do tenant.

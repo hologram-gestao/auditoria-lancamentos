@@ -6,6 +6,8 @@
     - GET  /api/v1/clients/{client_id}/accounting-chart/export   (CSV, 86e3qhhrm)
     - POST  /api/v1/clients/{client_id}/accounting-chart/accounts               (86e3nb816)
     - PATCH /api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}  (86e3nb816)
+    - POST /api/v1/clients/{client_id}/accounting-chart/parties/import  (multipart, 86e3qhhrn)
+    - GET  /api/v1/clients/{client_id}/accounting-chart/parties          (86e3qhhrn)
 
 ⚠️ Não é o plano da ORIGEM da S10 (`/chart-of-accounts`, categorias do Omie): este é
 o do sistema contábil de DESTINO, onde o escritório lança.
@@ -49,6 +51,7 @@ from app.core.dependencies import (
 from app.db.models.client_accounting_account import (
     MAX_ACCOUNTING_ACCOUNT_CODE_CHARS,
     AccountingAccountType,
+    AccountingPartyType,
 )
 from app.modules.client_accounting_chart.export import EXPORT_MEDIA_TYPE, export_filename
 from app.modules.client_accounting_chart.repository import AccountingChartFilters
@@ -63,6 +66,11 @@ from app.modules.client_accounting_chart.schemas import (
     ChartImportPayload,
     ChartImportPreviewEnvelope,
     ChartImportPreviewPayload,
+    PartiesImportEnvelope,
+    PartiesImportPayload,
+    PartyLinkResponse,
+    PartyLinksListResponse,
+    PartyLinksSummaryPayload,
 )
 from app.modules.client_accounting_chart.service import AccountingChartService
 from app.modules.users.schemas import PaginationMeta
@@ -340,3 +348,94 @@ async def update_accounting_account(
         client, account_id, actor=actor, patch=body.to_patch()
     )
     return AccountingAccountEnvelope(data=AccountingAccountResponse.from_row(account, names=names))
+
+
+@router.post(
+    "/parties/import",
+    summary=(
+        "Importa a RELAÇÃO DE CLIENTES ou a RELAÇÃO DE FORNECEDORES exportada do Domínio "
+        "(XLS ou XLSX, reconhecida pelo título e pelo cabeçalho `Código`/`Conta`/`Nome`/"
+        "`Razão Social`/`C.N.P.J./C.P.F.`, em qualquer ordem de colunas) e vincula cada "
+        "conta do plano contábil do cliente (a coluna `Conta` é o código reduzido) ao "
+        "CNPJ ou CPF da pessoa, cifrado com a chave do cliente. O tipo do vínculo "
+        "(`cliente`/`fornecedor`) vem do título do relatório. Por arquivo, tudo ou nada: "
+        "conta que não existe no plano ou é sintética recusa o arquivo inteiro com 422 "
+        "`LINHAS_INVALIDAS` (`details.lines=[{line, reason, accountCode}]`, `reason` ∈ "
+        "`conta_nao_encontrada`, `conta_sintetica`, `conta_ausente`, `linha_fora_do_bloco`). "
+        "Não recusam, mas ficam SEM vínculo e voltam em `naoVinculadas`: conta `0` "
+        "(`sem_conta`), `documento_ausente`, `documento_invalido` (dígito verificador "
+        "errado no Domínio) e `conta_compartilhada` (a mesma conta em mais de uma pessoa). "
+        "Reimportar é idempotente; a conta vinculada que não vem no relatório fica como "
+        "está. O CNPJ da empresa no cabeçalho do relatório é comparado (por impressão "
+        "digital, nunca em claro) com o dos relatórios já importados: outra empresa é 422 "
+        "`RELATORIO_DE_OUTRA_EMPRESA`. Arquivo que não é a relação: 422 "
+        "`CABECALHO_DIVERGENTE`; sem título ou sem o CNPJ da empresa: 422 `ARQUIVO_INVALIDO` "
+        "com `details.reason` (`relatorio_nao_reconhecido`, `empresa_nao_identificada`, "
+        "`sem_pessoas`); CSV ou PDF: 422 `FORMATO_NAO_SUPORTADO`. Requer "
+        "`manage_client_accounting_chart`; cliente encerrado 409. Nenhum documento, nome "
+        "ou razão social sai na resposta nem vai para o log."
+    ),
+)
+async def import_accounting_parties(
+    request: Request,
+    client: OpenClientDep,
+    actor: ManageClientAccountingChartDep,
+    settings: SettingsDep,
+    service: ServiceDep,
+    file: Annotated[
+        UploadFile,
+        File(
+            description="A RELAÇÃO DE CLIENTES ou a RELAÇÃO DE FORNECEDORES do Domínio (XLS/XLSX)."
+        ),
+    ],
+) -> PartiesImportEnvelope:
+    content = await read_upload_within_limit(
+        file,
+        declared_content_length=parse_content_length(request.headers.get("content-length")),
+        max_bytes=settings.max_upload_bytes,
+    )
+    result = await service.import_parties(client, actor=actor, content=content)
+    return PartiesImportEnvelope(data=PartiesImportPayload.from_result(result))
+
+
+@router.get(
+    "/parties",
+    summary=(
+        "Lista as contas do plano contábil do cliente COM vínculo a um cliente ou "
+        "fornecedor (importado das relações do Domínio): conta, nome (decifrado na "
+        "leitura), tipo do vínculo e o documento MASCARADO (`**.***.***/0001-91` para "
+        "CNPJ, `***.***.*89-00` para CPF; o inteiro nunca sai da API), paginado "
+        "(`page`/`pageSize`, máximo 100) na ordem do plano, com o filtro `type` "
+        "(`cliente`/`fornecedor`) e o resumo `summary` (`contasVinculadas`, `clientes`, "
+        "`fornecedores`). Requer `manage_client_accounting_chart` (documento de terceiro é "
+        "configuração do escritório); cliente encerrado continua legível, com o documento "
+        "sem máscara nenhuma (`documentResolved=false`)."
+    ),
+)
+async def list_accounting_parties(
+    client: AccessibleClientDep,
+    actor: ManageClientAccountingChartDep,
+    service: ServiceDep,
+    page: Annotated[int, Query(ge=1, description="Página, a partir de 1.")] = 1,
+    page_size: Annotated[
+        int,
+        Query(ge=1, le=100, alias="pageSize", description="Itens por página (máx. 100)."),
+    ] = 20,
+    party_type: Annotated[
+        AccountingPartyType | None,
+        Query(alias="type", description="`cliente` ou `fornecedor`. Ausente = os dois."),
+    ] = None,
+) -> PartyLinksListResponse:
+    rows, total, names, documents, summary = await service.list_parties(
+        client, party_type=party_type, limit=page_size, offset=(page - 1) * page_size
+    )
+    return PartyLinksListResponse(
+        data=[PartyLinkResponse.from_row(row, names=names, documents=documents) for row in rows],
+        pagination=PaginationMeta(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=(total + page_size - 1) // page_size,
+        ),
+        summary=PartyLinksSummaryPayload.from_summary(summary),
+    )

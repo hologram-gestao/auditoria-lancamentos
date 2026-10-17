@@ -698,6 +698,16 @@ class ClientRepository:
         await s.execute(
             delete(ClientAccountingAccount).where(ClientAccountingAccount.client_id == client_id)
         )
+        # 86e3qhhrn: a impressão digital da empresa dos relatórios de terceiros é
+        # IDENTIDADE (um HMAC do CNPJ dela) e sai com o nome. Em Core, e não só no
+        # atributo da instância: um `Client` que a sessão já tinha com o valor antigo
+        # (`None`) não geraria o UPDATE pelo ORM, e a impressão sobreviveria ao
+        # encerramento.
+        await s.execute(
+            update(Client)
+            .where(Client.id == client_id)
+            .values(party_reports_company_fingerprint=None)
+        )
         await s.execute(delete(OmieAccountCache).where(OmieAccountCache.client_id == client_id))
         await s.execute(delete(Notification).where(Notification.client_id == client_id))
         await s.execute(delete(UserClientFavorite).where(UserClientFavorite.client_id == client_id))

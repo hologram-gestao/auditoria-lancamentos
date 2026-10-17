@@ -49,8 +49,10 @@ from app.modules.usage_events.schemas import (
     OmieLancamentoRejeitadoProps,
     OrganizacaoCriadaProps,
     OrganizacaoDesativadaProps,
+    PartyReportKind,
     PlanoContabilContaEditadaProps,
     PlanoContabilImportadoProps,
+    PlanoContabilVinculosImportadosProps,
     PlanoContasSincronizadoProps,
     QualificacaoEmitidaProps,
     RecebiveisClassificadosProps,
@@ -709,6 +711,39 @@ class UsageEventService:
                 account_id=account_id,
                 operacao=operacao,
                 campos=list(campos),
+            ),
+        )
+        if props is None:
+            return False
+        return await self.emit(event, props=props)
+
+    async def emit_plano_contabil_vinculos_importados(
+        self,
+        *,
+        client_id: UUID,
+        relatorio: PartyReportKind,
+        linhas: int,
+        vinculos_novos: int,
+        vinculos_atualizados: int,
+        vinculos_sem_mudanca: int,
+        nao_vinculadas: int,
+    ) -> bool:
+        """86e3qhhrn — uma relação de clientes/fornecedores do Domínio foi importada.
+
+        O ponto de chamada é `AccountingChartService.import_parties`, DEPOIS do commit:
+        recusa 422 não emite. Props no caminho fail-soft, sem `session_id`, sem dedup.
+        """
+        event = UsageEventName.PLANO_CONTABIL_VINCULOS_IMPORTADOS
+        props = self._props_or_none(
+            event,
+            lambda: PlanoContabilVinculosImportadosProps(
+                client_id=client_id,
+                relatorio=relatorio,
+                linhas=linhas,
+                vinculos_novos=vinculos_novos,
+                vinculos_atualizados=vinculos_atualizados,
+                vinculos_sem_mudanca=vinculos_sem_mudanca,
+                nao_vinculadas=nao_vinculadas,
             ),
         )
         if props is None:

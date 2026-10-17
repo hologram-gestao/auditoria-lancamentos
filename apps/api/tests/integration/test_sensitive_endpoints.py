@@ -51,6 +51,7 @@ from app.db.models import (
 )
 from app.main import app as fastapi_app
 from app.modules.export_layouts.definition import DOMINIO_TEMPLATE
+from tests.parties_builder import VALID_CNPJS, build_parties_xlsx
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
@@ -325,6 +326,20 @@ _MULTIPART: dict[str, tuple[dict[str, tuple[str, bytes, str]], dict[str, str]]] 
     # 86e3qhhrm: a prévia lê a MESMA planilha válida e não grava.
     "POST /api/v1/clients/{client_id}/accounting-chart/import/preview": (
         {"file": ("plano.csv", _PLANO_DA_BATERIA, "text/csv")},
+        {},
+    ),
+    # 86e3qhhrn: a relação de clientes do Domínio, VÁLIDA na forma (ADR-012) — a conta
+    # pode nem existir no plano do alvo: quem tem de negar primeiro é o guard.
+    "POST /api/v1/clients/{client_id}/accounting-chart/parties/import": (
+        {
+            "file": (
+                "relacao.xlsx",
+                build_parties_xlsx(
+                    "cliente", [(1, 649, "Pessoa da bateria", "Pessoa da bateria", VALID_CNPJS[0])]
+                ),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
         {},
     ),
 }
