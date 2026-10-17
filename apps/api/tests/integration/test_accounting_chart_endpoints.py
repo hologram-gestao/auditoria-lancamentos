@@ -547,7 +547,11 @@ class TestListagem:
             world.client,
             _csv("codigo_reduzido;nome;tipo;classificacao", "100;Fornecedor;analitica;1.2"),
         )
-        reimportada = await client_with_db.get(_url(world.client), params={"status": "ativa"})
+        # 86e3qhhrm: as outras 8 não vieram, continuam ativas e ganham o selo.
+        ativas = await client_with_db.get(_url(world.client), params={"status": "ativa"})
+        assert ativas.json()["pagination"]["total"] == 9
+        assert {i["code"] for i in ativas.json()["data"] if i["absentSince"] is None} == {"100"}
+        reimportada = await client_with_db.get(_url(world.client), params={"code": "100"})
         assert [i["code"] for i in reimportada.json()["data"]] == ["100"]
         assert reimportada.json()["data"][0]["classification"] == "1.2"
         chave = await db_session.execute(
