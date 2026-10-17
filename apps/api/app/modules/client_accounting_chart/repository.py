@@ -326,14 +326,13 @@ class AccountingChartRepository:
         return (await self._session.execute(stmt)).scalar_one()
 
     async def set_company_fingerprint(self, client_id: UUID, fingerprint: str) -> None:
-        """Grava a impressão digital da empresa SÓ se ainda não há uma (convergente)."""
+        """Grava a impressão digital da empresa. Quem decide se pode (nula, ou diferente
+        sem nenhum vínculo gravado) é o serviço, sob o `FOR UPDATE` de
+        `company_fingerprint_for_update`."""
         table = cast(Table, Client.__table__)
         stmt = (
             update(table)
-            .where(
-                table.c.id == client_id,
-                table.c.party_reports_company_fingerprint.is_(None),
-            )
+            .where(table.c.id == client_id)
             .values(party_reports_company_fingerprint=fingerprint)
         )
         await self._session.execute(stmt)

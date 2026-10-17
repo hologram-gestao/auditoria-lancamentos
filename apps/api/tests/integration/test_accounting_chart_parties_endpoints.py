@@ -191,7 +191,7 @@ class TestAsDuasRelacoesDaHologram:
         assert resp.status_code == 200, resp.text
         data = resp.json()["data"]
         assert data["relatorio"] == "cliente"
-        assert (data["linhas"], data["contasVinculadas"], data["vinculosNovos"]) == (89, 89, 89)
+        assert (data["linhas"], data["contasVinculadas"], data["vinculosNovos"]) == (91, 89, 89)
         assert data["naoVinculadas"] == []
         assert data["naoVinculadasTotal"] == 0
 
@@ -345,6 +345,41 @@ class TestTudoOuNadaPorArquivo:
         assert resp.json()["error"]["code"] == "FORMATO_NAO_SUPORTADO"
 
 
+class TestEmpresaEDek:
+    async def test_relatorio_so_com_pulos_nao_provisiona_dek_nem_grava_a_empresa(
+        self, client_with_db: AsyncClient, world: World, db_session: AsyncSession
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        await _import_plan(client_with_db, world.client, _plan_csv({"649"}))
+        content = build_parties_xlsx(
+            "fornecedor", [(1, 0, "Sem conta", "Sem conta", VALID_CNPJS[0])], company=_OTHER_COMPANY
+        )
+        resp = await _import_parties(client_with_db, world.client, content, filename="r.xlsx")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert (data["linhas"], data["contasVinculadas"], data["naoVinculadasTotal"]) == (1, 0, 1)
+        await db_session.refresh(world.client)
+        assert world.client.party_reports_company_fingerprint is None
+        # E a empresa certa entra depois, sem a recusa de "outra empresa".
+        resp = await _import_parties(client_with_db, world.client, _CLIENTS.read_bytes())
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["error"]["code"] == "LINHAS_INVALIDAS"
+
+    async def test_empresa_gravada_sem_nenhum_vinculo_pode_ser_trocada(
+        self, client_with_db: AsyncClient, world: World, db_session: AsyncSession
+    ) -> None:
+        """A impressão digital de uma empresa SEM vínculo gravado (estado que só um
+        caminho futuro de desvincular produz) não prende o cliente à empresa errada."""
+        await _login(client_with_db, world.admin)
+        await _import_plan(client_with_db, world.client, _plan_csv(_codes_in_fixture()))
+        world.client.party_reports_company_fingerprint = "f" * 64
+        await db_session.flush()
+        resp = await _import_parties(client_with_db, world.client, _CLIENTS.read_bytes())
+        assert resp.status_code == 200, resp.text
+        await db_session.refresh(world.client)
+        assert world.client.party_reports_company_fingerprint not in (None, "f" * 64)
+
+
 class TestPermissaoEEncerramento:
     async def test_client_manager_le_o_plano_mas_nao_ve_nem_importa_vinculos(
         self, client_with_db: AsyncClient, world: World, db_session: AsyncSession
@@ -413,7 +448,7 @@ class TestNadaDePIIForaDoLugar:
         assert len(events) == 1
         props = events[0].props
         assert props["relatorio"] == "cliente"
-        assert (props["linhas"], props["vinculos_novos"], props["nao_vinculadas"]) == (89, 89, 0)
+        assert (props["linhas"], props["vinculos_novos"], props["nao_vinculadas"]) == (91, 89, 0)
         assert set(props) == {
             "client_id",
             "relatorio",

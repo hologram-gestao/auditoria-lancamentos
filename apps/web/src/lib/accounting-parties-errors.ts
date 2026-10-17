@@ -29,6 +29,7 @@ export type AccountingPartiesRefusalCode = (typeof ACCOUNTING_PARTIES_REFUSAL_CO
 export const PARTY_LINE_REASON_LABELS: Record<string, string> = {
   // Recusam o arquivo inteiro.
   conta_ausente: 'Linha com documento mas sem a conta (coluna Conta)',
+  conta_invalida: 'A coluna Conta tem um valor que não é um número inteiro',
   linha_fora_do_bloco:
     'Pessoa depois da linha de total do relatório: o arquivo inteiro foi recusado para nenhuma ficar de fora',
   conta_nao_encontrada: 'Conta não encontrada no plano contábil do cliente',
@@ -36,7 +37,8 @@ export const PARTY_LINE_REASON_LABELS: Record<string, string> = {
   // Não recusam: a linha fica sem vínculo.
   sem_conta: 'Sem conta no Domínio (conta 0)',
   documento_ausente: 'Sem CNPJ ou CPF no Domínio',
-  documento_invalido: 'CNPJ ou CPF com dígito verificador errado no Domínio',
+  documento_invalido:
+    'CNPJ ou CPF inválido no relatório (dígito verificador errado, ou zeros à esquerda perdidos numa célula numérica)',
   conta_compartilhada:
     'Conta compartilhada por mais de uma pessoa: o vínculo precisa ser um para um',
 };

@@ -49,7 +49,6 @@ impede importar o relatório de OUTRO cliente por engano.
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NoReturn
 
@@ -63,6 +62,7 @@ from app.core.exceptions import (
 )
 from app.db.models.client_accounting_account import AccountingPartyType
 from app.db.models.client_input_mapping import InputFileFormat
+from app.modules.client_accounting_chart.sheet import fold_text
 from app.modules.client_file_ingestion.reader import (
     MAX_INVALID_LINES_REPORTED,
     detect_format,
@@ -107,6 +107,8 @@ EXPECTED_PARTY_COLUMNS: tuple[str, ...] = (
 type PartyLineReason = Literal[
     # A linha do bloco tem documento mas não tem a conta (código reduzido) na coluna `Conta`.
     "conta_ausente",
+    # A coluna `Conta` tem algo que não é um número inteiro (`685A`).
+    "conta_invalida",
     # Linha com cara de pessoa DEPOIS do fim do bloco: seria descartada calada.
     "linha_fora_do_bloco",
     # Decididos pelo SERVIÇO, contra o plano do cliente (pedido da task: tudo ou nada):
@@ -190,6 +192,8 @@ class PartiesReport:
     company_document: str
     lines: list[PartyLine]
     skipped: list[PartyLineProblem]
+    #: Linhas de pessoa no relatório (vinculáveis + sem vínculo + repetidas).
+    persons: int
 
     def __repr__(self) -> str:
         return (
@@ -199,9 +203,8 @@ class PartiesReport:
 
 
 def _fold(text: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", text.strip().lower())
-    folded = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-    return re.sub(r"\s+", " ", folded)
+    """A dobra do `sheet.py` mais o colapso de espaços (os títulos vêm com dois)."""
+    return re.sub(r"\s+", " ", fold_text(text))
 
 
 def _filled(cells: Sequence[Any]) -> list[tuple[int, Any]]:
@@ -216,8 +219,12 @@ def _as_int(value: Any) -> int | None:
         return value
     if isinstance(value, float) and value.is_integer():
         return int(value)
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
+    if isinstance(value, str):
+        text = value.strip()
+        # `isdigit()` aceita `²` e dígitos de outros alfabetos, que `int()` recusa com
+        # ValueError (seria 500): só dígitos ASCII contam.
+        if text.isascii() and text.isdigit():
+            return int(text)
     return None
 
 
@@ -273,13 +280,10 @@ def _find_company(rows: Sequence[tuple[int, Sequence[Any]]], header_line: int) -
                 and _fold(cell) == _COMPANY_LABEL
                 and position + 1 < len(filled)
             ):
-                value = filled[position + 1][1]
-                if not isinstance(value, str):
+                normalized = normalize_document(filled[position + 1][1])
+                if normalized is None or normalized[1] != "cnpj":
                     return None
-                try:
-                    return normalize_cnpj(value)
-                except ValueError:
-                    return None
+                return normalized[0]
     return None
 
 
@@ -287,9 +291,10 @@ def normalize_document(raw: Any) -> tuple[str, DocumentKind] | None:
     """Os dígitos de um CNPJ ou CPF válido e qual dos dois é, ou `None`.
 
     Texto é lido como texto (com ou sem máscara), nunca convertido em número: um
-    CNPJ que começa com zeros perderia os zeros. Célula NUMÉRICA (um CPF sem máscara
-    pode chegar como número) vira texto, e o zero à esquerda que o Excel perdeu é
-    reposto quando o tamanho fica a um dígito de um dos dois formatos — nunca mais.
+    CNPJ que começa com zeros perderia os zeros. Célula NUMÉRICA (um documento sem
+    máscara pode chegar como número) vira texto, e os zeros à esquerda que o Excel
+    perdeu são repostos pelo tamanho que sobrou (9 a 11 dígitos é CPF, 12 a 14 é CNPJ),
+    com o verificador confirmando; número mais curto não se recupera.
     """
     if raw is None or isinstance(raw, bool):
         return None
@@ -301,10 +306,20 @@ def normalize_document(raw: Any) -> tuple[str, DocumentKind] | None:
         if number is None:
             return None
         digits = str(number)
-        # Célula NUMÉRICA perde o zero à esquerda no Excel: UM é reposto quando o
-        # tamanho fica a um dígito de um dos dois formatos, nunca mais do que isso.
-        if len(digits) in (10, 13):
-            digits = digits.zfill(len(digits) + 1)
+        # Célula NUMÉRICA perde os zeros à esquerda no Excel. O tamanho que sobrou diz
+        # o formato (9 a 11 dígitos é CPF, 12 a 14 é CNPJ); os zeros são repostos e o
+        # DÍGITO VERIFICADOR confirma. Menos que isso não se recupera: um número curto
+        # completado caberia nos dois formatos, e o verificador aceitaria um deles por
+        # acaso.
+        if 9 <= len(digits) <= 11:
+            return _validated_document(digits.zfill(11))
+        if 12 <= len(digits) <= 14:
+            return _validated_document(digits.zfill(14))
+        return None
+    return _validated_document(digits)
+
+
+def _validated_document(digits: str) -> tuple[str, DocumentKind] | None:
     try:
         if len(digits) == 14:
             return normalize_cnpj(digits), "cnpj"
@@ -328,12 +343,28 @@ def _cell(cells: Sequence[Any], col: int) -> Any:
     return cells[col] if col < len(cells) else None
 
 
+@dataclass(frozen=True, slots=True)
+class ConvertedParties:
+    """O bloco convertido: vinculáveis, pulos (sem vínculo), recusas e as linhas que
+    repetiam uma pessoa já lida (contam como pessoa, não viram vínculo duplicado)."""
+
+    lines: list[PartyLine]
+    skipped: list[PartyLineProblem]
+    problems: list[PartyLineProblem]
+    repeated: int
+
+    @property
+    def persons(self) -> int:
+        """Quantas linhas de pessoa o relatório tem, como a pessoa as conta no Excel."""
+        return len(self.lines) + len(self.skipped) + self.repeated
+
+
 def convert_parties(
     rows: Sequence[tuple[int, Sequence[Any]]],
     header_line: int,
     columns: dict[PartyColumn, int],
-) -> tuple[list[PartyLine], list[PartyLineProblem], list[PartyLineProblem]]:
-    """Converte o bloco de pessoas abaixo do cabeçalho: `(vinculáveis, pulos, recusas)`.
+) -> ConvertedParties:
+    """Converte o bloco de pessoas abaixo do cabeçalho em `ConvertedParties`.
 
     Função PURA. O bloco termina na primeira linha preenchida sem cara de pessoa (a
     linha de total); tudo depois só é conferido, e linha com cara de pessoa ali vira
@@ -359,9 +390,12 @@ def convert_parties(
         if not _looks_like_party(cells, columns):
             break
         position += 1
-        account = _as_int(_cell(cells, columns["conta"]))
+        raw_account = _cell(cells, columns["conta"])
+        account = _as_int(raw_account)
         if account is None:
-            problems.append(PartyLineProblem(line, "conta_ausente"))
+            problems.append(
+                PartyLineProblem(line, "conta_ausente" if raw_account is None else "conta_invalida")
+            )
             continue
         code = str(account)
         if account == 0:
@@ -389,6 +423,7 @@ def convert_parties(
         documents_by_code.setdefault(candidate.account_code, set()).add(candidate.document)
     lines: list[PartyLine] = []
     seen: set[str] = set()
+    repeated = 0
     for candidate in candidates:
         if len(documents_by_code[candidate.account_code]) > 1:
             skipped.append(
@@ -396,11 +431,12 @@ def convert_parties(
             )
             continue
         if candidate.account_code in seen:
+            repeated += 1
             continue
         seen.add(candidate.account_code)
         lines.append(candidate)
     skipped.sort(key=lambda p: p.line)
-    return lines, skipped, problems
+    return ConvertedParties(lines=lines, skipped=skipped, problems=problems, repeated=repeated)
 
 
 def _raise_invalid_file(reason: str | None = None) -> NoReturn:
@@ -471,11 +507,15 @@ def parse_parties_report(content: bytes) -> PartiesReport:
     if company is None:
         _raise_invalid_file("empresa_nao_identificada")
 
-    lines, skipped, problems = convert_parties(raw, header_line, columns)
-    if problems:
-        raise_party_lines(problems)
-    if not lines and not skipped:
+    converted = convert_parties(raw, header_line, columns)
+    if converted.problems:
+        raise_party_lines(converted.problems)
+    if converted.persons == 0:
         _raise_invalid_file("sem_pessoas")
     return PartiesReport(
-        party_type=party_type, company_document=company, lines=lines, skipped=skipped
+        party_type=party_type,
+        company_document=company,
+        lines=converted.lines,
+        skipped=converted.skipped,
+        persons=converted.persons,
     )

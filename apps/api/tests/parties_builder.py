@@ -30,7 +30,7 @@ def build_parties_xlsx(
     kind: str,
     rows: Sequence[tuple[object, object, str, str, object]],
     *,
-    company: str | None = COMPANY_CNPJ,
+    company: str | int | None = COMPANY_CNPJ,
     title: str | None = None,
     swap_code_and_account: bool = False,
     trailing: Sequence[Sequence[object]] = (),

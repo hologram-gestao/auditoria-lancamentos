@@ -41,7 +41,7 @@ posição. Ficam idênticos ao original o contêiner OLE2, todos os registros BI
 
 | Arquivo                    | O que é                                                                                                                                                                                                              |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `relacao_clientes.xls`     | A RELAÇÃO DE CLIENTES anonimizada: 89 pessoas, todas vinculáveis (77 CNPJ, 12 CPF; um CNPJ começa com zeros).                                                                                                        |
+| `relacao_clientes.xls`     | A RELAÇÃO DE CLIENTES anonimizada: 91 linhas de pessoa, 89 vinculáveis (77 CNPJ, 12 CPF; um CNPJ começa com zeros) e 2 que repetem uma pessoa já listada.                                                            |
 | `relacao_fornecedores.xls` | A RELAÇÃO DE FORNECEDORES anonimizada: 93 pessoas, 88 vinculáveis, 3 com conta `0` e 2 que compartilham a conta `746`.                                                                                               |
 | `vinculos_esperados.csv`   | UTF-8, `;`: linha física, relatório, conta, documento fictício, tipo do documento e situação (`vinculavel` ou o motivo do pulo). O teste-ouro (`tests/unit/test_accounting_chart_parties.py`) compara linha a linha. |
 

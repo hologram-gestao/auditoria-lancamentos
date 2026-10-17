@@ -713,8 +713,8 @@ class ClientService:
         client.omie_app_secret_iv = ""
         client.dek_wrapped = None
         # 86e3qhhrn: a impressão digital da empresa dos relatórios de terceiros é
-        # identidade (um HMAC do CNPJ dela): sai com o nome e a credencial.
-        client.party_reports_company_fingerprint = None
+        # identidade (um HMAC do CNPJ dela) e sai com o nome: `close_client_purge` a
+        # zera em Core (o atributo da instância pode já ser None e não gerar UPDATE).
         client.active = False
         client.closed_at = datetime.now(UTC)
 

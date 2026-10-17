@@ -67,7 +67,10 @@ import {
   readAccountingPartiesRefusal,
 } from '@/lib/accounting-parties-errors';
 import { ApiError } from '@/lib/api/client';
-import type { ListAccountingPartiesParams } from '@/lib/api/client-accounting-chart';
+import {
+  ACCOUNTING_CHART_MAX_PAGE_SIZE,
+  type ListAccountingPartiesParams,
+} from '@/lib/api/client-accounting-chart';
 import type {
   AccountingPartiesImportResult,
   AccountingPartyLink,
@@ -133,7 +136,11 @@ interface AccountingPartiesTabProps {
 export function AccountingPartiesTab({ clientId, isClosed, hasPlan }: AccountingPartiesTabProps) {
   const { get, setMany } = useUrlState();
   const page = readPositiveInt(get(PARAM.page), 1);
-  const pageSize = readPositiveInt(get(PARAM.pageSize), DEFAULT_PAGE_SIZE);
+  // Teto do servidor (`le=100`): um link editado à mão não pode virar 422 em loop.
+  const pageSize = Math.min(
+    readPositiveInt(get(PARAM.pageSize), DEFAULT_PAGE_SIZE),
+    ACCOUNTING_CHART_MAX_PAGE_SIZE,
+  );
   const type = readEnum(get(PARAM.type), PARTY_TYPES);
 
   const params = useMemo<ListAccountingPartiesParams>(

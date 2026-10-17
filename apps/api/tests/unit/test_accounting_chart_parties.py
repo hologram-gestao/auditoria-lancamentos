@@ -103,6 +103,8 @@ class TestTesteOuro:
         clients = parse_parties_report((_FIXTURES / "relacao_clientes.xls").read_bytes())
         suppliers = parse_parties_report((_FIXTURES / "relacao_fornecedores.xls").read_bytes())
         assert (len(clients.lines), len(suppliers.lines)) == (89, 88)
+        # A de clientes lista duas pessoas de novo: contam como pessoa, não como vínculo.
+        assert (clients.persons, suppliers.persons) == (91, 93)
         assert {item.kind for item in clients.lines} == {"cnpj", "cpf"}
         assert clients.skipped == []
         assert any(item.document.startswith("0") for item in clients.lines)
@@ -146,7 +148,7 @@ class TestPoliticaEmDuasCamadas:
             (13, "conta_compartilhada", "746"),
         ]
 
-    def test_a_mesma_pessoa_repetida_e_uma_linha_so(self) -> None:
+    def test_a_mesma_pessoa_repetida_e_uma_linha_so_mas_conta_como_pessoa(self) -> None:
         content = build_parties_xlsx(
             "cliente",
             _rows("cliente", (685, VALID_CNPJS[0], "A"), (685, VALID_CNPJS[0], "A de novo")),
@@ -154,6 +156,24 @@ class TestPoliticaEmDuasCamadas:
         report = parse_parties_report(content)
         assert [item.account_code for item in report.lines] == ["685"]
         assert report.skipped == []
+        assert report.persons == 2
+
+    @pytest.mark.parametrize("conta", ["685A", "²", "68.5"], ids=["letra", "unicode", "decimal"])
+    def test_conta_que_nao_e_inteiro_e_conta_invalida_nunca_500(self, conta: str) -> None:
+        content = build_parties_xlsx(
+            "cliente", _rows("cliente", (685, VALID_CNPJS[0], "A"), (conta, VALID_CNPJS[1], "B"))
+        )
+        with pytest.raises(FileLinesInvalidError) as caught:
+            parse_parties_report(content)
+        assert caught.value.details["lines"] == [
+            {"line": 9, "reason": "conta_invalida", "accountCode": None}
+        ]
+
+    def test_cnpj_da_empresa_em_celula_numerica_tambem_vale(self) -> None:
+        content = build_parties_xlsx(
+            "cliente", _rows("cliente", (685, VALID_CNPJS[0], "A")), company=11222333000181
+        )
+        assert parse_parties_report(content).company_document == "11222333000181"
 
     def test_documento_sem_conta_na_linha_recusa_o_arquivo(self) -> None:
         content = build_parties_xlsx(
@@ -268,11 +288,16 @@ class TestDocumentos:
             (11222333000181, ("11222333000181", "cnpj")),
             ("529.982.247-25", ("52998224725", "cpf")),
             (52998224725, ("52998224725", "cpf")),
-            # Zero à esquerda perdido pelo Excel numa célula NUMÉRICA: um só é reposto.
+            # Zero à esquerda perdido pelo Excel numa célula NUMÉRICA (13 dígitos é CNPJ).
             (4252011000110, ("04252011000110", "cnpj")),
             # Texto fica texto: os dois zeros do CNPJ não se perdem.
             ("00000000000191", ("00000000000191", "cnpj")),
+            # 12 dígitos é CNPJ: completa até 14, e o verificador decide (aqui recusa).
+            (252011000110, None),
+            # Número curto demais para recuperar (caberia nos dois formatos): nunca.
             (191, None),
+            (93000154, None),
+            ("191", None),
             (INVALID_CNPJ, None),
             ("529.982.247-26", None),
             ("123", None),

@@ -639,9 +639,14 @@ class AccountingChartService:
         )
         current_fingerprint = await self._repo.company_fingerprint_for_update(client.id)
         if current_fingerprint is not None and current_fingerprint != fingerprint:
-            raise PartiesReportCompanyMismatchError(
-                f"relatório de terceiros de outra empresa para o cliente {client.id}"
-            )
+            # A empresa só muda enquanto NENHUMA conta tem vínculo: é a saída para o
+            # relatório da empresa errada importado por engano antes de qualquer
+            # vínculo; com vínculo gravado, a troca seria misturar duas empresas.
+            if sum((await self._repo.count_links_by_type(client.id)).values()) > 0:
+                raise PartiesReportCompanyMismatchError(
+                    f"relatório de terceiros de outra empresa para o cliente {client.id}"
+                )
+            current_fingerprint = None
 
         codes = {line.account_code for line in report.lines}
         accounts = {a.code: a for a in await self._repo.get_by_codes(client.id, codes)}
@@ -656,6 +661,29 @@ class AccountingChartService:
                 problems.append(PartyLineProblem(line.line, "conta_sintetica", line.account_code))
         if problems:
             raise_party_lines(problems)
+
+        if not report.lines:
+            # Nada a vincular (só pulos): não provisiona DEK nem grava a empresa.
+            result = PartyImportResult(
+                party_type=report.party_type,
+                lines=report.persons,
+                new=0,
+                updated=0,
+                unchanged=0,
+                skipped=report.skipped,
+            )
+            log.info(
+                "accounting_parties_imported",
+                client_id=str(client.id),
+                relatorio=result.party_type.value,
+                lines=result.lines,
+                new=0,
+                updated=0,
+                unchanged=0,
+                skipped=len(result.skipped),
+            )
+            await self._emit_parties_imported(client, result)
+            return result
 
         cipher = await self._write_cipher(client)
         linked_accounts = [accounts[line.account_code] for line in report.lines]
@@ -696,7 +724,7 @@ class AccountingChartService:
 
         result = PartyImportResult(
             party_type=report.party_type,
-            lines=len(report.lines) + len(report.skipped),
+            lines=report.persons,
             new=new,
             updated=updated,
             unchanged=unchanged,

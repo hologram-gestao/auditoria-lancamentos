@@ -41,10 +41,10 @@ from app.core.cpf import normalize_cpf
 from app.modules.client_accounting_chart.parties import (
     PARTY_REPORT_TITLES,
     PartiesReport,
-    _fold,
     find_parties_header,
     parse_parties_report,
 )
+from app.modules.client_accounting_chart.sheet import fold_text
 from app.modules.client_file_ingestion.reader import read_sheet_raw_rows
 from scripts.anonymize_dominio_chart_sample import BANNER_LABELS
 from scripts.anonymize_dominio_chart_sample_xls import (
@@ -154,7 +154,7 @@ def _decide(
                 if folded in _LABELS:
                     label = folded
                     put(line, col, None)
-                elif _fold(folded) in PARTY_REPORT_TITLES:
+                elif fold_text(folded) in PARTY_REPORT_TITLES:
                     put(line, col, None)
                 else:
                     put(line, col, _COMPANY_VALUE.get(label or "", "[removido]"))
@@ -228,7 +228,7 @@ def anonymize_one(source: Path, target: Path, kind_label: str) -> PartiesReport:
     for text, new in zip(texts, final, strict=True):
         _write(stream, text, new)
     # O nome da aba é o TÍTULO do relatório ("RELAÇÃO DE CLIENTES"): estrutura, fica.
-    if _fold(sheet.value) not in PARTY_REPORT_TITLES:
+    if fold_text(sheet.value) not in PARTY_REPORT_TITLES:
         _write(stream, sheet, _fit(_SHEET_TITLE, len(sheet.value)))
         replaced.add(sheet.value.strip())
 
