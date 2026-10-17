@@ -1,29 +1,35 @@
 'use client';
 
 /**
- * Gaveta "Importar plano contábil" (Sprint 16 — FRONT 16.5 / R1).
+ * Gaveta "Importar plano contábil" (Sprint 16 — FRONT 16.5 / R1; prévia desde a
+ * 86e3qhhrm).
  *
  * O modelo da planilha documentado no topo (colunas e exemplo), o arquivo, e
- * três desfechos que NÃO são toast:
+ * dois passos, sempre, na primeira importação e na reimportação:
  *
- *   - **reimportação** (o cliente já tem plano): a confirmação vem ANTES de
- *     enviar, dentro da própria gaveta — um segundo passo no rodapé, e não um
- *     `AlertDialog` empilhado sobre a gaveta (dois modais do Radix marcam o
- *     fundo com `aria-hidden` e o de cima sai do teclado; front-gate §4). O
- *     aviso diz o que muda: conta que não vier na planilha fica INATIVA;
- *   - **sucesso**: as três contagens DA RESPOSTA (contas, novas, inativadas),
- *     no toast e na tela (o toast some); a lista se atualiza pela invalidação;
- *   - **recusa 422**: estado na gaveta ramificado por `code`
- *     (`AccountingChartRefusalNotice`). Só código desconhecido cai no toast
- *     (ADR-047-FE).
+ *   1. **Revisar**: o arquivo vai à PRÉVIA (`POST …/import/preview`, não grava) e
+ *      a gaveta mostra o que muda (`AccountingChartImportPreviewPanel`): novas,
+ *      alteradas, sem mudança e as que não vieram, com quantas delas estão em uso;
+ *      ela entra NO LUGAR do modelo da planilha e rola para a vista (em 390px, sem
+ *      isso, ela ficava abaixo da dobra, atrás do "Confirmar").
+ *      O segundo passo mora no rodapé da própria gaveta, e não num `AlertDialog`
+ *      empilhado (dois modais do Radix marcam o fundo com `aria-hidden` e o de
+ *      cima sai do teclado; front-gate §4);
+ *   2. **Confirmar**: o import de verdade, com o MESMO arquivo. A reimportação
+ *      não inativa: a conta que não veio fica como está, com o selo.
  *
- * Remontada por `key` a cada abertura: estado limpo, sem arquivo nem recusa
- * da vez anterior.
+ * Desfechos que NÃO são toast: as contagens da importação (no toast e na tela,
+ * porque o toast some) e a recusa 422, da prévia ou da importação, ramificada por
+ * `code` (`AccountingChartRefusalNotice`). Só código desconhecido cai no toast
+ * (ADR-047-FE). Planilha que não muda nada não oferece importar.
+ *
+ * Remontada por `key` a cada abertura: estado limpo, sem arquivo, prévia nem
+ * recusa da vez anterior.
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { AlertTriangle, Loader2, Upload } from 'lucide-react';
-import { useState } from 'react';
+import { Eye, Loader2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 
@@ -47,15 +53,19 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
-import { useImportAccountingChart } from '@/hooks/use-client-accounting-chart';
+import {
+  useImportAccountingChart,
+  usePreviewAccountingChartImport,
+} from '@/hooks/use-client-accounting-chart';
 import { readAccountingChartRefusal } from '@/lib/accounting-chart-errors';
 import { ApiError } from '@/lib/api/client';
-import type { AccountingChartImportResult } from '@/lib/contracts';
+import type { AccountingChartImportPreview, AccountingChartImportResult } from '@/lib/contracts';
 import {
   accountingChartImportSchema,
   type AccountingChartImportValues,
 } from '@/lib/validation/accounting-chart';
 
+import { AccountingChartImportPreviewPanel } from './accounting-chart-import-preview';
 import { AccountingChartModel } from './accounting-chart-model';
 import { AccountingChartRefusalNotice } from './accounting-chart-refusal-notice';
 
@@ -63,7 +73,7 @@ interface AccountingChartImportSheetProps {
   clientId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** O cliente já tem plano? Decide a confirmação de reimportação. */
+  /** O cliente já tem plano? Decide o título e os rótulos (a prévia vale para os dois). */
   hasPlan: boolean;
   /** Sucesso: a tela mostra as contagens fora da gaveta, que fecha. */
   onImported: (result: AccountingChartImportResult) => void;
@@ -75,7 +85,11 @@ export function importSuccessMessage(result: AccountingChartImportResult): strin
     result.contasNovas,
     'nova',
     'novas',
-  )}, ${plural(result.contasInativadas, 'inativada', 'inativadas')}.`;
+  )}, ${plural(result.contasAlteradas, 'alterada', 'alteradas')}, ${plural(
+    result.contasAusentes,
+    'não veio',
+    'não vieram',
+  )}.`;
 }
 
 export function AccountingChartImportSheet({
@@ -86,10 +100,17 @@ export function AccountingChartImportSheet({
   onImported,
 }: AccountingChartImportSheetProps) {
   const importMutation = useImportAccountingChart(clientId);
+  const previewMutation = usePreviewAccountingChartImport(clientId);
   const [refusal, setRefusal] = useState<unknown>(null);
-  // Segundo passo da reimportação: o arquivo já foi validado e a pessoa
-  // precisa confirmar que as contas ausentes ficarão inativas.
-  const [confirming, setConfirming] = useState(false);
+  // Segundo passo: a prévia do arquivo escolhido, que a pessoa confirma.
+  const [preview, setPreview] = useState<AccountingChartImportPreview | null>(null);
+  // A prévia é o que importa no segundo passo: ela entra no lugar do modelo e vem
+  // para a vista (o rodapé com "Confirmar" fica fixo; sem isto, em 390px a prévia
+  // ficava abaixo da dobra e a pessoa confirmaria sem vê-la).
+  const previewRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (preview !== null) previewRef.current?.scrollIntoView?.({ block: 'start' });
+  }, [preview]);
 
   const form = useForm<AccountingChartImportValues>({
     resolver: zodResolver(accountingChartImportSchema),
@@ -97,15 +118,32 @@ export function AccountingChartImportSheet({
     mode: 'onSubmit',
   });
 
-  const isPending = importMutation.isPending;
+  const isPending = importMutation.isPending || previewMutation.isPending;
 
   function onSubmit(values: AccountingChartImportValues) {
     if (!(values.file instanceof File)) return;
-    if (hasPlan && !confirming) {
-      setConfirming(true);
+    if (preview === null) {
+      void review(values.file);
       return;
     }
     void send(values.file);
+  }
+
+  function handleFailure(err: unknown, fallback: string) {
+    if (readAccountingChartRefusal(err) !== null) {
+      setRefusal(err);
+      return;
+    }
+    toast.error(err instanceof ApiError ? err.userMessage : fallback);
+  }
+
+  async function review(file: File) {
+    setRefusal(null);
+    try {
+      setPreview(await previewMutation.mutateAsync(file));
+    } catch (err) {
+      handleFailure(err, 'Não foi possível ler a planilha do plano contábil.');
+    }
   }
 
   async function send(file: File) {
@@ -116,14 +154,8 @@ export function AccountingChartImportSheet({
       onImported(result);
       onOpenChange(false);
     } catch (err) {
-      setConfirming(false);
-      if (readAccountingChartRefusal(err) !== null) {
-        setRefusal(err);
-        return;
-      }
-      toast.error(
-        err instanceof ApiError ? err.userMessage : 'Não foi possível importar o plano contábil.',
-      );
+      setPreview(null);
+      handleFailure(err, 'Não foi possível importar o plano contábil.');
     }
   }
 
@@ -147,7 +179,9 @@ export function AccountingChartImportSheet({
             noValidate
           >
             <SheetBody className="space-y-5">
-              <AccountingChartModel headingId="accounting-chart-import-model" />
+              {preview === null && (
+                <AccountingChartModel headingId="accounting-chart-import-model" />
+              )}
 
               <FormField
                 control={form.control}
@@ -166,7 +200,7 @@ export function AccountingChartImportSheet({
                         onChange={(file) => {
                           field.onChange(file);
                           setRefusal(null);
-                          setConfirming(false);
+                          setPreview(null);
                         }}
                       />
                     </FormControl>
@@ -175,22 +209,22 @@ export function AccountingChartImportSheet({
                 )}
               />
 
-              {hasPlan && (
-                <div
-                  role={confirming ? 'alert' : 'note'}
-                  data-testid="accounting-chart-reimport-warning"
-                  className="bg-warning-muted text-warning ring-warning/30 space-y-1 rounded-lg p-3 text-sm ring-1 ring-inset"
+              {hasPlan && preview === null && (
+                <p
+                  role="note"
+                  data-testid="accounting-chart-reimport-note"
+                  className="bg-muted text-foreground rounded-lg p-3 text-sm"
                 >
-                  <p className="flex items-start gap-2 font-medium">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                    <span>Este cliente já tem plano contábil</span>
-                  </p>
-                  <p>
-                    A reimportação casa as contas pelo código reduzido: as novas entram, as
-                    existentes são atualizadas e as contas que NÃO estiverem na planilha ficarão
-                    inativas. Conta inativa não é apagada, mas deixa de receber decisão nova e de
-                    ser conta do banco.
-                  </p>
+                  Este cliente já tem plano contábil. A reimportação casa as contas pelo código
+                  reduzido e só adiciona e atualiza: as contas que não estiverem na planilha
+                  continuam como estão, com o selo &quot;não veio na última importação&quot;. Antes
+                  de gravar, você revisa o que muda.
+                </p>
+              )}
+
+              {preview !== null && (
+                <div ref={previewRef}>
+                  <AccountingChartImportPreviewPanel preview={preview} />
                 </div>
               )}
 
@@ -198,20 +232,30 @@ export function AccountingChartImportSheet({
             </SheetBody>
 
             <SheetFooter>
-              {confirming ? (
+              {preview !== null ? (
                 <>
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => setConfirming(false)}
+                    onClick={() => setPreview(null)}
                     disabled={isPending}
                   >
                     Voltar
                   </Button>
-                  <Button type="submit" disabled={isPending}>
-                    {isPending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-                    {isPending ? 'Importando…' : 'Confirmar reimportação'}
-                  </Button>
+                  {preview.temMudancas ? (
+                    <Button type="submit" disabled={isPending}>
+                      {isPending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                      {isPending
+                        ? 'Importando…'
+                        : hasPlan
+                          ? 'Confirmar reimportação'
+                          : 'Confirmar importação'}
+                    </Button>
+                  ) : (
+                    <Button type="button" onClick={() => onOpenChange(false)} disabled={isPending}>
+                      Fechar sem importar
+                    </Button>
+                  )}
                 </>
               ) : (
                 <>
@@ -227,9 +271,9 @@ export function AccountingChartImportSheet({
                     {isPending ? (
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                     ) : (
-                      <Upload className="h-4 w-4" aria-hidden="true" />
+                      <Eye className="h-4 w-4" aria-hidden="true" />
                     )}
-                    {isPending ? 'Importando…' : hasPlan ? 'Reimportar' : 'Importar'}
+                    {isPending ? 'Lendo a planilha…' : 'Revisar mudanças'}
                   </Button>
                 </>
               )}

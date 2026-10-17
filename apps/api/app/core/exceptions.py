@@ -101,6 +101,7 @@ class ErrorCode(StrEnum):
     CONTA_CONTABIL_CODIGO_EXISTENTE = "CONTA_CONTABIL_CODIGO_EXISTENTE"
     CONTA_CONTABIL_INVALIDA = "CONTA_CONTABIL_INVALIDA"
     CONTA_CONTABIL_EM_USO = "CONTA_CONTABIL_EM_USO"
+    PLANO_CONTABIL_INDECIFRAVEL = "PLANO_CONTABIL_INDECIFRAVEL"
     # Sprint 16 (BACK 16.2) — o de-para no destino `conta_contabil` aponta para o
     # plano do CLIENTE, e só ele: catálogo da org nesse destino, conta do plano em
     # outro destino e a importação da planilha nesse destino são recusas tipadas.
@@ -1039,6 +1040,23 @@ class AccountingAccountInUseError(AppError):
     default_user_message = (
         "Esta conta está em uso no de-para ou como conta do banco e precisa continuar "
         "analítica e ativa. Troque essas configurações para outra conta antes."
+    )
+
+
+class AccountingChartUndecipherableError(AppError):
+    """409 — a exportação do plano contábil achou nome que a chave do cliente não abre
+    (86e3qhhrm).
+
+    O arquivo exportado é para ser reimportado: com `[indecifrável]` no lugar do nome,
+    a reimportação gravaria o marcador como nome de conta. A exportação recusa em vez
+    de entregar um arquivo errado. `details.count` é a contagem, nunca quais contas.
+    """
+
+    code = ErrorCode.PLANO_CONTABIL_INDECIFRAVEL
+    status_code = 409
+    default_user_message = (
+        "Não foi possível exportar o plano contábil: o nome de algumas contas não pôde "
+        "ser lido. Fale com o suporte."
     )
 
 

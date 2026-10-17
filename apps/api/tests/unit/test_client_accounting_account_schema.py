@@ -81,8 +81,23 @@ class TestModeloEMigrationBatem:
         model_columns = {column.name for column in ClientAccountingAccount.__table__.c}
         migration_columns = set(re.findall(r'sa\.Column\(\s*"([a-z_]+)"', upgrade))
         # `sort_key` nasceu depois, em `b2f7c9e41d06` (86e3n70p9); a comparação dela
-        # com o modelo é de `tests/unit/test_accounting_chart_sort_key.py`.
-        assert migration_columns | {"sort_key"} == model_columns
+        # com o modelo é de `tests/unit/test_accounting_chart_sort_key.py`. O selo
+        # `absent_since` nasceu em `a94a539e1d34` (86e3qhhrm), conferido logo abaixo.
+        assert migration_columns | {"sort_key", "absent_since"} == model_columns
+
+    def test_selo_de_ausente_da_migration_bate_com_o_modelo(self) -> None:
+        """86e3qhhrm: a coluna do selo é nullable e com fuso, nos dois lados."""
+        path = next(_VERSIONS.glob("a94a539e1d34_*.py"))
+        spec = importlib.util.spec_from_file_location("mig_absent_since", path)
+        assert spec is not None
+        assert spec.loader is not None
+        mig = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mig)
+        assert mig.down_revision == "d9f3b6a2e815"
+        assert (mig._TABLE, mig._COLUMN) == ("client_accounting_accounts", "absent_since")
+        column = ClientAccountingAccount.__table__.c.absent_since
+        assert column.nullable is True
+        assert column.type.timezone is True
 
     def test_nomes_de_constraint_cabem_no_postgres(self) -> None:
         """Nome > 63 caracteres é truncado em SILÊNCIO pelo Postgres (ADR-074-BE)."""

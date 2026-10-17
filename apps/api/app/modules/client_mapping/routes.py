@@ -470,6 +470,7 @@ def _list_item(named: NamedRow) -> MappingListItem:
         accounting_account_id=row.accounting_account_id,
         accounting_account_code=named.account.code if named.account else None,
         accounting_account_name=named.account.name if named.account else None,
+        accounting_account_absent_since=named.account.absent_since if named.account else None,
         history=row.history,
         requires_redo=row.requires_redo,
     )

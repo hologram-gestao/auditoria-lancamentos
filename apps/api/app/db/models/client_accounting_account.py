@@ -16,8 +16,10 @@ juntos — molde de `client_connections` e de `client_file_categories`.
 
 **Entra por importação de planilha, tudo ou nada** (`modules/client_accounting_chart/`).
 A reimportação casa por código reduzido: conta nova entra, conta existente atualiza
-nome/tipo/classificação (e volta a ativa), conta que sumiu da planilha vira INATIVA —
-**nunca é apagada**, porque pode haver decisão do de-para apontando para ela (16.2).
+nome/tipo/classificação, e a conta que sumiu da planilha ganha o SELO `absent_since`
+(86e3qhhrm) e continua como estava: a reimportação **nunca inativa nem apaga**, porque
+pode haver decisão do de-para apontando para ela (16.2) e o plano exportado pode vir
+recortado. A situação (`active`) só muda pela edição manual (86e3nb816).
 
 **A lista sai na ordem da CLASSIFICAÇÃO** (86e3n70p9): `sort_key` é derivada em toda
 escrita (`sort_key.chart_sort_key`) e a listagem só ordena por ela. Sintética em cima,
@@ -34,6 +36,7 @@ linhas saem ANTES dos usuários do tenant, por causa da autoria RESTRICT (ADR-07
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -41,6 +44,7 @@ from uuid import UUID
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    DateTime,
     ForeignKey,
     Index,
     String,
@@ -173,11 +177,18 @@ class ClientAccountingAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     account_type: Mapped[str] = mapped_column(String(20), nullable=False)
 
-    #: `false` = sumiu da última planilha importada. A linha FICA (decisões podem
-    #: apontar para ela); só não recebe decisão NOVA.
+    #: `false` = a conta foi inativada pela edição manual (ou, antes da 86e3qhhrm,
+    #: sumiu de uma planilha). A linha FICA (decisões podem apontar para ela); só não
+    #: recebe decisão NOVA. A reimportação NÃO mexe nesta coluna.
     active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )
+
+    #: O SELO "não veio na última importação" (86e3qhhrm): o instante da importação
+    #: em que a conta deixou de vir na planilha. Nula = veio na última. Enquanto ela
+    #: segue ausente fica a data da PRIMEIRA importação em que sumiu; limpa quando
+    #: ela volta. A conta continua ativa: o selo avisa, não bloqueia.
+    absent_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     #: Quem importou a planilha que criou/atualizou a linha. RESTRICT (ADR-074-BE):
     #: por isso a exclusão definitiva apaga o plano ANTES dos usuários do tenant.

@@ -456,7 +456,8 @@ class TestPreviaEMaterializacao:
         assert mat.status_code == 201, mat.text
         materialization_id = mat.json()["data"]["id"]
 
-        # Depois: histórico novo (vigência nova) e o plano renomeia E inativa a conta.
+        # Depois: histórico novo (vigência nova) e o plano chega SEM a conta (86e3qhhrm:
+        # ela continua ativa, com o selo de ausente; o snapshot não muda de nenhum jeito).
         await _decide(
             client_with_db,
             world,
@@ -470,7 +471,9 @@ class TestPreviaEMaterializacao:
             world.client,
             b"codigo_reduzido;nome;tipo\n649;Banco;analitica\n542;Tarifas;analitica\n",
         )
-        assert (await _accounts(db_session, world.client))["662"].active is False
+        conta_662 = (await _accounts(db_session, world.client))["662"]
+        assert conta_662.active is True
+        assert conta_662.absent_since is not None
 
         lines = await _apply_service(db_session).materialized_lines(
             world.client, UUID(materialization_id)

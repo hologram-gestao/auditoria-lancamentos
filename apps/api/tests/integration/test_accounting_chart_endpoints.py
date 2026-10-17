@@ -9,8 +9,10 @@ O que este módulo afirma (critérios de aceite da 16.1):
   - tudo ou nada: código repetido, cabeçalho divergente, tipo inválido, planilha
     vazia e arquivo que não é CSV/XLSX pelo conteúdo → 422 tipado e ZERO linhas
     (teste que CONTA linhas), sem nenhuma célula no corpo;
-  - reimportação por código: nova entra, existente atualiza, ausente vira inativa
-    (nunca apagada), inativa que volta reativa — contagens da resposta conferidas;
+  - reimportação por código que só adiciona e atualiza (86e3qhhrm): nova entra,
+    existente atualiza, ausente fica como estava com o selo `absentSince` (nunca
+    inativada nem apagada), o selo sai quando a conta volta, e a inativa que volta
+    CONTINUA inativa — contagens da resposta conferidas;
   - validador único: outro cliente → 404, sintética/inativa → 422 tipado;
   - lista paginada com `pageSize` pelo alias, busca por prefixo de código, filtros
     de tipo e situação; plano de outro cliente nunca aparece; a ordem é a da
@@ -208,7 +210,9 @@ class TestImportacaoDaAmostra:
         await _login(client_with_db, world.admin)
         resp = await _import(client_with_db, world.client, _SAMPLE.read_bytes())
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"data": {"contas": 20, "contasNovas": 20, "contasInativadas": 0}}
+        assert resp.json() == {
+            "data": {"contas": 20, "contasNovas": 20, "contasAlteradas": 0, "contasAusentes": 0}
+        }
         assert await _count(db_session, world.client.id) == 20
 
         # A DEK nasceu com o plano (cliente sem origem) e o nome só existe cifrado.
@@ -313,7 +317,7 @@ class TestTudoOuNada:
 
 
 class TestReimportacao:
-    async def test_nova_entra_existente_atualiza_ausente_inativa_e_volta_reativa(
+    async def test_nova_entra_existente_atualiza_e_ausente_ganha_o_selo_sem_inativar(
         self, client_with_db: AsyncClient, world: World, db_session: AsyncSession
     ) -> None:
         await _login(client_with_db, world.admin)
@@ -334,30 +338,70 @@ class TestReimportacao:
         )
         resp = await _import(client_with_db, world.client, segunda)
         assert resp.status_code == 200, resp.text
-        assert resp.json()["data"] == {"contas": 3, "contasNovas": 1, "contasInativadas": 1}
+        assert resp.json()["data"] == {
+            "contas": 3,
+            "contasNovas": 1,
+            "contasAlteradas": 2,
+            "contasAusentes": 1,
+        }
 
         contas = await _accounts(db_session, world.client.id)
         assert set(contas) == {"649", "662", "692", "700"}, "conta ausente NUNCA é apagada"
-        assert contas["692"].active is False
+        assert contas["692"].active is True, "a reimportação não inativa (86e3qhhrm)"
+        selo = contas["692"].absent_since
+        assert selo is not None
+        assert all(contas[c].absent_since is None for c in ("649", "662", "700"))
         assert contas["662"].account_type == "sintetica"
         assert contas["649"].classification == "1.1.1"
         # A reimportação casa por código: a pk da conta existente não muda.
         assert contas["649"].id == ids_antes["649"]
 
-        listing = await client_with_db.get(_url(world.client), params={"code": "649"})
-        assert listing.json()["data"][0]["name"] == "Banco renomeado"
+        listing = await client_with_db.get(_url(world.client), params={"code": "6"})
+        by_code = {item["code"]: item for item in listing.json()["data"]}
+        assert by_code["649"]["name"] == "Banco renomeado"
+        assert by_code["692"]["absentSince"] is not None
+        assert by_code["692"]["postable"] is True, "o selo avisa, não bloqueia"
+        assert by_code["649"]["absentSince"] is None
+
+        # Ausente de novo: a data fica a da PRIMEIRA importação em que sumiu.
+        assert (await _import(client_with_db, world.client, segunda)).status_code == 200
+        contas = await _accounts(db_session, world.client.id)
+        assert contas["692"].absent_since == selo
 
         terceira = _csv(
-            "codigo_reduzido;nome;tipo",
-            "649;Banco;analitica",
-            "662;Aluguel D;analitica",
-            "692;Aluguel F;analitica",
-            "700;Conta nova;analitica",
+            "codigo_reduzido;nome;tipo;classificacao",
+            "649;Banco renomeado;analitica;1.1.1",
+            "662;Aluguel D;sintetica;",
+            "692;Aluguel F;analitica;",
+            "700;Conta nova;analitica;",
         )
         resp = await _import(client_with_db, world.client, terceira)
-        assert resp.json()["data"] == {"contas": 4, "contasNovas": 0, "contasInativadas": 0}
+        assert resp.json()["data"] == {
+            "contas": 4,
+            "contasNovas": 0,
+            "contasAlteradas": 0,
+            "contasAusentes": 0,
+        }
         contas = await _accounts(db_session, world.client.id)
-        assert contas["692"].active is True, "a conta inativa que volta na planilha reativa"
+        assert contas["692"].absent_since is None, "a conta que volta perde o selo"
+
+    async def test_inativa_que_vem_na_planilha_continua_inativa(
+        self, client_with_db: AsyncClient, world: World, db_session: AsyncSession
+    ) -> None:
+        """A situação é da edição manual: a planilha não reativa (86e3qhhrm)."""
+        await _login(client_with_db, world.admin)
+        plano = _csv("codigo_reduzido;nome;tipo", "649;Banco;analitica", "650;Caixa;analitica")
+        assert (await _import(client_with_db, world.client, plano)).status_code == 200
+        caixa = (await _accounts(db_session, world.client.id))["650"]
+        resp = await client_with_db.patch(
+            f"{_url(world.client)}/accounts/{caixa.id}", json={"active": False}
+        )
+        assert resp.status_code == 200, resp.text
+
+        resp = await _import(client_with_db, world.client, plano)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["contasAlteradas"] == 0
+        assert (await _accounts(db_session, world.client.id))["650"].active is False
 
 
 class TestValidadorUnico:
@@ -503,7 +547,11 @@ class TestListagem:
             world.client,
             _csv("codigo_reduzido;nome;tipo;classificacao", "100;Fornecedor;analitica;1.2"),
         )
-        reimportada = await client_with_db.get(_url(world.client), params={"status": "ativa"})
+        # 86e3qhhrm: as outras 8 não vieram, continuam ativas e ganham o selo.
+        ativas = await client_with_db.get(_url(world.client), params={"status": "ativa"})
+        assert ativas.json()["pagination"]["total"] == 9
+        assert {i["code"] for i in ativas.json()["data"] if i["absentSince"] is None} == {"100"}
+        reimportada = await client_with_db.get(_url(world.client), params={"code": "100"})
         assert [i["code"] for i in reimportada.json()["data"]] == ["100"]
         assert reimportada.json()["data"][0]["classification"] == "1.2"
         chave = await db_session.execute(
@@ -673,7 +721,9 @@ class TestPlanoExportadoDoDominio:
                 client_with_db, world.client, _DOMINIO.read_bytes(), filename="plano.xlsx"
             )
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"data": {"contas": 563, "contasNovas": 563, "contasInativadas": 0}}
+        assert resp.json() == {
+            "data": {"contas": 563, "contasNovas": 563, "contasAlteradas": 0, "contasAusentes": 0}
+        }
         assert await _count(db_session, world.client.id) == 563
         assert "exemplo" not in repr(logs)
 
@@ -697,7 +747,8 @@ class TestPlanoExportadoDoDominio:
             "client_id": str(world.client.id),
             "contas": 563,
             "contas_novas": 563,
-            "contas_inativadas": 0,
+            "contas_alteradas": 0,
+            "contas_ausentes": 0,
             "layout": "dominio",
         }
 
@@ -787,7 +838,9 @@ class TestPlanoDoDominioEmXls:
                 client_with_db, world.client, _DOMINIO_XLS.read_bytes(), filename="plano.xls"
             )
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"data": {"contas": 370, "contasNovas": 370, "contasInativadas": 0}}
+        assert resp.json() == {
+            "data": {"contas": 370, "contasNovas": 370, "contasAlteradas": 0, "contasAusentes": 0}
+        }
         assert "exemplo" not in repr(logs)
 
         accounts = await _accounts(db_session, world.client.id)

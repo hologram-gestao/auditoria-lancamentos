@@ -662,7 +662,8 @@ class UsageEventService:
         client_id: UUID,
         contas: int,
         contas_novas: int,
-        contas_inativadas: int,
+        contas_alteradas: int,
+        contas_ausentes: int,
         layout: ChartImportLayout,
     ) -> bool:
         """S16 — a importação do plano contábil deu certo. Sem `session_id`, sem dedup.
@@ -678,7 +679,8 @@ class UsageEventService:
                 client_id=client_id,
                 contas=contas,
                 contas_novas=contas_novas,
-                contas_inativadas=contas_inativadas,
+                contas_alteradas=contas_alteradas,
+                contas_ausentes=contas_ausentes,
                 layout=layout,
             ),
         )

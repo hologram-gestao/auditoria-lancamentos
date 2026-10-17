@@ -304,13 +304,19 @@ class TestAmostraMsfgPeloCaminhoReal:
 
         # c. O plano do cliente: 20 contas, 1 evento só com contagens.
         imported = await _import_plan(http, client_id, PLANO)
-        assert imported == {"contas": 20, "contasNovas": 20, "contasInativadas": 0}
+        assert imported == {
+            "contas": 20,
+            "contasNovas": 20,
+            "contasAlteradas": 0,
+            "contasAusentes": 0,
+        }
         (evento,) = await _events(db_session, "plano_contabil_importado", client_id)
         assert evento.props == {
             "client_id": client_id,
             "contas": 20,
             "contas_novas": 20,
-            "contas_inativadas": 0,
+            "contas_alteradas": 0,
+            "contas_ausentes": 0,
             "layout": "modelo",
         }
         accounts = await _accounts_by_code(http, client_id)
@@ -419,9 +425,11 @@ class TestAmostraMsfgPeloCaminhoReal:
             if not line.startswith("662;")
         ).encode("utf-8")
         reimported = await _import_plan(http, client_id, reimport)
-        assert reimported["contasInativadas"] == 1
+        assert reimported["contasAusentes"] == 1
         after = await _accounts_by_code(http, client_id)
-        assert after["662"]["active"] is False
+        # 86e3qhhrm: a ausente continua ativa, com o selo; o teste a troca por 650.
+        assert after["662"]["active"] is True
+        assert after["662"]["absentSince"] is not None
         assert after["650"]["name"].startswith("RENOMEADA ")
         postable = {c: a for c, a in after.items() if a["postable"]}
         await _decide_all(

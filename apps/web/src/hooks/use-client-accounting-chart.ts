@@ -6,6 +6,7 @@
  *   - query key SEMPRE prefixada pelo `clientId` — trocar de cliente não pode
  *     servir o plano do tenant anterior do cache;
  *   - `keepPreviousData` na lista evita o flash da tabela ao paginar/filtrar;
+ *   - a PRÉVIA da importação e a EXPORTAÇÃO (86e3qhhrm) não gravam: não invalidam;
  *   - importar invalida a árvore INTEIRA do plano E as contas de origem (o nome
  *     da conta do banco associada pode ter mudado), e o de-para do cliente
  *     (a prévia do `conta_contabil` lê código e nome do plano);
@@ -16,11 +17,14 @@
  */
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import type { BlobResponse } from '@/lib/api/client';
 import {
   createAccountingAccount,
+  exportAccountingChart,
   importAccountingChart,
   listAccountingChart,
   listSourceAccounts,
+  previewAccountingChartImport,
   setSourceAccountBinding,
   updateAccountingAccount,
   type ListAccountingChartParams,
@@ -29,6 +33,7 @@ import type {
   AccountingAccount,
   AccountingAccountCreateRequest,
   AccountingAccountUpdateRequest,
+  AccountingChartImportPreview,
   AccountingChartImportResult,
   AccountingChartListResponse,
   SourceAccountBindingPayload,
@@ -66,6 +71,20 @@ export function useImportAccountingChart(clientId: string) {
       void qc.invalidateQueries({ queryKey: accountingChartKeys.all(clientId) });
       void qc.invalidateQueries({ queryKey: clientMappingKeys.all(clientId) });
     },
+  });
+}
+
+/** Prévia da importação (86e3qhhrm): não grava, então não invalida nada. */
+export function usePreviewAccountingChartImport(clientId: string) {
+  return useMutation<AccountingChartImportPreview, Error, File>({
+    mutationFn: (file) => previewAccountingChartImport(clientId, file),
+  });
+}
+
+/** Baixar o plano em CSV (86e3qhhrm): leitura, sem invalidação. */
+export function useExportAccountingChart(clientId: string) {
+  return useMutation<BlobResponse, Error, void>({
+    mutationFn: () => exportAccountingChart(clientId),
   });
 }
 

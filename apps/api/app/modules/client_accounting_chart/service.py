@@ -5,9 +5,12 @@ Regra de negócio pura, sem HTTP. Três responsabilidades, e só elas:
 1. **Importar** a planilha (`import_sheet`): tudo ou nada. O arquivo INTEIRO é
    validado (`sheet.parse_chart_sheet`, em threadpool) ANTES de qualquer escrita;
    só depois a importação trava o plano do cliente, cifra os nomes e grava numa
-   transação só. Reimportação casa por código reduzido: nova entra, existente
-   atualiza nome/tipo/classificação e volta a ativa, ausente vira inativa — nunca
-   apagada.
+   transação só. Reimportação casa por código reduzido e SÓ ADICIONA E ATUALIZA
+   (86e3qhhrm): nova entra, existente que mudou atualiza nome/tipo/classificação, e
+   a ausente fica como estava, com o selo "não veio na última importação". A
+   situação nunca muda pela planilha. A diferença é `diff.diff_chart`, a MESMA da
+   PRÉVIA (`preview_sheet`), que lê a planilha e não grava; e a EXPORTAÇÃO
+   (`export_csv`) devolve o plano no modelo que a importação lê.
 2. **Validar conta para decisão nova** (`require_postable_account`): o validador
    ÚNICO consumido pelo de-para (16.2) e pela conta do banco (16.3). Outro cliente
    ou inexistente → 404 sem vazar existência; sintética ou inativa → 422 tipado.
@@ -21,6 +24,7 @@ são IDs e contagens.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 from uuid import UUID, uuid4
 
@@ -39,6 +43,7 @@ from app.core.exceptions import (
     AccountingAccountInvalidError,
     AccountingAccountNotFoundError,
     AccountingAccountNotPostableError,
+    AccountingChartUndecipherableError,
     ClientClosedError,
 )
 from app.core.logging import get_logger
@@ -47,6 +52,8 @@ from app.db.models.client_accounting_account import (
     AccountingAccountType,
     ClientAccountingAccount,
 )
+from app.modules.client_accounting_chart.diff import ChartDiff, diff_chart
+from app.modules.client_accounting_chart.export import build_chart_csv
 from app.modules.client_accounting_chart.repository import (
     AccountingChartFilters,
     AccountingChartRepository,
@@ -88,17 +95,34 @@ type AccountChange = Literal["nome", "tipo", "classificacao", "situacao"]
 class ChartImportResult:
     """As contagens da importação — a resposta e (16.4) o evento `plano_contabil_importado`.
 
-    `accounts` = contas na planilha; `new` = as que o cliente não tinha;
-    `inactivated` = as que eram ATIVAS e sumiram da planilha (passaram a inativas
-    nesta importação).
+    `accounts` = contas na planilha; `new` = as que o cliente não tinha; `updated` =
+    as existentes em que nome, tipo ou classificação mudaram; `absent` = as do
+    cliente que não vieram na planilha (continuam como estavam, com o selo).
     """
 
     accounts: int
     new: int
-    inactivated: int
+    updated: int
+    absent: int
     #: De onde veio a planilha (`modelo` ou o export nativo do `dominio`). Vai só
     #: para a métrica, não para a resposta.
     layout: ChartLayout = "modelo"
+
+
+@dataclass(frozen=True, slots=True)
+class ChartPreview:
+    """O que a importação de uma planilha FARIA, sem gravar (86e3qhhrm).
+
+    `names` são os nomes ATUAIS decifrados (as ausentes são mostradas por eles);
+    `absent_in_use` são as ausentes que decisões do de-para (qualquer vigência) ou a
+    conta do banco usam: são as que podem levar conta inexistente ao arquivo contábil.
+    """
+
+    accounts: int
+    layout: ChartLayout
+    diff: ChartDiff
+    names: DecryptedNames
+    absent_in_use: frozenset[UUID]
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +138,9 @@ class AccountRef:
     name: str
     name_resolved: bool
     postable: bool
+    #: O selo "não veio na última importação" (86e3qhhrm): a conta pode não existir
+    #: mais no sistema contábil. `None` = veio na última.
+    absent_since: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,6 +240,7 @@ class AccountingChartService:
                 name=names.names.get(a.id, ACCOUNTING_ACCOUNT_UNDECIPHERABLE),
                 name_resolved=a.id in names.names and a.id not in names.failed,
                 postable=not_postable_reason(a) is None,
+                absent_since=a.absent_since,
             )
             for a in accounts
         }
@@ -285,14 +313,15 @@ class AccountingChartService:
         """Importa (ou reimporta) o plano do cliente — tudo ou nada.
 
         Ordem: cliente encerrado (409) → planilha inteira validada em memória (422
-        tipado, nada gravado) → trava por cliente → DEK → escrita numa transação →
-        commit. O commit é daqui (e não do fim do request) porque a métrica da 16.4
-        é emitida DEPOIS dele e nunca pode derrubar a importação gravada.
+        tipado, nada gravado) → trava por cliente → DEK → diferença (`diff_chart`,
+        a mesma da prévia) → escrita numa transação → commit. O commit é daqui (e não
+        do fim do request) porque a métrica da 16.4 é emitida DEPOIS dele e nunca
+        pode derrubar a importação gravada.
+
+        Só a conta nova e a alterada são escritas, mais a que VOLTOU (para tirar o
+        selo); a ausente ganha o selo e mais nada. A situação não muda (86e3qhhrm).
         """
-        if client.closed_at is not None:
-            raise ClientClosedError(
-                f"Cliente {client.id} está encerrado desde {client.closed_at.isoformat()}."
-            )
+        _require_open(client)
         # CPU síncrona fora do event loop (limites do leitor checados antes de iterar).
         parsed = await run_in_threadpool(parse_chart_sheet, content)
         rows = parsed.rows
@@ -300,20 +329,36 @@ class AccountingChartService:
         await self._repo.lock_client_chart(client.id)
         cipher = await self._write_cipher(client)
         author_id = UUID(actor.id)
-        existing = {account.code: account for account in await self._repo.list_all(client.id)}
+        existing = await self._repo.list_all(client.id)
+        current = _decrypt_all(client.id, cipher, existing)
+        diff = diff_chart(rows, existing, names=current.names, failed=current.failed)
 
-        inserts, updates = _plan_writes(
-            client.id, rows, existing, cipher=cipher, author_id=author_id
+        inserts, _ = _plan_writes(client.id, diff.new_rows, {}, cipher=cipher, author_id=author_id)
+        # A que voltou sem mudar também é regravada: é o UPDATE que tira o selo.
+        returned_codes = {account.code for account in diff.returned}
+        to_update = [item.row for item in diff.changed] + [
+            row for row in diff.unchanged_rows if row.code in returned_codes
+        ]
+        _, updates = _plan_writes(
+            client.id,
+            to_update,
+            {account.code: account for account in existing},
+            cipher=cipher,
+            author_id=author_id,
         )
         await self._repo.insert_accounts(inserts)
         await self._repo.update_accounts(updates)
-        inactivated = await self._repo.deactivate_absent(
-            client.id, present_codes=[row.code for row in rows], author_id=author_id
+        newly_absent = await self._repo.mark_absent(
+            client.id, account_ids=[account.id for account in diff.absent], author_id=author_id
         )
         await self._db.commit()
 
         result = ChartImportResult(
-            accounts=len(rows), new=len(inserts), inactivated=inactivated, layout=parsed.layout
+            accounts=len(rows),
+            new=len(inserts),
+            updated=len(diff.changed),
+            absent=len(diff.absent),
+            layout=parsed.layout,
         )
         log.info(
             "accounting_chart_imported",
@@ -321,11 +366,67 @@ class AccountingChartService:
             layout=result.layout,
             accounts=result.accounts,
             new=result.new,
-            updated=len(updates),
-            inactivated=result.inactivated,
+            updated=result.updated,
+            absent=result.absent,
+            newly_absent=newly_absent,
+            returned=len(diff.returned),
         )
         await self._emit_imported(client, result)
         return result
+
+    async def preview_sheet(self, client: Client, *, content: bytes) -> ChartPreview:
+        """O que `import_sheet` faria com esta planilha — SEM GRAVAR (86e3qhhrm).
+
+        O MESMO leitor (os dois layouts e as mesmas recusas 422) e a MESMA diferença
+        da importação. Não trava, não provisiona DEK (cliente sem plano não tem o que
+        decifrar) e não emite evento: é uma leitura. A trilha também não ganha linha
+        (navegação no próprio tenant, §4.7).
+        """
+        _require_open(client)
+        parsed = await run_in_threadpool(parse_chart_sheet, content)
+        existing = await self._repo.list_all(client.id)
+        current = await self.decrypt_names(client, existing)
+        diff = diff_chart(parsed.rows, existing, names=current.names, failed=current.failed)
+        in_use = await self._repo.accounts_in_use(
+            client.id, [account.id for account in diff.absent]
+        )
+        log.info(
+            "accounting_chart_import_previewed",
+            client_id=str(client.id),
+            layout=parsed.layout,
+            accounts=len(parsed.rows),
+            new=len(diff.new_rows),
+            updated=len(diff.changed),
+            absent=len(diff.absent),
+            absent_in_use=len(in_use),
+            returned=len(diff.returned),
+        )
+        return ChartPreview(
+            accounts=len(parsed.rows),
+            layout=parsed.layout,
+            diff=diff,
+            names=current,
+            absent_in_use=frozenset(in_use),
+        )
+
+    async def export_csv(self, client: Client) -> tuple[bytes, int]:
+        """O plano inteiro no modelo da plataforma, em CSV (86e3qhhrm), e quantas contas.
+
+        Todas as contas, ativas e inativas, na ordem do plano: exportar e reimportar
+        o mesmo arquivo não muda nada. Nome que não decifra recusa a exportação (409
+        `PLANO_CONTABIL_INDECIFRAVEL`): o marcador `[indecifrável]` viraria nome de
+        conta na reimportação. Plano vazio sai só com o cabeçalho (é o modelo).
+        """
+        accounts = await self._repo.list_all(client.id)
+        names = await self.decrypt_names(client, accounts)
+        if names.failed:
+            raise AccountingChartUndecipherableError(
+                f"plano contábil do cliente {client.id}: {len(names.failed)} nomes indecifráveis",
+                details={"count": len(names.failed)},
+            )
+        content = await run_in_threadpool(build_chart_csv, accounts, names.names)
+        log.info("accounting_chart_exported", client_id=str(client.id), accounts=len(accounts))
+        return content, len(accounts)
 
     async def create_account(
         self,
@@ -525,7 +626,8 @@ class AccountingChartService:
                 client_id=client.id,
                 contas=result.accounts,
                 contas_novas=result.new,
-                contas_inativadas=result.inactivated,
+                contas_alteradas=result.updated,
+                contas_ausentes=result.absent,
                 layout=result.layout,
             )
         except Exception:
@@ -560,8 +662,8 @@ _NOT_POSTABLE_MESSAGES: dict[NotPostableReason, str] = {
         "Escolha uma conta analítica do plano contábil do cliente."
     ),
     "inativa": (
-        "Esta conta está inativa: ela não veio na última planilha do plano contábil "
-        "importada. Escolha uma conta ativa ou reimporte o plano com ela."
+        "Esta conta está inativa e não recebe lançamento. Escolha uma conta ativa ou "
+        "reative esta conta no plano contábil do cliente."
     ),
 }
 

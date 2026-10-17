@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19, as sprints do agents-hub (tabela da §8) e os épicos de fora do hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **128/128** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **130/130** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -196,7 +196,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**128** hoje — o arquivo é a fonte, confira com
+      (**130** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -204,7 +204,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **128/128**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **130/130**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
@@ -248,7 +248,11 @@
       (`GET /clients/{id}/omie/fornecedores/busca?nome=`, coleção, mesmo guard) e a
       sugestão por linha (`GET /reconciliations/{id}/omie-postings/fornecedores-sugeridos`,
       `DETAIL_PK`, o guard do lançamento: `review_export` + `require_session_access`, e
-      as linhas saem do `SELECT` com o `session_id` da sessão autorizada). Só
+      as linhas saem do `SELECT` com o `session_id` da sessão autorizada). As 2 da
+      reimportação do plano contábil (86e3qhhrm) também são coleção: a prévia
+      (`POST /clients/{id}/accounting-chart/import/preview`, o mesmo guard da importação,
+      não grava) e a exportação (`GET …/accounting-chart/export`, `AccessibleClientDep`
+      como a lista, 1 linha `export` na trilha). Só
       auth, tipos de anomalia, `test-connection`, `alert-test`, as 5 rotas de
       `/organizations` (plataforma, sem dado de cliente), `GET /export-layout-templates`
       (modelos declarados no código, iguais para toda organização) e o `POST /leads`
@@ -1445,8 +1449,14 @@ que vale como lei:
   importado por planilha no modelo da plataforma (`codigo_reduzido;nome;tipo[;classificacao]`)
   ou pelo plano EXPORTADO do Domínio em `.xlsx`, reconhecido pelo cabeçalho e convertido
   para o modelo (`client_accounting_chart/dominio.py`, 86e3gkd7y; o CSV nativo do Domínio
-  não entra), tudo ou nada; reimportar casa por código e a conta que some vira inativa,
-  nunca apagada; nome cifrado, código reduzido em claro; **a lista do plano contábil é na
+  não entra), tudo ou nada; **reimportar só adiciona e atualiza** (86e3qhhrm, decisão do
+  Pedro de 14/10): casa por código, a conta que não veio fica como estava (nunca
+  inativada nem apagada) e ganha o selo `absent_since` ("não veio na última importação",
+  a data da primeira importação em que sumiu, limpo quando ela volta), e a SITUAÇÃO só
+  muda pela edição manual (a planilha também não reativa); a prévia
+  (`…/import/preview`) e a importação usam a MESMA diferença (`diff.diff_chart`), e o
+  plano se exporta no próprio modelo (`…/export`, CSV com BOM, nome com cara de fórmula
+  ganha `'` que a leitura tira: exportar e reimportar não muda nada); nome cifrado, código reduzido em claro; **a lista do plano contábil é na
   ordem da classificação, por `sort_key` derivada na gravação** (`chart_sort_key`, função
   única): a classificação ordena como TEXTO, igual ao Domínio (sob o mesmo pai, `00001…`
   e `001…` são famílias distintas e não se intercalam), e só o código reduzido da conta
@@ -1739,6 +1749,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.99, 17/10/2026. **A reimportação do plano contábil deixou de inativar, ganhou prévia antes de gravar, selo e exportação (86e3qhhrm, subtask 2 do épico 86e3qhhr0, reunião com o Gabriel de 14/10).** Decisão do Pedro: o plano exportado do Domínio pode vir recortado, e a reimportação parcial desligava contas em uso. Agora a conta que não veio fica como estava e ganha `client_accounting_accounts.absent_since` (migration `a94a539e1d34`, reversível, sem backfill: as inativadas pela regra antiga continuam inativas e se reativam pela edição), com a data da PRIMEIRA importação em que sumiu e limpo quando ela volta; a situação não muda pela planilha (nem reativa: export → import seria uma mudança sempre que houvesse conta inativa). `deactivate_absent` saiu; `mark_absent` só põe o selo. A diferença é uma função pura (`client_accounting_chart/diff.py::diff_chart`) consumida pela importação e pela prévia, e a importação só regrava a conta que mudou ou voltou. A resposta e o evento `plano_contabil_importado` trocaram `contasInativadas`/`contas_inativadas` por `contasAlteradas`/`contasAusentes` (`contas_alteradas`/`contas_ausentes`). `POST …/accounting-chart/import/preview` (mesmo leitor, mesmas recusas, mesmo guard, não grava) devolve contagens (novas, alteradas, sem mudança, ausentes, ausentes em uso por decisão do de-para de qualquer vigência ou pela conta do banco, as que voltaram, inativas que vieram), `temMudancas` e as listas, até 200 cada. `GET …/accounting-chart/export` devolve o plano no modelo (CSV UTF-8 com BOM, `;`), todas as contas na ordem do plano, com 1 linha **`export`** na trilha (a task dizia `view`; ficou `export` porque é um arquivo que sai da plataforma, como o de-para), e recusa com 409 `PLANO_CONTABIL_INDECIFRAVEL` se um nome não decifra. Nome que o Excel leria como fórmula (`= + - @`) sai com `'`, que a leitura da planilha retira (`sheet.neutralize_formula`/`restore_formula`, a regra vale também para a conta manual). Na tela: a gaveta sempre revisa antes ("Revisar mudanças" → prévia → "Confirmar"; planilha sem mudança só oferece fechar), selo na coluna Situação, "Baixar planilha" para todo papel que lê, e no de-para o aviso ao escolher (ou abrir) uma conta com o selo, com o selo também no rótulo da opção do seletor (`AccountRef.absent_since`, `accountingAccountAbsentSince` no item e na partida). Endpoints sensíveis 128 → **130** (bateria dos três atacantes nas duas); matriz (**29**) e pares de AAD (**17**) iguais._
 
 _Versão 1.98, 16/10/2026. **O fornecedor do título passou a ser buscado pelo NOME e sugerido pela descrição da compra (86e3qhhrd, subtask 1 do épico 86e3qhhr0, reunião com o Gabriel de 14/10).** Na gaveta "Lançar no Omie" e no fornecedor padrão do editar cliente o campo é um só: com letra é nome (a lista de parecidos aparece na pausa da digitação, 350 ms, mínimo de 3 caracteres úteis), só dígitos é CNPJ como antes. A busca é `GET /clients/{id}/omie/fornecedores/busca?nome=`: "contém" por pedaço, sem acento e sem caixa, sobre razão social, nome fantasia e dígitos do CNPJ, só cadastros ATIVOS, no máximo 20 com `total` e `truncated`, quem começa pelo texto primeiro; sai de um diretório em memória por cliente (`OmieFornecedoresDirectoryCache`, 6 h, trava por cliente no miss, `refresh=true` no "Atualizar lista"), lido por `OmieClient.listar_clientes` (o `ListarClientes` capturado em 13/10 sem o `clientesFiltro`, página de 50, teto de 100 páginas, `5113` vira lista vazia). Não houve captura nova: o request é o da captura menos o filtro, e o diretório vazio é inferência do `5113` da busca por CNPJ. A sugestão é `GET /reconciliations/{id}/omie-postings/fornecedores-sugeridos?file_entry_id=…` (até 200 linhas): o servidor decifra a descrição (que nunca vai na URL) e devolve os cadastros com a MAIOR `supplier_affinity`, a mesma do cruzamento, empates incluídos, até 3; só a melhor contagem volta porque "DEMO" sozinho sugeria todo cadastro "DEMO". A pessoa confirma com um clique, nada é aplicado sozinho. O pedido de lançamento ganhou `codigo_fornecedor` (só na provisão, exclusivo com `cnpj_fornecedor`): o cadastro escolhido vai sem nova busca, inclusive fornecedor do exterior sem CNPJ, que só o nome acha; o `SupplierValue` `found` da tela passou a carregar só o cadastro e manda o código também quando veio pela busca por CNPJ. `ClienteOmie` e `OmieFornecedorItem` ganharam `cnpj_cpf` (em memória até a tela, nunca persiste). De carona, um 500 latente vizinho: `omie_default_supplier_code` e `?codigo=` aceitavam inteiro acima do BIGINT; `OMIE_CODE_MAX` é o teto dos três. Regra nova na §7 Backend (busca ao digitar sobre dado do ERP). Endpoints sensíveis 126 → **128** (bateria dos três atacantes nas duas); matriz (**29**) e pares de AAD (**17**) iguais._
 
