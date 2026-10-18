@@ -23,18 +23,24 @@ from sqlalchemy import CheckConstraint, UniqueConstraint
 from app.core import crypto_service
 from app.db.models import (
     ACCOUNTING_ACCOUNT_NAME_PAIR_CONSTRAINT,
+    ACCOUNTING_ACCOUNT_PARTY_PAIR_CONSTRAINT,
+    ACCOUNTING_ACCOUNT_PARTY_TYPE_CONSTRAINT,
     ACCOUNTING_ACCOUNT_TYPE_CONSTRAINT,
     MAX_ACCOUNTING_ACCOUNT_CLASSIFICATION_CHARS,
     MAX_ACCOUNTING_ACCOUNT_CODE_CHARS,
     UQ_ACCOUNTING_ACCOUNT_CLIENT_CODE,
     AccountingAccountType,
+    AccountingPartyType,
+    Client,
     ClientAccountingAccount,
     ClientCategory,
     ClientChartOfAccount,
     accounting_account_name_pair_check,
+    accounting_account_party_pair_check,
+    accounting_account_party_type_check,
     accounting_account_type_check,
 )
-from app.db.models.client import IV_HEX_LENGTH
+from app.db.models.client import IV_HEX_LENGTH, PARTY_REPORTS_FINGERPRINT_HEX_LENGTH
 from app.modules.clients.repository import ClientRepository
 
 _MIGRATION = "e3a7c1f95b40_s16_client_accounting_accounts.py"
@@ -83,7 +89,41 @@ class TestModeloEMigrationBatem:
         # `sort_key` nasceu depois, em `b2f7c9e41d06` (86e3n70p9); a comparação dela
         # com o modelo é de `tests/unit/test_accounting_chart_sort_key.py`. O selo
         # `absent_since` nasceu em `a94a539e1d34` (86e3qhhrm), conferido logo abaixo.
-        assert migration_columns | {"sort_key", "absent_since"} == model_columns
+        # 86e3qhhrn (`7c3e9a1d5f28`): o vínculo conta ↔ pessoa, conferido logo abaixo.
+        party_columns = {"party_document_encrypted", "party_document_iv", "party_type"}
+        assert migration_columns | {"sort_key", "absent_since"} | party_columns == model_columns
+
+    def test_vinculo_de_terceiros_da_migration_bate_com_o_modelo(self) -> None:
+        """86e3qhhrn: os CHECKs e os tamanhos do vínculo são SNAPSHOTS do modelo."""
+        path = next(_VERSIONS.glob("7c3e9a1d5f28_*.py"))
+        spec = importlib.util.spec_from_file_location("mig_party_links", path)
+        assert spec is not None
+        assert spec.loader is not None
+        mig = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mig)
+        assert mig.down_revision == "a94a539e1d34"
+        assert accounting_account_party_pair_check() == mig._CK_PARTY_PAIR
+        assert accounting_account_party_type_check() == mig._CK_PARTY_TYPE
+        prefix = "ck_client_accounting_accounts_"
+        assert prefix + mig._CK_PARTY_PAIR_LABEL == ACCOUNTING_ACCOUNT_PARTY_PAIR_CONSTRAINT
+        assert prefix + mig._CK_PARTY_TYPE_LABEL == ACCOUNTING_ACCOUNT_PARTY_TYPE_CONSTRAINT
+        table = ClientAccountingAccount.__table__
+        assert table.c.party_document_iv.type.length == mig._IV_HEX_LENGTH == IV_HEX_LENGTH
+        assert table.c.party_type.type.length == mig._TYPE_MAX
+        for column in ("party_document_encrypted", "party_document_iv", "party_type"):
+            assert table.c[column].nullable is True, column
+        fingerprint = Client.__table__.c.party_reports_company_fingerprint
+        assert fingerprint.nullable is True
+        assert (
+            fingerprint.type.length
+            == mig._FINGERPRINT_HEX_LENGTH
+            == PARTY_REPORTS_FINGERPRINT_HEX_LENGTH
+        )
+        assert {m.value for m in AccountingPartyType} == {"cliente", "fornecedor"}
+        assert crypto_service.AAD_ACCOUNTING_ACCOUNT_PARTY_DOCUMENT == (
+            "client_accounting_accounts",
+            "party_document_encrypted",
+        )
 
     def test_selo_de_ausente_da_migration_bate_com_o_modelo(self) -> None:
         """86e3qhhrm: a coluna do selo é nullable e com fuso, nos dois lados."""
@@ -161,6 +201,9 @@ class TestModeloDeclaraAsGarantias:
         assert checks == {
             ACCOUNTING_ACCOUNT_NAME_PAIR_CONSTRAINT: accounting_account_name_pair_check(),
             ACCOUNTING_ACCOUNT_TYPE_CONSTRAINT: accounting_account_type_check(),
+            # 86e3qhhrn: o vínculo conta ↔ pessoa (documento, IV e tipo juntos; tipo fechado).
+            ACCOUNTING_ACCOUNT_PARTY_PAIR_CONSTRAINT: accounting_account_party_pair_check(),
+            ACCOUNTING_ACCOUNT_PARTY_TYPE_CONSTRAINT: accounting_account_party_type_check(),
         }
 
     def test_tipo_e_o_vocabulario_fechado(self) -> None:

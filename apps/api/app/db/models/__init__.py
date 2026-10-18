@@ -22,6 +22,8 @@ from app.db.models.client import (
 )
 from app.db.models.client_accounting_account import (
     ACCOUNTING_ACCOUNT_NAME_PAIR_CONSTRAINT,
+    ACCOUNTING_ACCOUNT_PARTY_PAIR_CONSTRAINT,
+    ACCOUNTING_ACCOUNT_PARTY_TYPE_CONSTRAINT,
     ACCOUNTING_ACCOUNT_SORT_KEY_COLLATION,
     ACCOUNTING_ACCOUNT_TYPE_CONSTRAINT,
     IX_ACCOUNTING_ACCOUNT_CLIENT_SORT_KEY,
@@ -31,8 +33,11 @@ from app.db.models.client_accounting_account import (
     MAX_ACCOUNTING_ACCOUNT_SORT_KEY_CHARS,
     UQ_ACCOUNTING_ACCOUNT_CLIENT_CODE,
     AccountingAccountType,
+    AccountingPartyType,
     ClientAccountingAccount,
     accounting_account_name_pair_check,
+    accounting_account_party_pair_check,
+    accounting_account_party_type_check,
     accounting_account_type_check,
 )
 from app.db.models.client_assignment import (
@@ -245,6 +250,8 @@ from app.db.models.user_client_favorite import UQ_USER_CLIENT_FAVORITE, UserClie
 
 __all__ = [
     "ACCOUNTING_ACCOUNT_NAME_PAIR_CONSTRAINT",
+    "ACCOUNTING_ACCOUNT_PARTY_PAIR_CONSTRAINT",
+    "ACCOUNTING_ACCOUNT_PARTY_TYPE_CONSTRAINT",
     "ACCOUNTING_ACCOUNT_SORT_KEY_COLLATION",
     "ACCOUNTING_ACCOUNT_TYPE_CONSTRAINT",
     "ACCOUNTING_DESTINATION_TYPE",
@@ -344,6 +351,7 @@ __all__ = [
     "AccessAudit",
     "AccountingAccountType",
     "AccountingFileGeneration",
+    "AccountingPartyType",
     "AnomalyDetectedBy",
     "AnomalyReviewVerdict",
     "AnomalySeverity",
@@ -421,6 +429,8 @@ __all__ = [
     "UserRole",
     "UserScope",
     "accounting_account_name_pair_check",
+    "accounting_account_party_pair_check",
+    "accounting_account_party_type_check",
     "accounting_account_type_check",
     "card_posting_date_mode_check",
     "chart_of_accounts_status_check",

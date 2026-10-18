@@ -689,6 +689,8 @@ const FILE_REFUSALS: Record<'cabecalho' | 'linhas', Record<string, unknown>> = {
  */
 let accountingChartEmpty = false;
 let accountingImportOutcome: 'sucesso' | 'linhas' | 'dominio' = 'sucesso';
+/** 86e3qhhrn — a importação da relação de clientes/fornecedores: sucesso ou recusa. */
+let partiesImportOutcome: 'sucesso' | 'linhas' = 'sucesso';
 
 function accountingAccount(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -804,6 +806,77 @@ const ACCOUNTING_IN_USE_REFUSAL = {
   userMessage:
     'Esta conta não pode ficar inativa: ela está em uso por 3 decisões do de-para e 1 conta do banco. Aponte essas configurações para outra conta antes.',
   details: { reason: 'inativa', decisionCount: 3, bindingCount: 1 },
+};
+
+/**
+ * 86e3qhhrn — os vínculos conta ↔ cliente/fornecedor, como o servidor os devolve: o
+ * documento já MASCARADO (a tela nunca recebe o inteiro), o tipo e o resumo.
+ */
+const PARTY_LINKS = [
+  {
+    accountId: 'acc-649',
+    code: '649',
+    name: 'Banco conta movimento',
+    nameResolved: true,
+    active: true,
+    partyType: 'cliente',
+    documentKind: 'cnpj',
+    documentMasked: '**.***.***/0001-81',
+    documentResolved: true,
+    updatedAt: '2026-10-17T12:00:00Z',
+  },
+  {
+    accountId: 'acc-662',
+    code: '662',
+    name: 'Aluguéis a receber - Inquilino D',
+    nameResolved: true,
+    active: true,
+    partyType: 'cliente',
+    documentKind: 'cpf',
+    documentMasked: '***.***.*47-25',
+    documentResolved: true,
+    updatedAt: '2026-10-17T12:00:00Z',
+  },
+  {
+    accountId: 'acc-5101',
+    code: '5101',
+    name: 'Receita de aluguéis',
+    nameResolved: true,
+    active: true,
+    partyType: 'fornecedor',
+    documentKind: 'cnpj',
+    documentMasked: '**.***.***/0001-10',
+    documentResolved: true,
+    updatedAt: '2026-10-17T12:00:00Z',
+  },
+];
+const PARTIES_IMPORT_RESULT = {
+  relatorio: 'fornecedor',
+  linhas: 93,
+  contasVinculadas: 88,
+  vinculosNovos: 88,
+  vinculosAtualizados: 0,
+  vinculosSemMudanca: 0,
+  naoVinculadas: [
+    { line: 46, reason: 'sem_conta', accountCode: '0' },
+    { line: 54, reason: 'conta_compartilhada', accountCode: '746' },
+    { line: 95, reason: 'conta_compartilhada', accountCode: '746' },
+  ],
+  naoVinculadasTotal: 3,
+  listLimit: 50,
+};
+const PARTIES_IMPORT_REFUSAL = {
+  code: 'LINHAS_INVALIDAS',
+  message: 'relatório de terceiros: 2 linha(s) inválida(s)',
+  userMessage:
+    'O relatório tem linhas que não puderam ser lidas com segurança. Confira as linhas apontadas (ou exporte o relatório de novo) — nenhum vínculo foi gravado.',
+  details: {
+    lines: [
+      { line: 9, reason: 'conta_nao_encontrada', accountCode: '685' },
+      { line: 12, reason: 'conta_sintetica', accountCode: '10' },
+    ],
+    total: 2,
+  },
 };
 
 /** Contas de origem: uma Omie associada, uma Omie PENDENTE e o slot padrão pendente. */
@@ -2489,6 +2562,35 @@ async function fulfillApi(route: Route): Promise<void> {
   // conta receber só analíticas ativas como o servidor faria.
   // 86e3qhhrm — a prévia lê o MESMO arquivo e responde as MESMAS recusas da
   // importação; sem recusa, a 662 (a conta do banco do mock) não veio e está em uso.
+  // 86e3qhhrn — vínculo conta ↔ cliente/fornecedor. A lista é o trio REAL
+  // `{ data, pagination, summary }` (`fulfill` cru); o filtro `type` recorta no mock.
+  if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/parties/import`) {
+    if (partiesImportOutcome === 'linhas') {
+      return route.fulfill({
+        status: 422,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: PARTIES_IMPORT_REFUSAL }),
+      });
+    }
+    return json(PARTIES_IMPORT_RESULT);
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/parties`) {
+    const tipo = url.searchParams.get('type');
+    const vinculos = PARTY_LINKS.filter((v) => tipo === null || v.partyType === tipo);
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: vinculos,
+        pagination: { page: 1, pageSize: 50, total: vinculos.length, totalPages: 1 },
+        summary: {
+          contasVinculadas: PARTY_LINKS.length,
+          clientes: PARTY_LINKS.filter((v) => v.partyType === 'cliente').length,
+          fornecedores: PARTY_LINKS.filter((v) => v.partyType === 'fornecedor').length,
+        },
+      }),
+    });
+  }
   if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/import/preview`) {
     if (enviouXls(route)) return recusarXls(route);
     if (accountingImportOutcome === 'linhas' || accountingImportOutcome === 'dominio') {
@@ -3833,6 +3935,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   // S16: o cliente TEM plano contábil e a importação dá certo, por padrão.
   accountingChartEmpty = false;
   accountingImportOutcome = 'sucesso';
+  partiesImportOutcome = 'sucesso';
   mappingAccountingDestination = false;
   mappingBankPending = false;
   // S13: a organização tem dois layouts, por padrão.
@@ -9359,6 +9462,83 @@ for (const vp of VIEWPORTS) {
 
       await shot(page, `plano-contabil-lista-${slugPC16}`);
       await analyze(page, `plano contábil — lista com plano (${vp.label})`);
+    });
+
+    test('aba Clientes e fornecedores: documento mascarado, importação e recusa (86e3qhhrn)', async ({
+      page,
+    }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil?aba=clientes-fornecedores`);
+
+      const abas = page.getByRole('tablist', { name: 'Seções do plano contábil' });
+      await expect(abas.getByRole('tab', { name: 'Clientes e fornecedores' })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+      const regiao = page.getByRole('region', {
+        name: 'Contas com vínculo a cliente ou fornecedor (rolável)',
+      });
+      await expect(regiao.getByRole('row')).toHaveCount(PARTY_LINKS.length + 1);
+      // O documento chega MASCARADO do servidor; nenhum CNPJ/CPF inteiro na página.
+      await expect(regiao.getByText('**.***.***/0001-81')).toBeVisible();
+      await expect(regiao.getByText('***.***.*47-25')).toBeVisible();
+      expect(await page.locator('main').textContent()).not.toMatch(/\d{14}|\d{11}/);
+      const resumo = page.getByTestId('accounting-parties-summary');
+      await expect(resumo).toContainText('Contas vinculadas');
+      const importar = page.getByRole('button', { name: 'Importar relação' });
+      await exigirDentroDaViewport(page, importar, `${vp.label}: "Importar relação"`);
+      await shot(page, `plano-contabil-vinculos-${slugPC16}`);
+      await analyze(page, `plano contábil — aba clientes e fornecedores (${vp.label})`);
+
+      // O filtro recorta pela URL (o mock filtra como o servidor).
+      await page.getByRole('button', { name: 'Fornecedores' }).click();
+      await expect(regiao.getByRole('row')).toHaveCount(2);
+      await page.getByRole('button', { name: 'Todas' }).click();
+
+      // Importar: sucesso com as linhas que ficaram SEM vínculo (conta e motivo).
+      const campo = page.getByLabel('Relação exportada do Domínio (.xls ou .xlsx)');
+      await campo.setInputFiles({
+        name: 'RELAÇÃO DE FORNECEDORES.xls',
+        mimeType: 'application/vnd.ms-excel',
+        buffer: Buffer.from('xls de teste'),
+      });
+      await importar.click();
+      const sucesso = page.getByTestId('accounting-parties-import-success');
+      await expect(sucesso).toContainText('Relação de fornecedores importada: 93 pessoas');
+      await expect(sucesso.getByRole('cell', { name: '746' }).first()).toBeVisible();
+      await expect(
+        sucesso.getByText(/Conta compartilhada por mais de uma pessoa/).first(),
+      ).toBeVisible();
+      await aguardarToastEstavel(page);
+      await shot(page, `plano-contabil-vinculos-importado-${slugPC16}`);
+      await analyze(page, `plano contábil — relação importada (${vp.label})`);
+
+      // Recusa: conta fora do plano vira tabela linha x conta x motivo, nunca toast.
+      partiesImportOutcome = 'linhas';
+      await campo.setInputFiles({
+        name: 'RELAÇÃO DE CLIENTES.xls',
+        mimeType: 'application/vnd.ms-excel',
+        buffer: Buffer.from('xls de teste'),
+      });
+      await importar.click();
+      const recusa = page.getByTestId('accounting-parties-refusal');
+      await expect(recusa).toHaveAttribute('data-refusal-code', 'LINHAS_INVALIDAS');
+      await expect(recusa.getByRole('cell', { name: '685' })).toBeVisible();
+      await expect(
+        recusa.getByText('Conta não encontrada no plano contábil do cliente'),
+      ).toBeVisible();
+      await shot(page, `plano-contabil-vinculos-recusa-${slugPC16}`);
+      await analyze(page, `plano contábil — relação recusada (${vp.label})`);
+
+      // Usuário do cliente: sem a faixa de abas, e o deep link cai em "Contas".
+      sessionUser = CLIENT_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil?aba=clientes-fornecedores`);
+      await expect(page.getByRole('heading', { name: 'Plano contábil', level: 1 })).toBeVisible();
+      await expect(page.getByRole('tablist')).toHaveCount(0);
+      await expect(page.getByTestId('accounting-parties-tab')).toHaveCount(0);
+      await expect(
+        page.getByRole('region', { name: 'Contas do plano contábil (rolável)' }),
+      ).toBeVisible();
     });
 
     test('lista vazia: o modelo da planilha documentado e Importar só para quem pode', async ({

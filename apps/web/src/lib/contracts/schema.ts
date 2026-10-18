@@ -679,6 +679,40 @@ export interface paths {
         patch: operations["update_accounting_account_api_v1_clients__client_id__accounting_chart_accounts__account_id__patch"];
         trace?: never;
     };
+    "/api/v1/clients/{client_id}/accounting-chart/parties/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Importa a RELAÇÃO DE CLIENTES ou a RELAÇÃO DE FORNECEDORES exportada do Domínio (XLS ou XLSX, reconhecida pelo título e pelo cabeçalho `Código`/`Conta`/`Nome`/`Razão Social`/`C.N.P.J./C.P.F.`, em qualquer ordem de colunas) e vincula cada conta do plano contábil do cliente (a coluna `Conta` é o código reduzido) ao CNPJ ou CPF da pessoa, cifrado com a chave do cliente. O tipo do vínculo (`cliente`/`fornecedor`) vem do título do relatório. Por arquivo, tudo ou nada: conta que não existe no plano ou é sintética recusa o arquivo inteiro com 422 `LINHAS_INVALIDAS` (`details.lines=[{line, reason, accountCode}]`, `reason` ∈ `conta_nao_encontrada`, `conta_sintetica`, `conta_ausente`, `linha_fora_do_bloco`). Não recusam, mas ficam SEM vínculo e voltam em `naoVinculadas`: conta `0` (`sem_conta`), `documento_ausente`, `documento_invalido` (dígito verificador errado no Domínio) e `conta_compartilhada` (a mesma conta em mais de uma pessoa). Reimportar é idempotente; a conta vinculada que não vem no relatório fica como está. O CNPJ da empresa no cabeçalho do relatório é comparado (por impressão digital, nunca em claro) com o dos relatórios já importados: outra empresa é 422 `RELATORIO_DE_OUTRA_EMPRESA`. Arquivo que não é a relação: 422 `CABECALHO_DIVERGENTE`; sem título ou sem o CNPJ da empresa: 422 `ARQUIVO_INVALIDO` com `details.reason` (`relatorio_nao_reconhecido`, `empresa_nao_identificada`, `sem_pessoas`); CSV ou PDF: 422 `FORMATO_NAO_SUPORTADO`. Requer `manage_client_accounting_chart`; cliente encerrado 409. Nenhum documento, nome ou razão social sai na resposta nem vai para o log. */
+        post: operations["import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/accounting-chart/parties": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista as contas do plano contábil do cliente COM vínculo a um cliente ou fornecedor (importado das relações do Domínio): conta, nome (decifrado na leitura), tipo do vínculo e o documento MASCARADO (`**.***.***\/0001-91` para CNPJ, `***.***.*89-00` para CPF; o inteiro nunca sai da API), paginado (`page`/`pageSize`, máximo 100) na ordem do plano, com o filtro `type` (`cliente`/`fornecedor`) e o resumo `summary` (`contasVinculadas`, `clientes`, `fornecedores`). Requer `manage_client_accounting_chart` (documento de terceiro é configuração do escritório); cliente encerrado continua legível, com o documento sem máscara nenhuma (`documentResolved=false`). */
+        get: operations["list_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/source-accounts": {
         parameters: {
             query?: never;
@@ -2425,6 +2459,16 @@ export interface components {
             pagination: components["schemas"]["PaginationMeta"];
         };
         /**
+         * AccountingPartyType
+         * @description De que relatório do Domínio veio o vínculo conta ↔ pessoa (86e3qhhrn).
+         *
+         *     Fonte ÚNICA do CHECK `party_type`. `cliente` vem da "RELAÇÃO DE CLIENTES" e
+         *     `fornecedor` da "RELAÇÃO DE FORNECEDORES"; a conta que aparece nos dois fica com o
+         *     tipo do ÚLTIMO relatório importado (a mesma pessoa pode ser as duas coisas).
+         * @enum {string}
+         */
+        AccountingPartyType: "cliente" | "fornecedor";
+        /**
          * AddClientManagerRequest
          * @description Body de POST /api/v1/clients/{id}/managers — concede ACESSO a um gerente.
          */
@@ -2909,6 +2953,14 @@ export interface components {
             /**
              * File
              * @description CSV (`;`, UTF-8), XLSX ou XLS no modelo, ou o plano exportado do Domínio.
+             */
+            file: string;
+        };
+        /** Body_import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post */
+        Body_import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post: {
+            /**
+             * File
+             * @description A RELAÇÃO DE CLIENTES ou a RELAÇÃO DE FORNECEDORES do Domínio (XLS/XLSX).
              */
             file: string;
         };
@@ -6627,6 +6679,130 @@ export interface components {
             pct?: string | null;
         };
         /**
+         * PartiesImportEnvelope
+         * @description Body de `POST /clients/{client_id}/accounting-chart/parties/import`.
+         */
+        PartiesImportEnvelope: {
+            data: components["schemas"]["PartiesImportPayload"];
+        };
+        /**
+         * PartiesImportPayload
+         * @description As contagens da importação de uma relação — só números, o tipo e as linhas puladas.
+         */
+        PartiesImportPayload: {
+            /** @description `cliente` (RELAÇÃO DE CLIENTES) ou `fornecedor` (RELAÇÃO DE FORNECEDORES). */
+            relatorio: components["schemas"]["AccountingPartyType"];
+            /**
+             * Linhas
+             * @description Pessoas no relatório.
+             */
+            linhas: number;
+            /**
+             * Contasvinculadas
+             * @description Contas do plano com vínculo depois desta importação (novas + atualizadas + sem mudança).
+             */
+            contasVinculadas: number;
+            /** Vinculosnovos */
+            vinculosNovos: number;
+            /**
+             * Vinculosatualizados
+             * @description Contas já vinculadas cujo documento ou tipo mudou.
+             */
+            vinculosAtualizados: number;
+            /** Vinculossemmudanca */
+            vinculosSemMudanca: number;
+            /**
+             * Naovinculadas
+             * @description Até 50 linhas que ficaram sem vínculo, na ordem do relatório.
+             */
+            naoVinculadas: components["schemas"]["PartySkippedLine"][];
+            /** Naovinculadastotal */
+            naoVinculadasTotal: number;
+            /** Listlimit */
+            listLimit: number;
+        };
+        /**
+         * PartyLinkResponse
+         * @description Uma conta do plano COM vínculo: a conta, o tipo e o documento MASCARADO.
+         */
+        PartyLinkResponse: {
+            /**
+             * Accountid
+             * Format: uuid
+             */
+            accountId: string;
+            /** Code */
+            code: string;
+            /**
+             * Name
+             * @description Nome da conta, decifrado na leitura (`[indecifrável]` se não abrir).
+             */
+            name: string;
+            /** Nameresolved */
+            nameResolved: boolean;
+            /** Active */
+            active: boolean;
+            partyType: components["schemas"]["AccountingPartyType"];
+            /**
+             * Documentkind
+             * @description `cnpj` ou `cpf`; `null` quando o documento não decifrou.
+             */
+            documentKind?: ("cnpj" | "cpf") | null;
+            /**
+             * Documentmasked
+             * @description O documento com a raiz escondida (`**.***.***\/0001-91`, `***.***.*89-00`). O documento inteiro nunca sai da API.
+             */
+            documentMasked?: string | null;
+            /**
+             * Documentresolved
+             * @description `false` = o documento não decifrou (cliente encerrado) e sai sem máscara nenhuma.
+             */
+            documentResolved: boolean;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /**
+         * PartyLinksListResponse
+         * @description Body de `GET /clients/{client_id}/accounting-chart/parties`.
+         */
+        PartyLinksListResponse: {
+            /** Data */
+            data: components["schemas"]["PartyLinkResponse"][];
+            pagination: components["schemas"]["PaginationMeta"];
+            summary: components["schemas"]["PartyLinksSummaryPayload"];
+        };
+        /**
+         * PartyLinksSummaryPayload
+         * @description Quantas contas do plano têm vínculo, por tipo — só contagens.
+         */
+        PartyLinksSummaryPayload: {
+            /** Contasvinculadas */
+            contasVinculadas: number;
+            /** Clientes */
+            clientes: number;
+            /** Fornecedores */
+            fornecedores: number;
+        };
+        /**
+         * PartySkippedLine
+         * @description Uma linha do relatório que ficou SEM vínculo: linha, motivo fechado e o código da
+         *     conta (nunca o documento, o nome nem a razão social).
+         */
+        PartySkippedLine: {
+            /** Line */
+            line: number;
+            /**
+             * Reason
+             * @description `sem_conta` (conta 0 no Domínio), `documento_ausente`, `documento_invalido` (dígito verificador errado no Domínio) ou `conta_compartilhada` (a mesma conta em mais de uma pessoa: vínculo um-para-um impossível).
+             */
+            reason: string;
+            /** Accountcode */
+            accountCode?: string | null;
+        };
+        /**
          * PendingSourceAccountResponse
          * @description S16 (16.3) — uma conta de origem SEM conta do banco (só identificadores).
          */
@@ -9629,6 +9805,83 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccountingAccountEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartiesImportEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_get: {
+        parameters: {
+            query?: {
+                /** @description Página, a partir de 1. */
+                page?: number;
+                /** @description Itens por página (máx. 100). */
+                pageSize?: number;
+                /** @description `cliente` ou `fornecedor`. Ausente = os dois. */
+                type?: components["schemas"]["AccountingPartyType"] | null;
+            };
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartyLinksListResponse"];
                 };
             };
             /** @description Validation Error */

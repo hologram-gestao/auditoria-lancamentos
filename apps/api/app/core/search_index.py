@@ -159,3 +159,17 @@ def compute_query_hmacs(term: str, hex_key: str) -> list[str]:
         return []
     key_bytes = _key_to_bytes(hex_key)
     return [_hmac_token(token, key_bytes) for token in tokens]
+
+
+def compute_fingerprint(value: str, hex_key: str) -> str:
+    """HMAC-SHA256 INTEIRO (64 hex) de um valor já normalizado — para comparar, nunca ler.
+
+    Nasceu para a impressão digital da EMPRESA dos relatórios de clientes e
+    fornecedores do Domínio (86e3qhhrn): o CNPJ do cabeçalho do relatório não
+    persiste em claro (§4.5), mas a plataforma precisa reconhecer "este relatório é
+    da mesma empresa do anterior". Chaveado com a `SEARCH_BLIND_INDEX_KEY`, como o
+    índice de busca; diferente dele, não trunca (não há coluna `LIKE` a economizar) e
+    não tokeniza: o valor entra como está.
+    """
+    key_bytes = _key_to_bytes(hex_key)
+    return hmac.new(key_bytes, value.encode("utf-8"), sha256).hexdigest()

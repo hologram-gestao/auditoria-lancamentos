@@ -242,6 +242,15 @@ class UsageEventName(StrEnum):
     #     count(*) WHERE event = 'plano_contabil_conta_editada'
     #       GROUP BY props->>'operacao'
     PLANO_CONTABIL_CONTA_EDITADA = "plano_contabil_conta_editada"
+    # 86e3qhhrn — importação de uma RELAÇÃO DE CLIENTES/FORNECEDORES do Domínio, que
+    # vincula contas do plano contábil a um CNPJ/CPF. De BACKEND, sem `session_id`,
+    # fora da dedup: cada importação bem-sucedida é uma linha, depois do commit (a
+    # recusa 422 não emite). Só o id do cliente, o tipo do relatório e contagens:
+    # NUNCA documento, código nem nome.
+    #
+    # Leitura (quantos clientes têm vínculo e quanto cada importação muda):
+    #     count(DISTINCT props->>'client_id') WHERE event = 'plano_contabil_vinculos_importados'
+    PLANO_CONTABIL_VINCULOS_IMPORTADOS = "plano_contabil_vinculos_importados"
     # Sprint 13 (BACK 13.1, emitido pela geração do arquivo contábil da 13.4) —
     # **a métrica da Sprint 13**. De BACKEND, sem `session_id`, fora da dedup:
     # cada geração (inclusive a segunda da mesma materialização) é uma linha.
@@ -686,6 +695,30 @@ class PlanoContabilContaEditadaProps(_StrictProps):
     account_id: UUID
     operacao: Literal["criada", "editada"]
     campos: list[AccountChangeField] = Field(max_length=4)
+
+
+#: De que relatório veio o vínculo (86e3qhhrn). Espelho de
+#: `db.models.client_accounting_account.AccountingPartyType` (o teste da métrica compara).
+PartyReportKind = Literal["cliente", "fornecedor"]
+
+
+class PlanoContabilVinculosImportadosProps(_StrictProps):
+    """`plano_contabil_vinculos_importados` (86e3qhhrn) — o cliente, o relatório e contagens.
+
+    `linhas` é quantas pessoas o relatório trazia; `vinculos_novos`, `vinculos_atualizados`
+    e `vinculos_sem_mudanca` somam as contas vinculadas; `nao_vinculadas` são as linhas
+    que o relatório trouxe sem conta (`0`), sem documento, com documento inválido no
+    Domínio ou com a conta compartilhada por mais de uma pessoa. Nenhum `str` livre:
+    documento e código de conta não têm onde caber (o guardrail anti-PII trava).
+    """
+
+    client_id: UUID
+    relatorio: PartyReportKind
+    linhas: int = Field(ge=0)
+    vinculos_novos: int = Field(ge=0)
+    vinculos_atualizados: int = Field(ge=0)
+    vinculos_sem_mudanca: int = Field(ge=0)
+    nao_vinculadas: int = Field(ge=0)
 
 
 class OrganizacaoCriadaProps(_StrictProps):

@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19, as sprints do agents-hub (tabela da §8) e os épicos de fora do hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **130/130** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **132/132** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -196,7 +196,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**130** hoje — o arquivo é a fonte, confira com
+      (**132** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -204,7 +204,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **130/130**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **132/132**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
@@ -226,7 +226,10 @@
       (`GET`/`PUT /clients/{id}/source-accounts`), mais a inclusão e a edição manual de
       UMA conta do plano (86e3nb816: `POST …/accounting-chart/accounts`, coleção, e
       `PATCH …/accounting-chart/accounts/{account_id}`, `DETAIL_PK` com `client_id` no
-      próprio SELECT). As 8 da S13 (arquivo contábil)
+      próprio SELECT), e as 2 do vínculo conta contábil ↔ cliente/fornecedor (86e3qhhrn:
+      `POST …/accounting-chart/parties/import` e `GET …/accounting-chart/parties`,
+      coleção, as duas sob `manage_client_accounting_chart`, o documento só sai
+      MASCARADO). As 8 da S13 (arquivo contábil)
       também: gerar, listar e baixar
       (`POST`/`GET /clients/{id}/accounting-files`,
       `GET …/accounting-files/{generation_id}/download`) e as 5 dos layouts de
@@ -395,7 +398,7 @@
    `[indecifrável]` + métrica `decrypt_failed` (não célula silenciosamente
    vazia sem sinal).
    **A fonte ÚNICA da lista são as constantes de AAD declaradas em
-   [apps/api/app/core/crypto_service.py](apps/api/app/core/crypto_service.py)** (17
+   [apps/api/app/core/crypto_service.py](apps/api/app/core/crypto_service.py)** (18
    hoje) — campo cifrado novo entra lá E aqui, na mesma entrega. Os pares
    (tabela, coluna) do AAD são **congelados**: renomear um invalida a decifragem de
    tudo que já foi gravado com ele. Campos:
@@ -432,6 +435,11 @@
      padrão da decisão no destino `conta_contabil`, texto livre escrito pelo
      escritório. O AAD usa a pk da DECISÃO (append-only): trocar o histórico é
      uma vigência nova, nunca UPDATE sobre o texto cifrado.
+   - `client_accounting_accounts.party_document_encrypted` (86e3qhhrn) — o CNPJ ou
+     CPF do cliente ou fornecedor a quem a conta do plano contábil pertence, como vem
+     das relações "RELAÇÃO DE CLIENTES/FORNECEDORES" do Domínio; só os dígitos, pk da
+     conta no AAD. O tipo do vínculo (`party_type`, `cliente`/`fornecedor`) fica em
+     claro: vocabulário fechado. O CHECK `party_pair` amarra documento, IV e tipo.
 2. **IV novo a cada operação** (12 bytes aleatórios). Nunca reutilize.
 3. **Valores monetários em claro** (campos `amount`, `balance`) — são números sem identificação, sem valor isolado.
 4. **Datas em claro** (`transaction_date`, `reference_month`) — necessárias para SQL ordering/filtering.
@@ -573,6 +581,24 @@
      categoria). O código do fornecedor padrão não é conferido no Omie ao gravar: quem o
      escolhe é a busca por CNPJ da tela, e um código que sumir falha no título com a
      mensagem da Omie.
+   - **O vínculo conta contábil ↔ cliente/fornecedor vem das relações do Domínio, por
+     arquivo e tudo ou nada** (86e3qhhrn): `POST …/accounting-chart/parties/import` lê a
+     "RELAÇÃO DE CLIENTES" ou a "RELAÇÃO DE FORNECEDORES" (`.xls` com o mesmo defeito dos
+     BLANKs do plano; colunas pelo NOME, porque os dois relatórios trocam `Código` e
+     `Conta` de lugar; o tipo do vínculo vem do TÍTULO, nunca é perguntado) e grava, em
+     cada conta do plano, o documento cifrado. Conta que não existe no plano ou é
+     sintética recusa o arquivo inteiro (422 `LINHAS_INVALIDAS`, com o CÓDIGO da conta:
+     código não é nome). O que é estado legítimo do Domínio NÃO recusa, só fica sem
+     vínculo e volta na resposta (`naoVinculadas`): conta `0` (sem conta), documento
+     ausente ou com verificador errado, e conta COMPARTILHADA por mais de uma pessoa
+     (vínculo um-para-um impossível). A conta vinculada que não vem no relatório fica
+     como está. **A empresa do relatório é conferida por IMPRESSÃO DIGITAL**
+     (`clients.party_reports_company_fingerprint`, HMAC-SHA256 do CNPJ do cabeçalho com
+     a `SEARCH_BLIND_INDEX_KEY`, nunca o CNPJ em claro): relatório de outra empresa é 422
+     `RELATORIO_DE_OUTRA_EMPRESA`, e o encerramento zera a coluna. Documento inteiro
+     nunca sai da API: a lista (`GET …/parties`) devolve só a máscara (raiz do CNPJ
+     escondida, quatro últimos do CPF). Texto de documento nunca passa por `int`: um CNPJ
+     que começa com zeros perderia os zeros (caso real da relação da Hologram).
    - **No PDF dividido em blocos, o total da fatura de cartão vem da identidade da
      página 1; o saldo final de extrato vem do último bloco** (86e3n70qf). A fatura
      imprime o total no cabeçalho (páginas 1 e 2) e a última página costuma ter só
@@ -839,7 +865,10 @@
       **associação da conta do banco** (`client_source_account_bindings`) e depois o
       **plano contábil do cliente** (`client_accounting_accounts`), nessa ordem
       (a associação aponta para o plano), depois das decisões do de-para e antes dos
-      usuários (autoria RESTRICT), no purge e na exclusão definitiva. Nas
+      usuários (autoria RESTRICT), no purge e na exclusão definitiva; o vínculo conta ↔
+      cliente/fornecedor (86e3qhhrn) mora nas colunas da própria conta e sai com ela, e a
+      impressão digital da empresa dos relatórios (`party_reports_company_fingerprint`) é
+      zerada no encerramento, em Core, junto com o nome. Nas
       materializações retidas, o **histórico** de cada item é lido pela vigência que o
       decidiu: com as decisões purgadas e a DEK destruída, ele passa a ler vazio (ou
       `[indecifrável]`), nunca 500, e o código da conta e o do banco, que estão em
@@ -1749,6 +1778,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.100, 17/10/2026. **As relações de clientes e de fornecedores do Domínio passaram a vincular cada conta do plano contábil ao CNPJ ou CPF da pessoa (86e3qhhrn, subtask 3 do épico 86e3qhhr0, reunião com o Gabriel de 14/10).** Leitor próprio (`client_accounting_chart/parties.py`): planilha pelo conteúdo, `.xls` com o reparo dos BLANKs do leitor compartilhado, cabeçalho pelo NOME (os dois relatórios trocam `Código` e `Conta` de lugar), tipo do vínculo pelo TÍTULO, CNPJ da empresa do banner. Política em duas camadas, decidida pelas amostras reais: recusa o arquivo inteiro o que diz que o arquivo está errado (linha com documento sem conta, pessoa depois do total) e, no serviço, conta fora do plano ou sintética (pedido da task); NÃO recusa, mas fica sem vínculo e volta na resposta, a conta `0` (3 fornecedores na amostra), o documento ausente ou com verificador errado e a conta compartilhada por mais de uma pessoa (a 746, dois fornecedores). Novo par de AAD (17 → **18**: `client_accounting_accounts.party_document_encrypted`, com `party_document_iv` e `party_type` em claro, CHECKs `party_pair` e `party_type`, migration `7c3e9a1d5f28`), `core/cpf.py` (irmão do `cnpj.py`), `clients.party_reports_company_fingerprint` (HMAC do CNPJ da empresa via `compute_fingerprint` da `search_index`; outra empresa é 422 `RELATORIO_DE_OUTRA_EMPRESA`; zerada no encerramento em Core). Duas rotas (lista canônica 130 → **132**, bateria dos três atacantes): a importação (`OpenClientDep` + `manage_client_accounting_chart`, idempotente, a conta nos dois relatórios fica com o tipo do último) e a lista (`AccessibleClientDep` + a MESMA permissão: documento de terceiro é configuração do escritório; `documentMasked` só, o inteiro nunca sai). Evento `plano_contabil_vinculos_importados` (só contagens). Fixture real anonimizada no lugar (`tests/fixtures/accounting_chart_dominio_parties/`, script `anonymize_dominio_parties_sample_xls.py`, documentos fictícios válidos, a validade e o zero à esquerda do original preservados): 89 + 88 vinculáveis, as contas 685 e 918 entre elas. **Achado da amostra:** um CNPJ começa com zeros; a primeira leitura passava o texto por `int` e o recusava como inválido. Na tela, a aba "Clientes e fornecedores" dentro de Plano contábil (`?aba=clientes-fornecedores`, só para quem tem a permissão; deep link sem ela cai em "Contas"): um arquivo por vez, resultado com as linhas sem vínculo (linha, conta, motivo), recusa ramificada por `code` com o código da conta, lista paginada com badge do tipo e documento mascarado, filtro por tipo. O `FilterGroup` do plano virou componente compartilhado. Matriz (**29**) igual._
 
 _Versão 1.99, 17/10/2026. **A reimportação do plano contábil deixou de inativar, ganhou prévia antes de gravar, selo e exportação (86e3qhhrm, subtask 2 do épico 86e3qhhr0, reunião com o Gabriel de 14/10).** Decisão do Pedro: o plano exportado do Domínio pode vir recortado, e a reimportação parcial desligava contas em uso. Agora a conta que não veio fica como estava e ganha `client_accounting_accounts.absent_since` (migration `a94a539e1d34`, reversível, sem backfill: as inativadas pela regra antiga continuam inativas e se reativam pela edição), com a data da PRIMEIRA importação em que sumiu e limpo quando ela volta; a situação não muda pela planilha (nem reativa: export → import seria uma mudança sempre que houvesse conta inativa). `deactivate_absent` saiu; `mark_absent` só põe o selo. A diferença é uma função pura (`client_accounting_chart/diff.py::diff_chart`) consumida pela importação e pela prévia, e a importação só regrava a conta que mudou ou voltou. A resposta e o evento `plano_contabil_importado` trocaram `contasInativadas`/`contas_inativadas` por `contasAlteradas`/`contasAusentes` (`contas_alteradas`/`contas_ausentes`). `POST …/accounting-chart/import/preview` (mesmo leitor, mesmas recusas, mesmo guard, não grava) devolve contagens (novas, alteradas, sem mudança, ausentes, ausentes em uso por decisão do de-para de qualquer vigência ou pela conta do banco, as que voltaram, inativas que vieram), `temMudancas` e as listas, até 200 cada. `GET …/accounting-chart/export` devolve o plano no modelo (CSV UTF-8 com BOM, `;`), todas as contas na ordem do plano, com 1 linha **`export`** na trilha (a task dizia `view`; ficou `export` porque é um arquivo que sai da plataforma, como o de-para), e recusa com 409 `PLANO_CONTABIL_INDECIFRAVEL` se um nome não decifra. Nome que o Excel leria como fórmula (`= + - @`) sai com `'`, que a leitura da planilha retira (`sheet.neutralize_formula`/`restore_formula`, a regra vale também para a conta manual). Na tela: a gaveta sempre revisa antes ("Revisar mudanças" → prévia → "Confirmar"; planilha sem mudança só oferece fechar), selo na coluna Situação, "Baixar planilha" para todo papel que lê, e no de-para o aviso ao escolher (ou abrir) uma conta com o selo, com o selo também no rótulo da opção do seletor (`AccountRef.absent_since`, `accountingAccountAbsentSince` no item e na partida). Endpoints sensíveis 128 → **130** (bateria dos três atacantes nas duas); matriz (**29**) e pares de AAD (**17**) iguais._
 
