@@ -79,10 +79,11 @@ import {
   postingBlockMessage,
   type PostingBlockReason,
 } from './omie-posting-eligibility';
+import { OmieStatusExplainer } from './omie-status-explainer';
 import { QualificationCell, isQualificationAnomaly } from './qualification-cell';
 import { QualificationOverrideDialog } from './qualification-override-dialog';
 import { RegistrarAnomaliaModal } from './registrar-anomalia-modal';
-import { OmiePostingBadge, SituationBadge } from './situation-badge';
+import { OmiePostingBadge, OmieStatusBadge, SituationBadge } from './situation-badge';
 import { TrocarLancamentoModal } from './trocar-lancamento-modal';
 
 interface MovementsTabProps {
@@ -167,13 +168,14 @@ export function MovementsTab({
   const omieById = useMemo(() => {
     const map = new Map<
       number,
-      { supplier: string | null; category: string | null; date: string }
+      { supplier: string | null; category: string | null; date: string; status: string }
     >();
     omieLookupQuery.data?.forEach((item) => {
       map.set(item.omie_id, {
         supplier: item.supplier,
         category: item.category,
         date: item.transaction_date,
+        status: item.status,
       });
     });
     return map;
@@ -320,6 +322,7 @@ export function MovementsTab({
 
   return (
     <div className="space-y-4">
+      <OmieStatusExplainer />
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1">
           <label htmlFor="filter-situation" className="text-muted-foreground text-xs">
@@ -464,6 +467,7 @@ export function MovementsTab({
                     amountNum={amountNum}
                     supplier={omieData?.supplier ?? null}
                     category={omieData?.category ?? null}
+                    omieStatus={omieData?.status ?? null}
                     divergenceTitle={divergenceTitle}
                     qualificationAnomalies={qualificationAnomalies}
                     onOpenOverride={() => setOverrideFor(entry)}
@@ -589,6 +593,8 @@ interface RowFragmentProps {
   amountNum: number;
   supplier: string | null;
   category: string | null;
+  /** `cSituacao` do lançamento pareado (86e3t4vpq): só informa, não decide o par. */
+  omieStatus: string | null;
   /** Tooltip da linha divergente (FRONT 1.8): data arquivo · data Omie. */
   divergenceTitle?: string;
   qualificationAnomalies: AnomalyItem[];
@@ -619,6 +625,7 @@ function RowFragment({
   amountNum,
   supplier,
   category,
+  omieStatus,
   divergenceTitle,
   qualificationAnomalies,
   onOpenOverride,
@@ -676,7 +683,18 @@ function RowFragment({
           {entry.omie_lancamento_id === null ? '—' : (supplier ?? '—')}
         </TableCell>
         <TableCell className="text-muted-foreground text-sm">
-          {entry.omie_lancamento_id === null ? '—' : (category ?? '—')}
+          {entry.omie_lancamento_id === null ? (
+            '—'
+          ) : (
+            <div className="flex flex-col items-start gap-1">
+              <span>{category ?? '—'}</span>
+              {/* 86e3t4vpq — a situação lá dentro do Omie, só nas linhas com par. */}
+              {(entry.situation === 'conciliado' ||
+                entry.situation === 'conciliado_data_divergente') && (
+                <OmieStatusBadge status={omieStatus} />
+              )}
+            </div>
+          )}
         </TableCell>
         <TableCell>
           <div className="flex flex-col items-start gap-1">
