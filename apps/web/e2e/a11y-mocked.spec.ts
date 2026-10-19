@@ -6055,15 +6055,25 @@ for (const vp of VIEWPORTS) {
       const valor1 = gaveta.getByLabel(/Valor da parte 1/);
       await valor1.fill('');
       await valor1.pressSequentially('14670');
-      await gaveta.getByRole('button', { name: /Categoria da parte 2/ }).click();
+      // O seletor fecha e devolve o foco ao botão de forma ASSÍNCRONA. Digitar
+      // antes disso deixa o 1º dígito no campo e o resto cai no botão: sob a
+      // carga da suíte inteira a parte 2 ficava "0,03" (o "3" de "380"). Espera o
+      // foco voltar antes de digitar (86e3t4vpq, achado do gate completo).
+      const categoriaParte2 = gaveta.getByRole('button', { name: /Categoria da parte 2/ });
+      await categoriaParte2.click();
       await page.getByRole('option', { name: /Serviços de software/ }).click();
+      await expect(categoriaParte2).toBeFocused();
       await gaveta.getByLabel(/Valor da parte 2/).pressSequentially('380');
       await expect(gaveta.getByText('Fecha com o valor da compra.')).toBeVisible();
 
       await gaveta.getByRole('switch', { name: /Ratear por departamento/ }).click();
-      await gaveta.getByRole('button', { name: /Departamento da parte 1 do rateio/ }).click();
+      const departamentoParte1 = gaveta.getByRole('button', {
+        name: /Departamento da parte 1 do rateio/,
+      });
+      await departamentoParte1.click();
       await page.getByRole('combobox').fill('loja');
       await page.getByRole('option', { name: /Loja/ }).click();
+      await expect(departamentoParte1).toBeFocused();
       const pct1 = gaveta.getByLabel(/Percentual da parte 1 do rateio/);
       await pct1.fill('');
       await pct1.pressSequentially('6000');
