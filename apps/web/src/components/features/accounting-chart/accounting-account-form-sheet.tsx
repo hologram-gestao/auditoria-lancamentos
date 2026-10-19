@@ -61,6 +61,7 @@ import { readAccountFormRefusal } from '@/lib/accounting-chart-errors';
 import { ApiError } from '@/lib/api/client';
 import type {
   AccountingAccount,
+  AccountingAccountNature,
   AccountingAccountType,
   AccountingAccountUpdateRequest,
 } from '@/lib/contracts';
@@ -69,6 +70,7 @@ import {
   ACCOUNT_MAX_CODE_CHARS,
   ACCOUNT_MAX_NAME_CHARS,
   accountingAccountSchema,
+  NATURE_AUTOMATIC,
   type AccountingAccountFormValues,
 } from '@/lib/validation/accounting-account';
 
@@ -76,6 +78,24 @@ const TYPE_OPTIONS: { value: AccountingAccountType; label: string; hint: string 
   { value: 'analitica', label: 'Analítica', hint: 'Recebe lançamento.' },
   { value: 'sintetica', label: 'Sintética', hint: 'Só agrupa outras contas.' },
 ];
+
+const NATURE_LABELS: Record<AccountingAccountNature, string> = {
+  devedora: 'Devedora',
+  credora: 'Credora',
+};
+
+const NATURE_OPTIONS: { value: AccountingAccountFormValues['nature']; label: string }[] = [
+  { value: NATURE_AUTOMATIC, label: 'Automática (pela classificação)' },
+  { value: 'devedora', label: 'Devedora' },
+  { value: 'credora', label: 'Credora' },
+];
+
+/** O valor do campo para a conta: a escolhida à mão, ou automática. */
+function natureFieldValue(
+  account: AccountingAccount | null,
+): AccountingAccountFormValues['nature'] {
+  return account?.natureOverridden && account.nature ? account.nature : NATURE_AUTOMATIC;
+}
 
 interface AccountingAccountFormSheetProps {
   clientId: string;
@@ -102,6 +122,10 @@ export function accountChanges(
     changes.classification = classification;
   }
   if (values.active !== account.active) changes.active = values.active;
+  // A natureza (86e3qhhrr): `null` volta ao automático; um valor a escolhe à mão.
+  if (values.nature !== natureFieldValue(account)) {
+    changes.nature = values.nature === NATURE_AUTOMATIC ? null : values.nature;
+  }
   return changes;
 }
 
@@ -124,9 +148,12 @@ export function AccountingAccountFormSheet({
       type: account?.type ?? 'analitica',
       classification: account?.classification ?? '',
       active: account?.active ?? true,
+      nature: natureFieldValue(account),
     },
     mode: 'onSubmit',
   });
+
+  const classificationNow = form.watch('classification').trim();
 
   async function onSubmit(values: AccountingAccountFormValues) {
     try {
@@ -142,6 +169,8 @@ export function AccountingAccountFormSheet({
           name: values.name,
           type: values.type,
           classification: emptyToNull(values.classification),
+          // Automática não vai: o servidor deriva da classificação.
+          ...(values.nature === NATURE_AUTOMATIC ? {} : { nature: values.nature }),
         });
         toast.success(`Conta ${created.code} incluída no plano.`);
       }
@@ -267,6 +296,48 @@ export function AccountingAccountFormSheet({
                       />
                     </FormControl>
                     <FormDescription>Decide a posição da conta na lista.</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="nature"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Natureza</FormLabel>
+                    <Select
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      disabled={isSubmitting}
+                    >
+                      <FormControl>
+                        <SelectTrigger ref={field.ref}>
+                          <SelectValue placeholder="Selecione a natureza" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {NATURE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      {field.value === NATURE_AUTOMATIC
+                        ? `Segue o grupo da classificação: 1 e de 4 em diante Devedora, 2 e 3 Credora.${
+                            // "Hoje" só vale enquanto a classificação é a gravada: trocada
+                            // no formulário, o servidor deriva de novo ao salvar.
+                            account?.nature &&
+                            !account.natureOverridden &&
+                            classificationNow === (account.classification ?? '')
+                              ? ` Hoje: ${NATURE_LABELS[account.nature]}.`
+                              : ''
+                          } A planilha da Omie exige a natureza.`
+                        : 'Escolhida à mão: a reimportação do plano não a altera.'}
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

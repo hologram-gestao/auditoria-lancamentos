@@ -199,3 +199,57 @@ export function readAccountFormRefusal(error: unknown): AccountFormRefusal | nul
   }
   return null;
 }
+
+/**
+ * Os motivos que impedem a planilha da Omie (86e3qhhrr), vocabulário FECHADO do
+ * servidor (`omie_sheet.OmieExportReason`). Valor fora dele (backend mais novo) sai cru.
+ */
+export const OMIE_EXPORT_REASON_LABELS: Record<string, string> = {
+  plano_vazio: 'O plano contábil está vazio: importe o plano antes de gerar a planilha.',
+  plano_grande_demais: 'O plano passa de 10.000 contas, o limite da planilha da Omie.',
+  conta_sem_classificacao: 'Contas sem classificação (a planilha da Omie exige)',
+  conta_sem_natureza: 'Contas sem natureza (Devedora ou Credora): escolha na edição da conta',
+  nome_indecifravel: 'Contas com o nome ilegível',
+  documento_indecifravel: 'Contas com o CNPJ/CPF do vínculo ilegível',
+  texto_formula: 'Contas com texto que começa com =, +, - ou @',
+  texto_longo:
+    'Contas com texto maior que a coluna da Omie (classificação e nome até 60, código até 20)',
+  texto_invalido: 'Contas com quebra de linha ou caractere de controle no texto',
+};
+
+export function omieExportReasonLabel(reason: string): string {
+  return OMIE_EXPORT_REASON_LABELS[reason] ?? reason;
+}
+
+export interface OmieExportRefusalProblem {
+  reason: string;
+  accountCodes: string[];
+  count: number;
+}
+
+/**
+ * O 409 `PLANILHA_OMIE_RECUSADA` (86e3qhhrr): os problemas que o servidor devolve em
+ * `details.problems` (motivo e CÓDIGOS das contas, nunca o nome). Item fora da forma
+ * é descartado; erro de outro código, ou o 409 sem nenhum problema legível → `null` (o
+ * caller cai no toast com o `userMessage`: lista vazia liberaria o download de novo).
+ */
+export function readOmieExportRefusal(error: unknown): OmieExportRefusalProblem[] | null {
+  if (!(error instanceof ApiError) || error.code !== 'PLANILHA_OMIE_RECUSADA') return null;
+  const raw = error.details.problems;
+  if (!Array.isArray(raw)) return null;
+  const problems: OmieExportRefusalProblem[] = [];
+  for (const item of raw as unknown[]) {
+    if (typeof item !== 'object' || item === null) continue;
+    const { reason, accountCodes, count } = item as Record<string, unknown>;
+    if (typeof reason !== 'string') continue;
+    const codes = Array.isArray(accountCodes)
+      ? accountCodes.filter((code): code is string => typeof code === 'string')
+      : [];
+    problems.push({
+      reason,
+      accountCodes: codes,
+      count: typeof count === 'number' ? count : codes.length,
+    });
+  }
+  return problems.length > 0 ? problems : null;
+}

@@ -1995,6 +1995,10 @@ class TestPlanoContabilRoundTrip:
             "party_document_encrypted",
             "party_document_iv",
             "party_type",
+            # 86e3qhhrr (`5d8e2b7c4a91`): a natureza Devedora/Credora (vocabulário fechado)
+            # e a marca de escolhida à mão.
+            "nature",
+            "nature_overridden",
         )
         assert _columns(url, "client_accounting_accounts", *columns) == len(columns)
         assert _scalar(
@@ -2006,6 +2010,8 @@ class TestPlanoContabilRoundTrip:
             "uq_client_accounting_accounts_client_id_code",
             "ck_client_accounting_accounts_name_pair",
             "ck_client_accounting_accounts_account_type",
+            "ck_client_accounting_accounts_nature",
+            "ck_client_accounting_accounts_nature_override",
             "fk_client_accounting_accounts_client_id_clients",
             "fk_client_accounting_accounts_created_by_users",
             "fk_client_accounting_accounts_updated_by_users",

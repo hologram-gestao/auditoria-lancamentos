@@ -8,6 +8,8 @@
     - PATCH /api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}  (86e3nb816)
     - POST /api/v1/clients/{client_id}/accounting-chart/parties/import  (multipart, 86e3qhhrn)
     - GET  /api/v1/clients/{client_id}/accounting-chart/parties          (86e3qhhrn)
+    - GET  /api/v1/clients/{client_id}/accounting-chart/omie-export          (XLSX, 86e3qhhrr)
+    - GET  /api/v1/clients/{client_id}/accounting-chart/omie-export/preview  (86e3qhhrr)
 
 ⚠️ Não é o plano da ORIGEM da S10 (`/chart-of-accounts`, categorias do Omie): este é
 o do sistema contábil de DESTINO, onde o escritório lança.
@@ -30,6 +32,12 @@ param depois do prefixo.
 A EXPORTAÇÃO é leitura (`AccessibleClientDep`, como a lista): quem lê o plano baixa o
 plano. Ela grava 1 linha `export` em `access_audit` (o arquivo sai da plataforma com
 nome de conta, dado do cliente final), como a exportação do de-para.
+
+A PLANILHA DA OMIE (86e3qhhrr) é artefato de trabalho do ESCRITÓRIO, como o arquivo
+contábil da S13: `generate_accounting_file` (staff), guard AUDITADO declarado antes do
+cliente aberto (o `client_manager` e o `client_operator` recebem 403 com linha
+`denied`), e cliente encerrado 409 (`OpenClientDep`: a DEK morreu). O download grava 1
+linha `export` na trilha; o conteúdo não persiste.
 """
 
 from __future__ import annotations
@@ -44,6 +52,7 @@ from app.core.dependencies import (
     AccessibleClientDep,
     CurrentUserDep,
     DbSessionDep,
+    GenerateAccountingFileDep,
     ManageClientAccountingChartDep,
     OpenClientDep,
     SettingsDep,
@@ -53,7 +62,15 @@ from app.db.models.client_accounting_account import (
     AccountingAccountType,
     AccountingPartyType,
 )
+from app.integrations.omie.client import OmieClient
+from app.integrations.omie.fornecedores_directory_cache import OmieFornecedoresDirectoryCache
+from app.integrations.omie.schemas import ClienteOmie
+from app.integrations.providers.base import Capability
 from app.modules.client_accounting_chart.export import EXPORT_MEDIA_TYPE, export_filename
+from app.modules.client_accounting_chart.omie_sheet import (
+    OMIE_EXPORT_MEDIA_TYPE,
+    omie_export_filename,
+)
 from app.modules.client_accounting_chart.repository import AccountingChartFilters
 from app.modules.client_accounting_chart.schemas import (
     AccountingAccountCreateRequest,
@@ -66,6 +83,8 @@ from app.modules.client_accounting_chart.schemas import (
     ChartImportPayload,
     ChartImportPreviewEnvelope,
     ChartImportPreviewPayload,
+    OmieExportPreviewEnvelope,
+    OmieExportPreviewPayload,
     PartiesImportEnvelope,
     PartiesImportPayload,
     PartyLinkResponse,
@@ -73,6 +92,8 @@ from app.modules.client_accounting_chart.schemas import (
     PartyLinksSummaryPayload,
 )
 from app.modules.client_accounting_chart.service import AccountingChartService
+from app.modules.client_connections.origin import build_capable_client
+from app.modules.omie_data.payables_service import OmieFornecedorDirectoryService
 from app.modules.users.schemas import PaginationMeta
 from app.utils.upload import parse_content_length, read_upload_within_limit
 
@@ -320,6 +341,7 @@ async def create_accounting_account(
         name=body.name,
         account_type=body.account_type,
         classification=body.classification,
+        nature=body.nature,
     )
     return AccountingAccountEnvelope(data=AccountingAccountResponse.from_row(account, names=names))
 
@@ -439,4 +461,101 @@ async def list_accounting_parties(
             total_pages=(total + page_size - 1) // page_size,
         ),
         summary=PartyLinksSummaryPayload.from_summary(summary),
+    )
+
+
+@router.get(
+    "/omie-export/preview",
+    summary=(
+        "O que a planilha de importação do plano de contas da Omie (modelo "
+        "`Omie_Plano_Contas` v1.1.3 do Painel do Contador) levaria, SEM gerar o arquivo: "
+        "`contas` (todas as contas do plano), `vinculadas` (as que saem com o CNPJ/CPF "
+        "do cliente ou fornecedor), `semVinculo`, `inativas`, `ausentes`, "
+        "`naturezaManual`, os `problems` que impedem a geração (cada um com `reason` e "
+        "os CÓDIGOS das contas; vazio = a planilha sai) e `omieRegistry`: quantos "
+        "documentos vinculados NÃO existem no cadastro do Omie do cliente (na "
+        "importação a Omie não cria o cadastro e a conta cai como diversos), lido do "
+        "diretório em memória da busca de fornecedor, sem gravar. Cliente sem Omie ou "
+        "com a Omie fora do ar: `checked=false` com o `reason`, nunca erro. "
+        "`refresh=true` relê o diretório da Omie (depois de cadastrar o que faltava). Requer "
+        "`generate_accounting_file` (plataforma, admin e gerente da carteira; usuários "
+        "do cliente recebem 403 e a negação fica na trilha); cliente encerrado 409."
+    ),
+)
+async def preview_omie_export(
+    request: Request,
+    actor: GenerateAccountingFileDep,
+    client: OpenClientDep,
+    db: DbSessionDep,
+    settings: SettingsDep,
+    service: ServiceDep,
+    refresh: Annotated[
+        bool, Query(description="Relê o diretório de cadastros da Omie antes de conferir.")
+    ] = False,
+) -> OmieExportPreviewEnvelope:
+    cache: OmieFornecedoresDirectoryCache = request.app.state.omie_fornecedores_directory_cache
+
+    async def build_client() -> OmieClient:
+        # Só no MISS do diretório: o hit não paga o unwrap da DEK nem o 409 de origem.
+        return await build_capable_client(
+            db, client, Capability.LISTAR_LANCAMENTOS, settings=settings
+        )
+
+    async def registry() -> list[ClienteOmie]:
+        return await OmieFornecedorDirectoryService(cache).directory(
+            client_id=client.id, omie_client_factory=build_client, refresh=refresh
+        )
+
+    preview = await service.omie_export_preview(client, registry=registry)
+    return OmieExportPreviewEnvelope(data=OmieExportPreviewPayload.from_preview(preview))
+
+
+@router.get(
+    "/omie-export",
+    summary=(
+        "Baixa a planilha de importação do plano de contas da Omie (modelo "
+        "`Omie_Plano_Contas` v1.1.3 do Painel do Contador, XLSX) preenchida com o plano "
+        "contábil do cliente: uma linha por conta, na ordem do plano, com classificação, "
+        "código reduzido, nome, natureza (`Devedora`/`Credora`), tipo (`Analítica`/"
+        "`Totalizadora (Sintética)`) e, na conta vinculada a um cliente ou fornecedor, o "
+        "CNPJ/CPF com máscara na coluna `CNPJ do Estabelecimento`, que é por onde a Omie "
+        "liga a conta ao cadastro. O arquivo é o modelo da Omie com as células "
+        "preenchidas: listas de opções, proteção e aba `Config` intactas. Mesma entrada, "
+        "mesmos bytes. Recusa com 409 `PLANILHA_OMIE_RECUSADA` e nada gerado quando o "
+        "plano está vazio, passa de 10.000 contas ou alguma conta não tem classificação, "
+        "natureza, nome ou documento legível, ou tem texto que começa com `= + - @`, "
+        "passa do teto da coluna ou tem quebra de linha (`details.problems=[{reason, "
+        "accountCodes, count}]`, só códigos). Requer `generate_accounting_file` (a "
+        "negação fica na trilha); cliente encerrado 409. Registra a exportação na trilha "
+        "de acesso; o conteúdo não persiste."
+    ),
+    response_class=Response,
+    responses={200: {"content": {OMIE_EXPORT_MEDIA_TYPE: {}}}},
+)
+async def export_omie_chart(
+    actor: GenerateAccountingFileDep,
+    client: OpenClientDep,
+    db: DbSessionDep,
+    service: ServiceDep,
+) -> Response:
+    export = await service.omie_export(client)
+    # A trilha (§4.7): 1 linha `export`, só IDs. Sem `commit` próprio: o fim do request
+    # (`get_db_session`) persiste junto com a resposta.
+    await record_access(
+        db,
+        user_id=UUID(actor.id),
+        client_id=client.id,
+        action=AccessAction.EXPORT,
+        user_scope=actor.scope,
+        actor_client_id=actor.client_id,
+        actor_organization_id=actor.organization_id,
+    )
+    return Response(
+        content=export.content,
+        media_type=OMIE_EXPORT_MEDIA_TYPE,
+        headers={
+            "Content-Disposition": (
+                'attachment; filename="' + omie_export_filename(client.id) + '"'
+            )
+        },
     )

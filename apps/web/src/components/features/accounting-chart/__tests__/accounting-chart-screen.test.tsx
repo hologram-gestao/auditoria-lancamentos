@@ -120,6 +120,10 @@ vi.mock('@/hooks/use-client-accounting-chart', () => ({
   // 86e3qhhrn — a aba "Clientes e fornecedores" (testada em accounting-parties-tab.test.tsx).
   useAccountingPartiesList: () => partiesListState,
   useImportAccountingParties: () => partiesImportState,
+  // 86e3qhhrr — o diálogo da planilha da Omie (testado em omie-chart-export-dialog.test.tsx).
+  useOmieChartExportPreview: () => ({ data: undefined, isLoading: true, isError: false }),
+  useExportOmieChart: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRefreshOmieChartExportPreview: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 const clientDetailState = {
@@ -195,6 +199,8 @@ function account(overrides: Partial<AccountingAccount> = {}): AccountingAccount 
     type: 'analitica',
     active: true,
     postable: true,
+    nature: 'devedora',
+    natureOverridden: false,
     updatedAt: '2026-09-28T10:00:00Z',
     ...overrides,
   };
@@ -1068,6 +1074,53 @@ describe('conta do banco', () => {
   });
 });
 
+describe('planilha da Omie (86e3qhhrr)', () => {
+  it.each([
+    ['plataforma', platform],
+    ['admin', admin],
+    ['gerente da organização', manager],
+  ])('%s vê "Gerar planilha da Omie" na aba Contas', (_label, user) => {
+    authState.user = user;
+    render(<AccountingChartScreen clientId="c1" />);
+    expect(screen.getByRole('button', { name: 'Gerar planilha da Omie' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['gerente do cliente', clientManager],
+    ['operador do cliente', clientOperator],
+  ])('%s não vê o botão (o servidor nega com 403)', (_label, user) => {
+    authState.user = user;
+    render(<AccountingChartScreen clientId="c1" />);
+    expect(
+      screen.queryByRole('button', { name: 'Gerar planilha da Omie' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('sem plano, cliente encerrado ou na aba de vínculos, o botão não aparece', () => {
+    withoutPlan();
+    const { unmount } = render(<AccountingChartScreen clientId="c1" />);
+    expect(
+      screen.queryByRole('button', { name: 'Gerar planilha da Omie' }),
+    ).not.toBeInTheDocument();
+    unmount();
+
+    withPlan([account()]);
+    clientDetailState.data = { closed_at: '2026-09-01T00:00:00Z', accounts: [] };
+    const closed = render(<AccountingChartScreen clientId="c1" />);
+    expect(
+      screen.queryByRole('button', { name: 'Gerar planilha da Omie' }),
+    ).not.toBeInTheDocument();
+    closed.unmount();
+
+    clientDetailState.data = { closed_at: null, accounts: [] };
+    currentSearch = 'aba=clientes-fornecedores';
+    render(<AccountingChartScreen clientId="c1" />);
+    expect(
+      screen.queryByRole('button', { name: 'Gerar planilha da Omie' }),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe('conta manual (86e3nb816)', () => {
   it.each([
     ['plataforma', platform],
@@ -1213,6 +1266,71 @@ describe('conta manual (86e3nb816)', () => {
       payload: { active: false },
     });
     expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('a natureza escolhida à mão vai no pedido; voltar ao automático manda null', async () => {
+    const user = userEvent.setup();
+    updateAccountState.mutateAsync = vi.fn().mockResolvedValue(account());
+    const { unmount } = render(<AccountingChartScreen clientId="c1" />);
+    await user.click(screen.getByRole('button', { name: 'Editar conta 649' }));
+    let dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/Hoje: Devedora\./)).toBeInTheDocument();
+    // Trocar a classificação no formulário: o "Hoje" deixa de valer (o servidor deriva de novo).
+    const classification = within(dialog).getByLabelText('Classificação (opcional)');
+    await user.type(classification, '9');
+    expect(within(dialog).queryByText(/Hoje: Devedora\./)).toBeNull();
+    await user.type(classification, '{Backspace}');
+    expect(within(dialog).getByText(/Hoje: Devedora\./)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('combobox', { name: 'Natureza' }));
+    await user.click(await screen.findByRole('option', { name: 'Credora' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Salvar alterações' }));
+    await waitFor(() =>
+      expect(updateAccountState.mutateAsync).toHaveBeenCalledWith({
+        accountId: 'acc-649',
+        payload: { nature: 'credora' },
+      }),
+    );
+    unmount();
+
+    withPlan([account({ nature: 'credora', natureOverridden: true })]);
+    updateAccountState.mutateAsync = vi.fn().mockResolvedValue(account());
+    render(<AccountingChartScreen clientId="c1" />);
+    await user.click(screen.getByRole('button', { name: 'Editar conta 649' }));
+    dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/Escolhida à mão/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('combobox', { name: 'Natureza' }));
+    await user.click(
+      await screen.findByRole('option', { name: 'Automática (pela classificação)' }),
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Salvar alterações' }));
+    await waitFor(() =>
+      expect(updateAccountState.mutateAsync).toHaveBeenCalledWith({
+        accountId: 'acc-649',
+        payload: { nature: null },
+      }),
+    );
+  });
+
+  it('na conta nova, a natureza escolhida vai no pedido', async () => {
+    const user = userEvent.setup();
+    createAccountState.mutateAsync = vi.fn().mockResolvedValue(account({ id: 'n', code: '700' }));
+    render(<AccountingChartScreen clientId="c1" />);
+    await user.click(screen.getByRole('button', { name: 'Nova conta' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Código reduzido'), '700');
+    await user.type(within(dialog).getByLabelText('Nome'), 'Redutora');
+    await user.click(within(dialog).getByRole('combobox', { name: 'Natureza' }));
+    await user.click(await screen.findByRole('option', { name: 'Devedora' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Incluir conta' }));
+    await waitFor(() =>
+      expect(createAccountState.mutateAsync).toHaveBeenCalledWith({
+        code: '700',
+        name: 'Redutora',
+        type: 'analitica',
+        classification: null,
+        nature: 'devedora',
+      }),
+    );
   });
 
   it('gaveta aberta sem violações de a11y', async () => {

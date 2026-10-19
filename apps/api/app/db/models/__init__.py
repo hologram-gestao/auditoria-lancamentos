@@ -22,6 +22,8 @@ from app.db.models.client import (
 )
 from app.db.models.client_accounting_account import (
     ACCOUNTING_ACCOUNT_NAME_PAIR_CONSTRAINT,
+    ACCOUNTING_ACCOUNT_NATURE_CONSTRAINT,
+    ACCOUNTING_ACCOUNT_NATURE_OVERRIDE_CONSTRAINT,
     ACCOUNTING_ACCOUNT_PARTY_PAIR_CONSTRAINT,
     ACCOUNTING_ACCOUNT_PARTY_TYPE_CONSTRAINT,
     ACCOUNTING_ACCOUNT_SORT_KEY_COLLATION,
@@ -32,10 +34,13 @@ from app.db.models.client_accounting_account import (
     MAX_ACCOUNTING_ACCOUNT_NAME_CHARS,
     MAX_ACCOUNTING_ACCOUNT_SORT_KEY_CHARS,
     UQ_ACCOUNTING_ACCOUNT_CLIENT_CODE,
+    AccountingAccountNature,
     AccountingAccountType,
     AccountingPartyType,
     ClientAccountingAccount,
     accounting_account_name_pair_check,
+    accounting_account_nature_check,
+    accounting_account_nature_override_check,
     accounting_account_party_pair_check,
     accounting_account_party_type_check,
     accounting_account_type_check,
@@ -250,6 +255,8 @@ from app.db.models.user_client_favorite import UQ_USER_CLIENT_FAVORITE, UserClie
 
 __all__ = [
     "ACCOUNTING_ACCOUNT_NAME_PAIR_CONSTRAINT",
+    "ACCOUNTING_ACCOUNT_NATURE_CONSTRAINT",
+    "ACCOUNTING_ACCOUNT_NATURE_OVERRIDE_CONSTRAINT",
     "ACCOUNTING_ACCOUNT_PARTY_PAIR_CONSTRAINT",
     "ACCOUNTING_ACCOUNT_PARTY_TYPE_CONSTRAINT",
     "ACCOUNTING_ACCOUNT_SORT_KEY_COLLATION",
@@ -349,6 +356,7 @@ __all__ = [
     "UQ_SOURCE_ACCOUNT_BINDING_DEFAULT",
     "UQ_USER_CLIENT_FAVORITE",
     "AccessAudit",
+    "AccountingAccountNature",
     "AccountingAccountType",
     "AccountingFileGeneration",
     "AccountingPartyType",
@@ -429,6 +437,8 @@ __all__ = [
     "UserRole",
     "UserScope",
     "accounting_account_name_pair_check",
+    "accounting_account_nature_check",
+    "accounting_account_nature_override_check",
     "accounting_account_party_pair_check",
     "accounting_account_party_type_check",
     "accounting_account_type_check",

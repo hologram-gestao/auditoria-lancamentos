@@ -395,6 +395,7 @@ beforeEach(() => {
     type: 'analitica',
     active: true,
     postable: true,
+    natureOverridden: false,
     updatedAt: '2026-09-28T10:00:00Z',
   });
   for (const state of [writeState, materializeState, exportState]) {
@@ -504,6 +505,7 @@ describe('conta com o selo "não veio na última importação" (86e3qhhrm)', () 
       type: 'analitica',
       active: true,
       postable: true,
+      natureOverridden: false,
       absentSince: '2026-10-16T13:05:00Z',
       updatedAt: '2026-10-16T13:05:00Z',
     });

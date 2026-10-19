@@ -22,6 +22,8 @@
  *   - `POST /clients/{id}/accounting-chart/parties/import` → multipart `file`; `{ data:
  *                                                     contagens + naoVinculadas }` (86e3qhhrn)
  *   - `GET  /clients/{id}/accounting-chart/parties`  → `{ data: [...], pagination, summary }`
+ *   - `GET  /clients/{id}/accounting-chart/omie-export/preview` → `{ data: prévia }` (86e3qhhrr)
+ *   - `GET  /clients/{id}/accounting-chart/omie-export` → XLSX no modelo da Omie (86e3qhhrr)
  *                                                     — TRÊS chaves: o envelope chega inteiro
  *   - `GET  /clients/{id}/source-accounts`         → `{ data: [...] }` — chave única: o array
  *   - `PUT  /clients/{id}/source-accounts`         → `{ data: { entry, created } }`
@@ -42,6 +44,7 @@ import type {
   AccountingPartyLinksListResponse,
   ListAccountingChartQuery,
   ListAccountingPartiesQuery,
+  OmieExportPreview,
   SourceAccountBindingPayload,
   SourceAccountBindingRequest,
   SourceAccountEntry,
@@ -225,4 +228,28 @@ export async function listAccountingParties(
   return apiGet<AccountingPartyLinksListResponse>(
     `${clientBase(clientId)}/accounting-chart/parties?${sp.toString()}`,
   );
+}
+
+/**
+ * O que a planilha de importação do plano de contas da Omie levaria (86e3qhhrr), sem
+ * gerar: contagens, os problemas que impedem e quantos documentos vinculados não têm
+ * cadastro no Omie. Requer `generate_accounting_file`; cliente encerrado 409.
+ */
+export async function previewOmieChartExport(
+  clientId: string,
+  options: { refresh?: boolean } = {},
+): Promise<OmieExportPreview> {
+  // `refresh=true` relê o diretório de cadastros da Omie (cache de 6 h no servidor).
+  const query = options.refresh ? '?refresh=true' : '';
+  return apiGet<OmieExportPreview>(
+    `${clientBase(clientId)}/accounting-chart/omie-export/preview${query}`,
+  );
+}
+
+/**
+ * A planilha da Omie preenchida (XLSX, 86e3qhhrr). Plano com problema: 409
+ * `PLANILHA_OMIE_RECUSADA` com `details.problems` (lido por `readOmieExportRefusal`).
+ */
+export async function exportOmieChart(clientId: string): Promise<BlobResponse> {
+  return apiGetBlob(`${clientBase(clientId)}/accounting-chart/omie-export`);
 }

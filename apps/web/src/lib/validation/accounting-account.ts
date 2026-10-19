@@ -8,14 +8,16 @@
  *     terminando com letra ou dígito (o código vai cru para o arquivo contábil);
  *   - `name`: obrigatório, até 200 (o servidor apara e recusa só-espaços);
  *   - `type`: `analitica` | `sintetica`;
- *   - `classification`: opcional, até 40 (decide a posição na lista).
+ *   - `classification`: opcional, até 40 (decide a posição na lista);
+ *   - `nature` (86e3qhhrr): `automatica` (derivada da classificação pelo servidor) ou
+ *     `devedora`/`credora` escolhida à mão (a reimportação passa a respeitá-la).
  *
  * É UX, não barreira: o servidor revalida tudo e ainda recusa o que só ele sabe
  * (código repetido, conta em uso).
  */
 import { z } from 'zod';
 
-import type { AccountingAccountType } from '@/lib/contracts';
+import type { AccountingAccountNature, AccountingAccountType } from '@/lib/contracts';
 
 export const ACCOUNT_MAX_CODE_CHARS = 20;
 export const ACCOUNT_MAX_NAME_CHARS = 200;
@@ -32,6 +34,19 @@ const typeUnionMatchesContract: AssertSameUnion<
   AccountingAccountType
 > = true;
 void typeUnionMatchesContract;
+
+/** A natureza escolhida à mão, como o contrato a chama. */
+export const accountNatureSchema = z.enum(['devedora', 'credora']);
+
+const natureUnionMatchesContract: AssertSameUnion<
+  z.infer<typeof accountNatureSchema>,
+  AccountingAccountNature
+> = true;
+void natureUnionMatchesContract;
+
+/** O campo do formulário: `automatica` não vai para o servidor como valor. */
+export const NATURE_AUTOMATIC = 'automatica';
+export const accountNatureFieldSchema = z.enum([NATURE_AUTOMATIC, 'devedora', 'credora']);
 
 export const accountingAccountSchema = z.object({
   code: z
@@ -54,6 +69,7 @@ export const accountingAccountSchema = z.object({
     .trim()
     .max(ACCOUNT_MAX_CLASSIFICATION_CHARS, `Até ${ACCOUNT_MAX_CLASSIFICATION_CHARS} caracteres.`),
   active: z.boolean(),
+  nature: accountNatureFieldSchema,
 });
 
 export type AccountingAccountFormValues = z.infer<typeof accountingAccountSchema>;
