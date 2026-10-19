@@ -47,6 +47,7 @@ from app.core.exceptions import (
     AccountingChartUndecipherableError,
     AppError,
     ClientClosedError,
+    ErrorCode,
     OmieChartExportRefusedError,
     PartiesReportCompanyMismatchError,
 )
@@ -257,11 +258,16 @@ class OmieExportPreview:
     nature_overridden: int
     problems: list[OmieExportProblem]
     registry_missing: int | None
-    registry_unavailable: Literal["sem_omie", "omie_indisponivel"] | None
+    registry_unavailable: RegistryUnavailable | None
 
 
-#: As recusas da origem que querem dizer "este cliente não tem Omie para perguntar".
-_NO_OMIE_CODES = frozenset({"SEM_CONEXAO", "CAPACIDADE_AUSENTE"})
+#: Por que a prévia não conferiu os documentos no cadastro do Omie.
+type RegistryUnavailable = Literal["sem_omie", "origem_com_erro", "omie_indisponivel"]
+
+#: As recusas da origem que querem dizer "este cliente não tem Omie para perguntar"
+#: (conectar) e "a conexão existe e está com erro" (reconectar): a taxonomia da S9.
+_NO_OMIE_CODES = frozenset({ErrorCode.SEM_CONEXAO, ErrorCode.CAPACIDADE_AUSENTE})
+_ORIGIN_ERROR_CODES = frozenset({ErrorCode.ORIGEM_COM_ERRO})
 
 
 def not_postable_reason(account: ClientAccountingAccount) -> NotPostableReason | None:
@@ -576,12 +582,12 @@ class AccountingChartService:
         accounts, lines = await self._omie_lines(client)
         documents = {line.document for line in lines if line.document is not None}
         missing: int | None = None
-        unavailable: Literal["sem_omie", "omie_indisponivel"] | None = None
+        unavailable: RegistryUnavailable | None = None
         if documents:
             try:
                 cadastros = await registry()
             except AppError as exc:
-                unavailable = "sem_omie" if str(exc.code) in _NO_OMIE_CODES else "omie_indisponivel"
+                unavailable = _registry_unavailable(exc)
                 log.info(
                     "omie_chart_export_registry_unavailable",
                     client_id=str(client.id),
@@ -1113,6 +1119,15 @@ def _as_uuid(value: object) -> UUID:
     if not isinstance(value, UUID):  # pragma: no cover - `_plan_writes` sempre gera UUID
         raise TypeError("id da conta não é UUID")
     return value
+
+
+def _registry_unavailable(exc: AppError) -> RegistryUnavailable:
+    """Que remédio a tela oferece quando o diretório do Omie não pôde ser lido."""
+    if exc.code in _NO_OMIE_CODES:
+        return "sem_omie"
+    if exc.code in _ORIGIN_ERROR_CODES:
+        return "origem_com_erro"
+    return "omie_indisponivel"
 
 
 def _effective_nature(account: ClientAccountingAccount) -> AccountingAccountNature | None:

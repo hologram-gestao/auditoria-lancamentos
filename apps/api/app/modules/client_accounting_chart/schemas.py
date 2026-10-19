@@ -591,7 +591,7 @@ class PartyLinksListResponse(BaseModel):
 # ------------------------------------------ planilha do plano de contas da Omie (86e3qhhrr)
 
 #: Por que os documentos vinculados não foram conferidos no cadastro do Omie.
-OmieRegistryUnavailableReason = Literal["sem_omie", "omie_indisponivel"]
+OmieRegistryUnavailableReason = Literal["sem_omie", "origem_com_erro", "omie_indisponivel"]
 
 
 class OmieRegistryCheckPayload(BaseModel):
@@ -611,8 +611,9 @@ class OmieRegistryCheckPayload(BaseModel):
     reason: OmieRegistryUnavailableReason | None = Field(
         default=None,
         description=(
-            "`sem_omie` (cliente sem conexão Omie, ou só por arquivo) ou "
-            "`omie_indisponivel` (a Omie não respondeu ou recusou a credencial)."
+            "`sem_omie` (cliente sem conexão Omie, ou só por arquivo), `origem_com_erro` "
+            "(a conexão existe e está com erro: reconectar) ou `omie_indisponivel` (a Omie "
+            "não respondeu ou recusou a credencial)."
         ),
     )
 

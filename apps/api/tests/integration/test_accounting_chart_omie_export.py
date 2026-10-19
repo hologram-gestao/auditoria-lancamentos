@@ -59,6 +59,7 @@ from app.integrations.omie.mock_client import (
     FAKE_DEMO_KEY_PREFIX,
     reset_mock_payables_state,
 )
+from app.main import app as fastapi_app
 from app.modules.client_accounting_chart.nature import derive_nature
 from app.modules.client_accounting_chart.omie_sheet import SHEET_PART, TEMPLATE_PATH
 from tests.parties_builder import VALID_CNPJS, VALID_CPFS, build_parties_xlsx
@@ -408,6 +409,29 @@ class TestPrevia:
         assert data["problems"] == []
         assert data["omieRegistry"] == {"checked": True, "missing": 1, "reason": None}
         assert known not in resp.text
+
+    async def test_refresh_rele_o_diretorio_da_omie(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        """Depois de cadastrar o que faltava no Omie, `refresh=true` relê (cache de 6 h)."""
+        await _login(client_with_db, world.admin)
+        known = next(iter(_MOCK_FORNECEDORES_SEED))
+        plan = "codigo_reduzido;nome;tipo;classificacao\n10;Cliente A;analitica;1.1\n"
+        await _import_plan(client_with_db, world.omie_client, plan.encode())
+        report = build_parties_xlsx("cliente", [(1, 10, "A", "A LTDA", known)])
+        await _import_parties(client_with_db, world.omie_client, report)
+        # O diretório em cache é de ANTES do cadastro: o documento ainda não estava lá.
+        fastapi_app.state.omie_fornecedores_directory_cache.set(world.omie_client.id, [])
+        url = f"{_url(world.omie_client)}/omie-export/preview"
+        stale = await client_with_db.get(url)
+        assert stale.json()["data"]["omieRegistry"]["missing"] == 1
+        fresh = await client_with_db.get(url, params={"refresh": "true"})
+        assert fresh.status_code == 200, fresh.text
+        assert fresh.json()["data"]["omieRegistry"] == {
+            "checked": True,
+            "missing": 0,
+            "reason": None,
+        }
 
     async def test_cliente_sem_omie_nao_confere_e_nao_falha(
         self, client_with_db: AsyncClient, world: World

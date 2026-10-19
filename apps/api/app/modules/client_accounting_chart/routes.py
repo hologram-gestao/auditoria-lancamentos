@@ -476,7 +476,8 @@ async def list_accounting_parties(
         "documentos vinculados NÃO existem no cadastro do Omie do cliente (na "
         "importação a Omie não cria o cadastro e a conta cai como diversos), lido do "
         "diretório em memória da busca de fornecedor, sem gravar. Cliente sem Omie ou "
-        "com a Omie fora do ar: `checked=false` com o `reason`, nunca erro. Requer "
+        "com a Omie fora do ar: `checked=false` com o `reason`, nunca erro. "
+        "`refresh=true` relê o diretório da Omie (depois de cadastrar o que faltava). Requer "
         "`generate_accounting_file` (plataforma, admin e gerente da carteira; usuários "
         "do cliente recebem 403 e a negação fica na trilha); cliente encerrado 409."
     ),
@@ -488,6 +489,9 @@ async def preview_omie_export(
     db: DbSessionDep,
     settings: SettingsDep,
     service: ServiceDep,
+    refresh: Annotated[
+        bool, Query(description="Relê o diretório de cadastros da Omie antes de conferir.")
+    ] = False,
 ) -> OmieExportPreviewEnvelope:
     cache: OmieFornecedoresDirectoryCache = request.app.state.omie_fornecedores_directory_cache
 
@@ -499,7 +503,7 @@ async def preview_omie_export(
 
     async def registry() -> list[ClienteOmie]:
         return await OmieFornecedorDirectoryService(cache).directory(
-            client_id=client.id, omie_client_factory=build_client
+            client_id=client.id, omie_client_factory=build_client, refresh=refresh
         )
 
     preview = await service.omie_export_preview(client, registry=registry)

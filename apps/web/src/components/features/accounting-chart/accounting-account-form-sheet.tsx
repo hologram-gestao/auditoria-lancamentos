@@ -153,6 +153,8 @@ export function AccountingAccountFormSheet({
     mode: 'onSubmit',
   });
 
+  const classificationNow = form.watch('classification').trim();
+
   async function onSubmit(values: AccountingAccountFormValues) {
     try {
       if (account !== null) {
@@ -326,7 +328,11 @@ export function AccountingAccountFormSheet({
                     <FormDescription>
                       {field.value === NATURE_AUTOMATIC
                         ? `Segue o grupo da classificação: 1 e de 4 em diante Devedora, 2 e 3 Credora.${
-                            account?.nature && !account.natureOverridden
+                            // "Hoje" só vale enquanto a classificação é a gravada: trocada
+                            // no formulário, o servidor deriva de novo ao salvar.
+                            account?.nature &&
+                            !account.natureOverridden &&
+                            classificationNow === (account.classification ?? '')
                               ? ` Hoje: ${NATURE_LABELS[account.nature]}.`
                               : ''
                           } A planilha da Omie exige a natureza.`

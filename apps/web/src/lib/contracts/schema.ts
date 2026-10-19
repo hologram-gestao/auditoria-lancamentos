@@ -720,7 +720,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** O que a planilha de importação do plano de contas da Omie (modelo `Omie_Plano_Contas` v1.1.3 do Painel do Contador) levaria, SEM gerar o arquivo: `contas` (todas as contas do plano), `vinculadas` (as que saem com o CNPJ/CPF do cliente ou fornecedor), `semVinculo`, `inativas`, `ausentes`, `naturezaManual`, os `problems` que impedem a geração (cada um com `reason` e os CÓDIGOS das contas; vazio = a planilha sai) e `omieRegistry`: quantos documentos vinculados NÃO existem no cadastro do Omie do cliente (na importação a Omie não cria o cadastro e a conta cai como diversos), lido do diretório em memória da busca de fornecedor, sem gravar. Cliente sem Omie ou com a Omie fora do ar: `checked=false` com o `reason`, nunca erro. Requer `generate_accounting_file` (plataforma, admin e gerente da carteira; usuários do cliente recebem 403 e a negação fica na trilha); cliente encerrado 409. */
+        /** O que a planilha de importação do plano de contas da Omie (modelo `Omie_Plano_Contas` v1.1.3 do Painel do Contador) levaria, SEM gerar o arquivo: `contas` (todas as contas do plano), `vinculadas` (as que saem com o CNPJ/CPF do cliente ou fornecedor), `semVinculo`, `inativas`, `ausentes`, `naturezaManual`, os `problems` que impedem a geração (cada um com `reason` e os CÓDIGOS das contas; vazio = a planilha sai) e `omieRegistry`: quantos documentos vinculados NÃO existem no cadastro do Omie do cliente (na importação a Omie não cria o cadastro e a conta cai como diversos), lido do diretório em memória da busca de fornecedor, sem gravar. Cliente sem Omie ou com a Omie fora do ar: `checked=false` com o `reason`, nunca erro. `refresh=true` relê o diretório da Omie (depois de cadastrar o que faltava). Requer `generate_accounting_file` (plataforma, admin e gerente da carteira; usuários do cliente recebem 403 e a negação fica na trilha); cliente encerrado 409. */
         get: operations["preview_omie_export_api_v1_clients__client_id__accounting_chart_omie_export_preview_get"];
         put?: never;
         post?: never;
@@ -6608,9 +6608,9 @@ export interface components {
             missing?: number | null;
             /**
              * Reason
-             * @description `sem_omie` (cliente sem conexão Omie, ou só por arquivo) ou `omie_indisponivel` (a Omie não respondeu ou recusou a credencial).
+             * @description `sem_omie` (cliente sem conexão Omie, ou só por arquivo), `origem_com_erro` (a conexão existe e está com erro: reconectar) ou `omie_indisponivel` (a Omie não respondeu ou recusou a credencial).
              */
-            reason?: ("sem_omie" | "omie_indisponivel") | null;
+            reason?: ("sem_omie" | "origem_com_erro" | "omie_indisponivel") | null;
         };
         /**
          * OrganizationCreate
@@ -10042,7 +10042,10 @@ export interface operations {
     };
     preview_omie_export_api_v1_clients__client_id__accounting_chart_omie_export_preview_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Relê o diretório de cadastros da Omie antes de conferir. */
+                refresh?: boolean;
+            };
             header?: never;
             path: {
                 client_id: string;

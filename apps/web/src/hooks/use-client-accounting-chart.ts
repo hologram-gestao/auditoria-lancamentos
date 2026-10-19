@@ -188,6 +188,20 @@ export function useOmieChartExportPreview(clientId: string, options: { enabled: 
   });
 }
 
+/**
+ * Conferir de novo o cadastro no Omie (86e3qhhrr): a prévia com `refresh=true`, que relê
+ * o diretório da Omie, e o resultado vira o dado da prévia aberta.
+ */
+export function useRefreshOmieChartExportPreview(clientId: string) {
+  const qc = useQueryClient();
+  return useMutation<OmieExportPreview, Error, void>({
+    mutationFn: () => previewOmieChartExport(clientId, { refresh: true }),
+    onSuccess: (data) => {
+      qc.setQueryData(accountingChartKeys.omieExportPreview(clientId), data);
+    },
+  });
+}
+
 /** Baixar a planilha da Omie (86e3qhhrr): leitura, sem invalidação. */
 export function useExportOmieChart(clientId: string) {
   return useMutation<BlobResponse, Error, void>({

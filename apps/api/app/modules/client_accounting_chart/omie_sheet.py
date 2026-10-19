@@ -194,12 +194,12 @@ def find_problems(lines: Sequence[OmieChartLine]) -> list[OmieExportProblem]:
         return [OmieExportProblem("plano_vazio")]
     if len(lines) > MAX_ACCOUNTS:
         return [OmieExportProblem("plano_grande_demais")]
-    found: dict[OmieExportReason, list[str]] = {}
+    # `dict` como conjunto ORDENADO: a ordem do plano fica e a busca é O(1) (o plano
+    # pode ter 10.000 contas, todas no mesmo motivo).
+    found: dict[OmieExportReason, dict[str, None]] = {}
 
     def add(reason: OmieExportReason, code: str) -> None:
-        codes = found.setdefault(reason, [])
-        if code not in codes:
-            codes.append(code)
+        found.setdefault(reason, {})[code] = None
 
     for line in lines:
         if not line.classification:
@@ -320,11 +320,13 @@ def _template() -> _Template:
     with zipfile.ZipFile(io.BytesIO(raw)) as package:
         order = tuple(package.infolist())
         parts = {info.filename: package.read(info.filename) for info in order}
-    sheet = parts[SHEET_PART].decode("utf-8")
+    # As duas partes que o gerador reescreve saem do cache: guardar os bytes delas além
+    # das linhas já separadas seria uma segunda cópia de ~3 MB para a vida do processo.
+    sheet = parts.pop(SHEET_PART).decode("utf-8")
     start = sheet.index("<sheetData>") + len("<sheetData>")
     end = sheet.index("</sheetData>")
     rows = {int(m.group(1)): m.group(0) for m in _ROW.finditer(sheet, start, end)}
-    sst = parts[SHARED_STRINGS_PART].decode("utf-8")
+    sst = parts.pop(SHARED_STRINGS_PART).decode("utf-8")
     opening = _SST_OPEN.search(sst)
     if opening is None:  # pragma: no cover - o modelo versionado sempre tem
         raise ValueError("sharedStrings do modelo sem contagem")

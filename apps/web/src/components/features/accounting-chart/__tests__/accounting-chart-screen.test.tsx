@@ -123,6 +123,7 @@ vi.mock('@/hooks/use-client-accounting-chart', () => ({
   // 86e3qhhrr — o diálogo da planilha da Omie (testado em omie-chart-export-dialog.test.tsx).
   useOmieChartExportPreview: () => ({ data: undefined, isLoading: true, isError: false }),
   useExportOmieChart: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRefreshOmieChartExportPreview: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 const clientDetailState = {
@@ -1273,6 +1274,12 @@ describe('conta manual (86e3nb816)', () => {
     const { unmount } = render(<AccountingChartScreen clientId="c1" />);
     await user.click(screen.getByRole('button', { name: 'Editar conta 649' }));
     let dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/Hoje: Devedora\./)).toBeInTheDocument();
+    // Trocar a classificação no formulário: o "Hoje" deixa de valer (o servidor deriva de novo).
+    const classification = within(dialog).getByLabelText('Classificação (opcional)');
+    await user.type(classification, '9');
+    expect(within(dialog).queryByText(/Hoje: Devedora\./)).toBeNull();
+    await user.type(classification, '{Backspace}');
     expect(within(dialog).getByText(/Hoje: Devedora\./)).toBeInTheDocument();
     await user.click(within(dialog).getByRole('combobox', { name: 'Natureza' }));
     await user.click(await screen.findByRole('option', { name: 'Credora' }));

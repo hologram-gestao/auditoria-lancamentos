@@ -230,12 +230,13 @@ export interface OmieExportRefusalProblem {
 /**
  * O 409 `PLANILHA_OMIE_RECUSADA` (86e3qhhrr): os problemas que o servidor devolve em
  * `details.problems` (motivo e CÓDIGOS das contas, nunca o nome). Item fora da forma
- * é descartado; erro de outro código → `null` (o caller cai no toast).
+ * é descartado; erro de outro código, ou o 409 sem nenhum problema legível → `null` (o
+ * caller cai no toast com o `userMessage`: lista vazia liberaria o download de novo).
  */
 export function readOmieExportRefusal(error: unknown): OmieExportRefusalProblem[] | null {
   if (!(error instanceof ApiError) || error.code !== 'PLANILHA_OMIE_RECUSADA') return null;
   const raw = error.details.problems;
-  if (!Array.isArray(raw)) return [];
+  if (!Array.isArray(raw)) return null;
   const problems: OmieExportRefusalProblem[] = [];
   for (const item of raw as unknown[]) {
     if (typeof item !== 'object' || item === null) continue;
@@ -250,5 +251,5 @@ export function readOmieExportRefusal(error: unknown): OmieExportRefusalProblem[
       count: typeof count === 'number' ? count : codes.length,
     });
   }
-  return problems;
+  return problems.length > 0 ? problems : null;
 }

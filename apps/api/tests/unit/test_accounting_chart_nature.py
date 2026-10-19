@@ -12,8 +12,16 @@ from pathlib import Path
 
 import pytest
 
+from app.core.exceptions import (
+    AppError,
+    NoOriginConnectionError,
+    OmieTimeoutError,
+    OriginCapabilityMissingError,
+    OriginConnectionInErrorError,
+)
 from app.db.models.client_accounting_account import AccountingAccountNature
 from app.modules.client_accounting_chart.nature import derive_nature, resolve_nature
+from app.modules.client_accounting_chart.service import _registry_unavailable
 
 D = AccountingAccountNature.DEVEDORA
 C = AccountingAccountNature.CREDORA
@@ -74,3 +82,17 @@ def test_a_migration_e_o_modelo_usam_o_mesmo_vocabulario() -> None:
     assert "'devedora'" in mig._BACKFILL
     assert "IN ('2', '3')" in mig._BACKFILL
     assert {m.value for m in AccountingAccountNature} == {"devedora", "credora"}
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (NoOriginConnectionError, "sem_omie"),
+        (OriginCapabilityMissingError, "sem_omie"),
+        (OriginConnectionInErrorError, "origem_com_erro"),
+        (OmieTimeoutError, "omie_indisponivel"),
+    ],
+)
+def test_motivo_da_previa_sem_cadastro(error: type[AppError], expected: str) -> None:
+    """A taxonomia da S9 decide o remédio: conectar, reconectar ou tentar depois."""
+    assert _registry_unavailable(error("x")) == expected

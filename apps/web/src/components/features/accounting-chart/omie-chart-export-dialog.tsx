@@ -24,6 +24,7 @@ import {
   FileSpreadsheet,
   Info,
   Loader2,
+  RefreshCw,
 } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -37,7 +38,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useExportOmieChart, useOmieChartExportPreview } from '@/hooks/use-client-accounting-chart';
+import {
+  useExportOmieChart,
+  useOmieChartExportPreview,
+  useRefreshOmieChartExportPreview,
+} from '@/hooks/use-client-accounting-chart';
 import {
   omieExportReasonLabel,
   readOmieExportRefusal,
@@ -75,6 +80,7 @@ function OmieChartExportDialog({
 }) {
   const preview = useOmieChartExportPreview(clientId, { enabled: open });
   const exportMutation = useExportOmieChart(clientId);
+  const refreshMutation = useRefreshOmieChartExportPreview(clientId);
   const [refusal, setRefusal] = useState<OmieExportRefusalProblem[] | null>(null);
   const data = preview.data;
   const problems = refusal ?? data?.problems ?? [];
@@ -139,7 +145,20 @@ function OmieChartExportDialog({
             {problems.length > 0 ? (
               <ProblemsNotice problems={problems} />
             ) : (
-              <RegistryNotice check={data.omieRegistry} />
+              <RegistryNotice
+                check={data.omieRegistry}
+                refreshing={refreshMutation.isPending}
+                onRefresh={() =>
+                  refreshMutation.mutate(undefined, {
+                    onError: (err) =>
+                      toast.error(
+                        err instanceof ApiError || err instanceof NetworkError
+                          ? err.userMessage
+                          : 'Não foi possível conferir o cadastro do Omie de novo.',
+                      ),
+                  })
+                }
+              />
             )}
           </div>
         ) : null}
@@ -206,7 +225,24 @@ function Count({ label, value }: { label: string; value: number }) {
   );
 }
 
-function RegistryNotice({ check }: { check: OmieRegistryCheck }) {
+const UNCHECKED_MESSAGES: Record<string, string> = {
+  sem_omie:
+    'Este cliente não está conectado ao Omie, então não foi possível conferir se os CNPJ/CPF já têm cadastro lá.',
+  origem_com_erro:
+    'A conexão deste cliente com o Omie está com erro (reconecte em Contas Bancárias), então não foi possível conferir se os CNPJ/CPF já têm cadastro lá.',
+  omie_indisponivel:
+    'O Omie não respondeu agora, então não foi possível conferir se os CNPJ/CPF já têm cadastro lá.',
+};
+
+function RegistryNotice({
+  check,
+  refreshing,
+  onRefresh,
+}: {
+  check: OmieRegistryCheck;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
   if (!check.checked) {
     return (
       <p
@@ -215,9 +251,8 @@ function RegistryNotice({ check }: { check: OmieRegistryCheck }) {
       >
         <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <span>
-          {check.reason === 'sem_omie'
-            ? 'Este cliente não está conectado ao Omie, então não foi possível conferir se os CNPJ/CPF já têm cadastro lá.'
-            : 'O Omie não respondeu agora, então não foi possível conferir se os CNPJ/CPF já têm cadastro lá.'}{' '}
+          {UNCHECKED_MESSAGES[check.reason ?? 'omie_indisponivel'] ??
+            UNCHECKED_MESSAGES.omie_indisponivel}{' '}
           Na importação, a Omie não cria cadastro: a conta cujo documento não existe lá fica como
           diversos.
         </span>
@@ -234,20 +269,30 @@ function RegistryNotice({ check }: { check: OmieRegistryCheck }) {
     );
   }
   return (
-    <p
+    <div
       role="status"
       data-testid="omie-export-registry-warning"
-      className="bg-warning-muted text-warning ring-warning/30 flex items-start gap-2 rounded-md p-3 text-sm ring-1 ring-inset"
+      className="bg-warning-muted text-warning ring-warning/30 space-y-2 rounded-md p-3 text-sm ring-1 ring-inset"
     >
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-      <span>
-        {missing === 1
-          ? '1 conta tem um CNPJ/CPF que não está no cadastro do Omie deste cliente.'
-          : `${missing} contas têm um CNPJ/CPF que não está no cadastro do Omie deste cliente.`}{' '}
-        Na importação, a Omie não cria o cadastro e essas contas ficam como diversos. Cadastre o
-        cliente ou fornecedor no Omie antes, se quiser a ligação.
-      </span>
-    </p>
+      <p className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        <span>
+          {missing === 1
+            ? '1 conta tem um CNPJ/CPF que não está no cadastro do Omie deste cliente.'
+            : `${missing} contas têm um CNPJ/CPF que não está no cadastro do Omie deste cliente.`}{' '}
+          Na importação, a Omie não cria o cadastro e essas contas ficam como diversos. Cadastre o
+          cliente ou fornecedor no Omie antes, se quiser a ligação, e confira de novo.
+        </span>
+      </p>
+      <Button type="button" variant="outline" size="sm" onClick={onRefresh} disabled={refreshing}>
+        {refreshing ? (
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+        ) : (
+          <RefreshCw className="h-4 w-4" aria-hidden="true" />
+        )}
+        {refreshing ? 'Conferindo…' : 'Conferir de novo no Omie'}
+      </Button>
+    </div>
   );
 }
 

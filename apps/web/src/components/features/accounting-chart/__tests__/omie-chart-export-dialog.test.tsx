@@ -40,6 +40,7 @@ const previewState: PreviewState = {
   refetch: vi.fn(),
 };
 const exportState = { mutateAsync: vi.fn(), isPending: false };
+const refreshState = { mutate: vi.fn(), isPending: false };
 const previewEnabled = vi.fn();
 
 vi.mock('@/hooks/use-client-accounting-chart', () => ({
@@ -48,6 +49,7 @@ vi.mock('@/hooks/use-client-accounting-chart', () => ({
     return previewState;
   },
   useExportOmieChart: () => exportState,
+  useRefreshOmieChartExportPreview: () => refreshState,
 }));
 
 import { OmieChartExportAction } from '@/components/features/accounting-chart/omie-chart-export-dialog';
@@ -83,6 +85,8 @@ beforeEach(() => {
   previewState.error = null;
   exportState.mutateAsync = vi.fn();
   exportState.isPending = false;
+  refreshState.mutate = vi.fn();
+  refreshState.isPending = false;
   toastSuccess.mockReset();
   toastError.mockReset();
   downloadSpy.mockReset();
@@ -116,8 +120,16 @@ describe('OmieChartExportAction', () => {
     expect(within(dialog).getByRole('button', { name: 'Baixar planilha' })).toBeEnabled();
   });
 
+  it('"Conferir de novo no Omie" relê o cadastro (refresh)', async () => {
+    previewState.data = preview({ omieRegistry: { checked: true, missing: 4, reason: null } });
+    const { user, dialog } = await openDialog();
+    await user.click(within(dialog).getByRole('button', { name: 'Conferir de novo no Omie' }));
+    expect(refreshState.mutate).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ['sem_omie', /não está conectado ao Omie/],
+    ['origem_com_erro', /conexão deste cliente com o Omie está com erro/],
     ['omie_indisponivel', /O Omie não respondeu agora/],
   ] as const)('sem conferência (%s), explica e deixa baixar', async (reason, text) => {
     previewState.data = preview({ omieRegistry: { checked: false, missing: null, reason } });
@@ -176,6 +188,22 @@ describe('OmieChartExportAction', () => {
     expect(problems).toHaveTextContent('Conta 12');
     expect(toastError).not.toHaveBeenCalled();
     expect(within(dialog).queryByRole('button', { name: 'Baixar planilha' })).toBeNull();
+  });
+
+  it('409 sem problema legível vira toast e não libera o download de novo em silêncio', async () => {
+    exportState.mutateAsync = vi.fn().mockRejectedValue(
+      new ApiError(409, {
+        code: 'PLANILHA_OMIE_RECUSADA',
+        message: 'x',
+        userMessage: 'A planilha da Omie não pode ser gerada.',
+        details: { problems: [{ nada: 1 }] },
+      }),
+    );
+    const { user, dialog } = await openDialog();
+    await user.click(within(dialog).getByRole('button', { name: 'Baixar planilha' }));
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith('A planilha da Omie não pode ser gerada.'),
+    );
   });
 
   it('outro erro do download vira toast com a mensagem do servidor', async () => {

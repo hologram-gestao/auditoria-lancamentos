@@ -235,8 +235,15 @@ export async function listAccountingParties(
  * gerar: contagens, os problemas que impedem e quantos documentos vinculados não têm
  * cadastro no Omie. Requer `generate_accounting_file`; cliente encerrado 409.
  */
-export async function previewOmieChartExport(clientId: string): Promise<OmieExportPreview> {
-  return apiGet<OmieExportPreview>(`${clientBase(clientId)}/accounting-chart/omie-export/preview`);
+export async function previewOmieChartExport(
+  clientId: string,
+  options: { refresh?: boolean } = {},
+): Promise<OmieExportPreview> {
+  // `refresh=true` relê o diretório de cadastros da Omie (cache de 6 h no servidor).
+  const query = options.refresh ? '?refresh=true' : '';
+  return apiGet<OmieExportPreview>(
+    `${clientBase(clientId)}/accounting-chart/omie-export/preview${query}`,
+  );
 }
 
 /**
