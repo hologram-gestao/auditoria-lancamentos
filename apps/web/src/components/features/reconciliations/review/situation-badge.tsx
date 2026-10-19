@@ -62,6 +62,44 @@ function BadgeComDica({
   );
 }
 
+/**
+ * A situação do lançamento NO OMIE (86e3t4vpq, terceiro fato do FCA de 09/10).
+ *
+ * É a marcação que o cliente faz no próprio Omie (`cSituacao`), e ela NÃO entra
+ * no cruzamento (`matcher.py`: "O matcher não filtra por status"). A frase é a
+ * mesma no tooltip e no bloco explicativo da aba, por isso mora aqui.
+ */
+export const OMIE_STATUS_EXPLANATION =
+  "Marcação feita no próprio Omie. Ela não entra no cruzamento: a plataforma compara o arquivo do banco com os lançamentos do Omie. Um lançamento com par aqui e 'Não conciliado' lá significa que o Omie está desatualizado.";
+
+/** O único valor que a Omie devolve para "já conciliado lá dentro" (fixtures reais). */
+const OMIE_RECONCILED_STATUS = 'Conciliado';
+
+/**
+ * Selo "No Omie: <situação>", com o texto como a Omie devolveu (o campo é
+ * texto livre no contrato; nada de enum no front). Sem situação (lançamento
+ * recém-criado volta sem `cSituacao`, e o cache grava `""`), não há selo:
+ * inventar "Conciliado" seria afirmar o que a Omie não disse.
+ */
+export function OmieStatusBadge({ status }: { status: string | null | undefined }) {
+  const text = status?.trim() ?? '';
+  if (text === '') return null;
+  const reconciled = text === OMIE_RECONCILED_STATUS;
+  const label = `No Omie: ${text}`;
+  return (
+    <BadgeComDica
+      dica={OMIE_STATUS_EXPLANATION}
+      ariaLabel={`${label}. ${OMIE_STATUS_EXPLANATION}`}
+      className={cn(
+        'inline-flex w-fit items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium',
+        reconciled ? 'bg-muted text-muted-foreground' : 'bg-warning-muted text-warning',
+      )}
+    >
+      {label}
+    </BadgeComDica>
+  );
+}
+
 export function SituationBadge({ situation, title }: SituationBadgeProps) {
   // 86e2n39hb — badges pintam por TOKEN (par `-muted` + sólido, travado no
   // theme-contrast.test.ts nos dois temas), nunca pela paleta crua. O laranja

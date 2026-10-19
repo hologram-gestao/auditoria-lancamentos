@@ -2146,6 +2146,12 @@ let sessionAccountType: string | null = null;
  */
 let sessionErrorDetail = false;
 /**
+ * 86e3t4vpq: a situação que a Omie devolve para o lançamento 9001 (o par da
+ * linha conciliada). O padrão é a das fixtures reais ("Conciliado"); o cenário
+ * do selo troca por "Não conciliado".
+ */
+let omie9001Status = 'Conciliado';
+/**
  * 86e3n70q9: o `POST /reprocess` liga esta chave, e o detalhe passa a voltar em
  * `processing` (é o que o servidor faz). Prova que a tela volta ao estado
  * "processando" depois de confirmar, sem navegar.
@@ -3504,7 +3510,7 @@ async function fulfillApi(route: Route): Promise<void> {
         supplier: c.supplier,
         category: c.category,
         amount: c.amount,
-        status: c.status,
+        status: c.omie_id === 9001 ? omie9001Status : c.status,
       })),
     );
   }
@@ -3900,6 +3906,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   // lançamento ligam o cartão.
   sessionAccountType = null;
   sessionErrorDetail = false;
+  omie9001Status = 'Conciliado';
   sessionReprocessed = false;
   cardEntriesWithPostings = false;
   postingResponse = 'direto-parcial';
@@ -5578,6 +5585,79 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator('#__next_error__')).toHaveCount(0);
       await analyze(page, `resumo com saldo divergente (${vp.label})`);
       await shot(page, `resumo-diferenca-${slugD}`);
+    });
+  });
+}
+
+/**
+ * 86e3t4vpq — a linha conciliada mostra a situação do lançamento NO OMIE, e o
+ * topo da aba explica que ela não decide o cruzamento.
+ *
+ * Medido no browser o que o jsdom não mede: o contraste do selo em `warning`
+ * com o ponteiro sobre a linha (`hover:bg-muted/50` do `<TableRow>` por baixo;
+ * `contrasteComposto` mistura as camadas até a opaca), o tooltip aberto pelo
+ * FOCO do teclado e o axe com o bloco explicativo aberto e o tooltip visível.
+ */
+for (const vp of VIEWPORTS) {
+  const slugS = vp.label.replace(/\s+/g, '-');
+  test.describe(`Situação no Omie na linha conciliada (86e3t4vpq) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('"Não conciliado" no Omie: selo, tooltip pelo teclado e bloco explicativo', async ({
+      page,
+    }) => {
+      omie9001Status = 'Não conciliado';
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+
+      const bloco = page.getByRole('region', { name: 'Conciliado aqui e conciliado no Omie' });
+      await expect(bloco).toBeVisible();
+      await expect(bloco).toContainText('Ela não entra no cruzamento');
+
+      const linha = page.getByRole('row').filter({ hasText: 'Pagamento fornecedor X' });
+      const selo = linha.getByRole('img', { name: /^No Omie: Não conciliado\./ });
+      await expect(selo).toBeVisible();
+      // O cruzamento não mudou: a linha continua conciliada.
+      await expect(linha.getByText('Conciliado', { exact: true })).toBeVisible();
+
+      await linha.hover();
+      await aguardarAnimacao(linha);
+      const ratio = await contrasteComposto(selo);
+      expect(
+        ratio,
+        `selo "No Omie: Não conciliado" em hover (${vp.label}): ${ratio.toFixed(2)}:1`,
+      ).toBeGreaterThanOrEqual(4.5);
+
+      // Teclado: o foco abre a dica do Radix, com o texto inteiro.
+      await selo.focus();
+      const dica = page.getByRole('tooltip');
+      await expect(dica).toContainText('o Omie está desatualizado');
+      await aguardarAnimacao(page.locator('[data-radix-popper-content-wrapper]').first());
+      await analyze(page, `selo "No Omie" com o tooltip aberto (${vp.label})`);
+      await shot(page, `revisao-situacao-no-omie-${slugS}`);
+    });
+
+    test('"Conciliado" no Omie: selo neutro; recolher o bloco e a tela lembrar', async ({
+      page,
+    }) => {
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+      const linha = page.getByRole('row').filter({ hasText: 'Pagamento fornecedor X' });
+      const selo = linha.getByRole('img', { name: /^No Omie: Conciliado\./ });
+      await expect(selo).toBeVisible();
+      await linha.hover();
+      await aguardarAnimacao(linha);
+      const ratio = await contrasteComposto(selo);
+      expect(
+        ratio,
+        `selo "No Omie: Conciliado" em hover (${vp.label}): ${ratio.toFixed(2)}:1`,
+      ).toBeGreaterThanOrEqual(4.5);
+
+      await page.getByRole('button', { name: 'Ocultar a explicação' }).click();
+      await expect(
+        page.getByRole('region', { name: 'Conciliado aqui e conciliado no Omie' }),
+      ).toBeHidden();
+      await page.reload();
+      await expect(page.getByRole('button', { name: 'Mostrar a explicação' })).toBeVisible();
+      await analyze(page, `bloco "Situação no Omie" recolhido (${vp.label})`);
     });
   });
 }
