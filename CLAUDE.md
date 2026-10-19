@@ -966,6 +966,16 @@ is_primary`) — um responsável por cliente; o predicado é COPIADO na migratio
    valor com um lançamento no lote: uma casa, a outra fica `sem_omie` (decisão do Pedro,
    08/10/2026). `sem_omie` e `omie_sem_arquivo` continuam, só dentro do lote. O job
    escolhe o matcher pelo modo da SESSÃO e loga `match_mode` em `reconciliation_matched`.
+9. **A situação do lançamento NO OMIE (`cSituacao`) nunca decide o cruzamento**
+   (`matcher.py`: "O matcher não filtra por status"; reafirmado em 86e3t4vpq, terceiro fato
+   do FCA de 09/10/2026). Ela é a marcação que o cliente faz lá dentro e pode discordar do
+   par: "Conciliado" aqui e "Não conciliado" no Omie significa que o Omie está
+   desatualizado, não que o par está errado. A revisão a MOSTRA na linha com par (selo
+   "No Omie: <texto como veio>", `OmieStatusBadge`, neutro só para "Conciliado" sem
+   olhar caixa e acento) e explica no topo da aba. Sem situação no lookup não há selo,
+   nunca um "Conciliado" inventado: lançamento sem `cSituacao` (o cache grava `""`) e
+   par com título em aberto (Atrasado/Previsto, fora do cache do extrato, como o
+   fornecedor e a categoria dessas linhas).
 
 ---
 
@@ -1778,6 +1788,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.101, 19/10/2026. **A linha conciliada da revisão passou a mostrar a situação do lançamento NO OMIE, e a tela explica que ela não decide o cruzamento (86e3t4vpq, subtask 1 do épico 86e3t4vpe, terceiro fato do FCA de 09/10; prometida antes da implantação da Felicity).** Só front, sem rota nem contrato novo: a aba Movimentações já recebia `status` (o `cSituacao`) do lookup `GET /omie/lancamentos` e o descartava. Agora a linha `conciliado` e `conciliado_data_divergente` ganha, sob a categoria do Omie, o selo "No Omie: <situação>" com o texto como a Omie devolveu (neutro para "Conciliado", `warning` para qualquer outro valor, tooltip no padrão `role="img"` + `aria-label` + `tabIndex`), e o topo da aba ganhou o bloco recolhível "Conciliado aqui e conciliado no Omie" pela moldura `CollapsibleSummary` (estado `revisao-situacao-no-omie`). Sem `cSituacao` o cache grava `""` e não há selo. Contraste do selo com a linha em hover, composto: 5,50 / 5,81 / 7,57:1 neutro e 4,84 / 8,09 / 7,69:1 em atenção (claro / escuro / Hologram). Regra nova §5.9. Endpoints sensíveis (**132**), matriz (**29**) e pares de AAD (**18**) iguais._
 
 _Versão 1.100, 17/10/2026. **As relações de clientes e de fornecedores do Domínio passaram a vincular cada conta do plano contábil ao CNPJ ou CPF da pessoa (86e3qhhrn, subtask 3 do épico 86e3qhhr0, reunião com o Gabriel de 14/10).** Leitor próprio (`client_accounting_chart/parties.py`): planilha pelo conteúdo, `.xls` com o reparo dos BLANKs do leitor compartilhado, cabeçalho pelo NOME (os dois relatórios trocam `Código` e `Conta` de lugar), tipo do vínculo pelo TÍTULO, CNPJ da empresa do banner. Política em duas camadas, decidida pelas amostras reais: recusa o arquivo inteiro o que diz que o arquivo está errado (linha com documento sem conta, pessoa depois do total) e, no serviço, conta fora do plano ou sintética (pedido da task); NÃO recusa, mas fica sem vínculo e volta na resposta, a conta `0` (3 fornecedores na amostra), o documento ausente ou com verificador errado e a conta compartilhada por mais de uma pessoa (a 746, dois fornecedores). Novo par de AAD (17 → **18**: `client_accounting_accounts.party_document_encrypted`, com `party_document_iv` e `party_type` em claro, CHECKs `party_pair` e `party_type`, migration `7c3e9a1d5f28`), `core/cpf.py` (irmão do `cnpj.py`), `clients.party_reports_company_fingerprint` (HMAC do CNPJ da empresa via `compute_fingerprint` da `search_index`; outra empresa é 422 `RELATORIO_DE_OUTRA_EMPRESA`; zerada no encerramento em Core). Duas rotas (lista canônica 130 → **132**, bateria dos três atacantes): a importação (`OpenClientDep` + `manage_client_accounting_chart`, idempotente, a conta nos dois relatórios fica com o tipo do último) e a lista (`AccessibleClientDep` + a MESMA permissão: documento de terceiro é configuração do escritório; `documentMasked` só, o inteiro nunca sai). Evento `plano_contabil_vinculos_importados` (só contagens). Fixture real anonimizada no lugar (`tests/fixtures/accounting_chart_dominio_parties/`, script `anonymize_dominio_parties_sample_xls.py`, documentos fictícios válidos, a validade e o zero à esquerda do original preservados): 89 + 88 vinculáveis, as contas 685 e 918 entre elas. **Achado da amostra:** um CNPJ começa com zeros; a primeira leitura passava o texto por `int` e o recusava como inválido. Na tela, a aba "Clientes e fornecedores" dentro de Plano contábil (`?aba=clientes-fornecedores`, só para quem tem a permissão; deep link sem ela cai em "Contas"): um arquivo por vez, resultado com as linhas sem vínculo (linha, conta, motivo), recusa ramificada por `code` com o código da conta, lista paginada com badge do tipo e documento mascarado, filtro por tipo. O `FilterGroup` do plano virou componente compartilhado. Matriz (**29**) igual._
 
