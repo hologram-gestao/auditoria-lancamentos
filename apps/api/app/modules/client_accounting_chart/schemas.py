@@ -16,9 +16,11 @@ from app.db.models.client_accounting_account import (
     MAX_ACCOUNTING_ACCOUNT_CLASSIFICATION_CHARS,
     MAX_ACCOUNTING_ACCOUNT_CODE_CHARS,
     MAX_ACCOUNTING_ACCOUNT_NAME_CHARS,
+    AccountingAccountNature,
     AccountingAccountType,
     AccountingPartyType,
 )
+from app.modules.client_accounting_chart.omie_sheet import problems_details
 from app.modules.client_accounting_chart.parties import PartyLineProblem
 from app.modules.client_accounting_chart.service import (
     ACCOUNTING_ACCOUNT_UNDECIPHERABLE,
@@ -33,6 +35,7 @@ if TYPE_CHECKING:
         ChartImportResult,
         ChartPreview,
         DecryptedNames,
+        OmieExportPreview,
         PartyDocuments,
         PartyImportResult,
         PartyLinksSummary,
@@ -88,6 +91,23 @@ class AccountingAccountResponse(BaseModel):
             "E ativa. É o filtro do seletor de conta."
         )
     )
+    nature: AccountingAccountNature | None = Field(
+        default=None,
+        description=(
+            "`devedora` ou `credora`: a natureza que a planilha de importação do plano "
+            "de contas da Omie exige. Derivada da classificação (grupo 1 devedora, 2 e 3 "
+            "credora, 4 em diante devedora) ou escolhida à mão (`natureOverridden`). "
+            "`null` = conta sem classificação e sem escolha."
+        ),
+    )
+    nature_overridden: bool = Field(
+        default=False,
+        alias="natureOverridden",
+        description=(
+            "`true` = a natureza foi escolhida à mão: a reimportação e a troca de "
+            "classificação não a recalculam."
+        ),
+    )
     updated_at: datetime = Field(alias="updatedAt", description="Última importação que a tocou.")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -106,6 +126,8 @@ class AccountingAccountResponse(BaseModel):
             active=row.active,
             absent_since=row.absent_since,
             postable=not_postable_reason(row) is None,
+            nature=AccountingAccountNature(row.nature) if row.nature is not None else None,
+            nature_overridden=row.nature_overridden,
             updated_at=row.updated_at,
         )
 
@@ -352,6 +374,13 @@ class AccountingAccountCreateRequest(BaseModel):
         max_length=MAX_ACCOUNTING_ACCOUNT_CLASSIFICATION_CHARS,
         description="Classificação hierárquica opcional (`1.1.1.02.001`); decide a ordem.",
     )
+    nature: AccountingAccountNature | None = Field(
+        default=None,
+        description=(
+            "`devedora` ou `credora`, escolhida à mão. Ausente ou `null` = derivada da "
+            "classificação."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -377,6 +406,14 @@ class AccountingAccountUpdateRequest(BaseModel):
             "`false` inativa a conta (ela fica, sem receber decisão nova); `true` reativa."
         ),
     )
+    nature: AccountingAccountNature | None = Field(
+        default=None,
+        description=(
+            "`devedora` ou `credora` ESCOLHE a natureza à mão (a reimportação passa a "
+            "respeitá-la); `null` volta ao automático, derivado da classificação; "
+            "ausente mantém."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -387,6 +424,8 @@ class AccountingAccountUpdateRequest(BaseModel):
             classification=self.classification,
             classification_set="classification" in self.model_fields_set,
             active=self.active,
+            nature=self.nature,
+            nature_set="nature" in self.model_fields_set,
         )
 
 
@@ -547,3 +586,102 @@ class PartyLinksListResponse(BaseModel):
     data: list[PartyLinkResponse]
     pagination: PaginationMeta
     summary: PartyLinksSummaryPayload
+
+
+# ------------------------------------------ planilha do plano de contas da Omie (86e3qhhrr)
+
+#: Por que os documentos vinculados não foram conferidos no cadastro do Omie.
+OmieRegistryUnavailableReason = Literal["sem_omie", "origem_com_erro", "omie_indisponivel"]
+
+
+class OmieRegistryCheckPayload(BaseModel):
+    """Quantos documentos vinculados NÃO existem no cadastro do Omie do cliente."""
+
+    checked: bool = Field(
+        description="`false` = a conferência não rodou (ver `reason`); `missing` vem nulo."
+    )
+    missing: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Contas vinculadas cujo CNPJ/CPF não tem cadastro no Omie: na importação a "
+            "Omie não cria o cadastro e a conta cai como diversos."
+        ),
+    )
+    reason: OmieRegistryUnavailableReason | None = Field(
+        default=None,
+        description=(
+            "`sem_omie` (cliente sem conexão Omie, ou só por arquivo), `origem_com_erro` "
+            "(a conexão existe e está com erro: reconectar) ou `omie_indisponivel` (a Omie "
+            "não respondeu ou recusou a credencial)."
+        ),
+    )
+
+
+class OmieExportProblemPayload(BaseModel):
+    """Um motivo que impede a planilha, com os CÓDIGOS das contas (nunca o nome)."""
+
+    reason: str = Field(
+        description=(
+            "`plano_vazio`, `plano_grande_demais` (mais de 10.000 contas), "
+            "`conta_sem_classificacao`, `conta_sem_natureza`, `nome_indecifravel`, "
+            "`documento_indecifravel`, `texto_formula` (começa com `= + - @`), "
+            "`texto_longo` (classificação ou nome acima de 60, código acima de 20) ou "
+            "`texto_invalido` (quebra de linha ou caractere de controle)."
+        )
+    )
+    account_codes: list[str] = Field(
+        alias="accountCodes", description="Códigos reduzidos, na ordem do plano (até 50)."
+    )
+    count: int = Field(ge=0, description="Quantas contas têm o motivo (a lista para em 50).")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class OmieExportPreviewPayload(BaseModel):
+    """O que a planilha da Omie levaria, sem gerar o arquivo."""
+
+    contas: int = Field(ge=0, description="Linhas da planilha: todas as contas do plano.")
+    vinculadas: int = Field(ge=0, description="Contas que saem com o CNPJ/CPF do vínculo.")
+    sem_vinculo: int = Field(ge=0, alias="semVinculo")
+    inativas: int = Field(
+        ge=0, description="Contas inativas no plano (saem na planilha como as outras)."
+    )
+    ausentes: int = Field(
+        ge=0, description='Contas com o selo "não veio na última importação" (saem também).'
+    )
+    natureza_manual: int = Field(
+        ge=0, alias="naturezaManual", description="Contas com a natureza escolhida à mão."
+    )
+    problems: list[OmieExportProblemPayload] = Field(
+        description="Vazio = a planilha pode ser gerada; senão, o que impede (a geração é 409)."
+    )
+    omie_registry: OmieRegistryCheckPayload = Field(alias="omieRegistry")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_preview(cls, preview: OmieExportPreview) -> OmieExportPreviewPayload:
+        return cls(
+            contas=preview.accounts,
+            vinculadas=preview.linked,
+            sem_vinculo=preview.accounts - preview.linked,
+            inativas=preview.inactive,
+            ausentes=preview.absent,
+            natureza_manual=preview.nature_overridden,
+            problems=[
+                OmieExportProblemPayload.model_validate(item)
+                for item in problems_details(preview.problems)
+            ],
+            omie_registry=OmieRegistryCheckPayload(
+                checked=preview.registry_missing is not None,
+                missing=preview.registry_missing,
+                reason=preview.registry_unavailable,
+            ),
+        )
+
+
+class OmieExportPreviewEnvelope(BaseModel):
+    """Body de `GET /clients/{client_id}/accounting-chart/omie-export/preview`."""
+
+    data: OmieExportPreviewPayload

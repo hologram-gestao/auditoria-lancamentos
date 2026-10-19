@@ -691,6 +691,8 @@ let accountingChartEmpty = false;
 let accountingImportOutcome: 'sucesso' | 'linhas' | 'dominio' = 'sucesso';
 /** 86e3qhhrn — a importação da relação de clientes/fornecedores: sucesso ou recusa. */
 let partiesImportOutcome: 'sucesso' | 'linhas' = 'sucesso';
+/** 86e3qhhrr — a prévia da planilha da Omie: pronta (com aviso de cadastro) ou com problemas. */
+let omieExportOutcome: 'pronta' | 'problemas' = 'pronta';
 
 function accountingAccount(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -702,6 +704,8 @@ function accountingAccount(over: Record<string, unknown> = {}): Record<string, u
     type: 'analitica',
     active: true,
     postable: true,
+    nature: 'devedora',
+    natureOverridden: false,
     updatedAt: '2026-09-28T10:00:00Z',
     ...over,
   };
@@ -2597,6 +2601,33 @@ async function fulfillApi(route: Route): Promise<void> {
       }),
     });
   }
+  // 86e3qhhrr — a planilha da Omie: a prévia (chave única `data`) e o XLSX do download.
+  if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/omie-export/preview`) {
+    return json({
+      contas: 5,
+      vinculadas: 2,
+      semVinculo: 3,
+      inativas: 1,
+      ausentes: 0,
+      naturezaManual: 0,
+      problems:
+        omieExportOutcome === 'problemas'
+          ? [
+              { reason: 'conta_sem_classificacao', accountCodes: ['700', '701'], count: 2 },
+              { reason: 'conta_sem_natureza', accountCodes: ['700', '701'], count: 2 },
+            ]
+          : [],
+      omieRegistry: { checked: true, missing: 1, reason: null },
+    });
+  }
+  if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/omie-export`) {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      headers: { 'content-disposition': 'attachment; filename="Omie_Plano_Contas_11111111.xlsx"' },
+      body: Buffer.from('PK'),
+    });
+  }
   if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/import/preview`) {
     if (enviouXls(route)) return recusarXls(route);
     if (accountingImportOutcome === 'linhas' || accountingImportOutcome === 'dominio') {
@@ -3943,6 +3974,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   accountingChartEmpty = false;
   accountingImportOutcome = 'sucesso';
   partiesImportOutcome = 'sucesso';
+  omieExportOutcome = 'pronta';
   mappingAccountingDestination = false;
   mappingBankPending = false;
   // S13: a organização tem dois layouts, por padrão.
@@ -9859,6 +9891,52 @@ for (const vp of VIEWPORTS) {
       });
     }
 
+    for (const estado of ['pronta', 'problemas'] as const) {
+      test(`planilha da Omie: diálogo ${estado === 'pronta' ? 'pronto, com aviso de cadastro' : 'com problemas'} (86e3qhhrr)`, async ({
+        page,
+      }) => {
+        omieExportOutcome = estado;
+        sessionUser = SYSTEM_MANAGER_USER;
+        await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+        await expect(page.getByRole('heading', { name: 'Plano contábil', level: 1 })).toBeVisible();
+        const acao = page.getByRole('button', { name: 'Gerar planilha da Omie' });
+        await exigirDentroDaViewport(page, acao, `${vp.label}: "Gerar planilha da Omie"`);
+        await acao.click();
+        const dialogo = page.getByRole('dialog', { name: 'Gerar planilha da Omie' });
+        await expect(dialogo.getByTestId('omie-export-counts')).toContainText('Contas5');
+        if (estado === 'pronta') {
+          await expect(dialogo.getByTestId('omie-export-registry-warning')).toContainText(
+            '1 conta tem um CNPJ/CPF que não está no cadastro do Omie',
+          );
+          const baixar = dialogo.getByRole('button', { name: 'Baixar planilha' });
+          await exigirDentroDaViewport(page, baixar, `${vp.label}: "Baixar planilha"`);
+        } else {
+          await expect(dialogo.getByTestId('omie-export-problems')).toContainText(
+            'Contas 700, 701',
+          );
+          await expect(dialogo.getByRole('button', { name: 'Baixar planilha' })).toHaveCount(0);
+        }
+        await shot(page, `plano-contabil-planilha-omie-${estado}-${slugPC16}`);
+        await analyze(page, `plano contábil — planilha da Omie, ${estado} (${vp.label})`);
+        if (estado === 'pronta') {
+          const download = page.waitForEvent('download');
+          await dialogo.getByRole('button', { name: 'Baixar planilha' }).click();
+          expect((await download).suggestedFilename()).toBe('Omie_Plano_Contas_11111111.xlsx');
+          await expect(dialogo).toHaveCount(0);
+        }
+      });
+    }
+
+    test('gaveta da conta: o campo Natureza (86e3qhhrr)', async ({ page }) => {
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+      await page.getByRole('button', { name: 'Editar conta 649' }).click();
+      const gaveta = page.getByRole('dialog', { name: 'Editar conta 649' });
+      await expect(gaveta.getByRole('combobox', { name: 'Natureza' })).toBeVisible();
+      await expect(gaveta.getByText(/Hoje: Devedora\./)).toBeVisible();
+      await analyze(page, `plano contábil — gaveta com a natureza (${vp.label})`);
+    });
+
     test('operador do cliente lê a conta do banco, sem importar nem associar', async ({ page }) => {
       sessionUser = CLIENT_OPERATOR_USER;
       await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
@@ -9867,6 +9945,7 @@ for (const vp of VIEWPORTS) {
         page.getByRole('region', { name: 'Contas do plano contábil (rolável)' }),
       ).toBeVisible();
       await expect(page.getByRole('button', { name: /importar/i })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Gerar planilha da Omie' })).toHaveCount(0);
       const secao = page.getByTestId('bank-accounts-section');
       await expect(secao.getByRole('button', { name: /Associar|Trocar/ })).toHaveCount(0);
       await expect(

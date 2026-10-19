@@ -170,11 +170,19 @@ CLASSIFICATION: tuple[Entry, ...] = (
         "`arquivo` não tem credencial. NÃO converter",
     ),
     Entry(
+        "app/modules/client_accounting_chart/routes.py",
+        Family.ORIGEM,
+        "prévia da planilha do plano de contas da Omie (86e3qhhrr): lê o diretório de "
+        "cadastros pela `listar_lancamentos`, só no miss do cache; sem Omie (sem conexão "
+        "ou só-arquivo) a prévia devolve o motivo, nunca erro",
+    ),
+    Entry(
         "app/modules/client_accounting_chart/service.py",
         Family.CIFRA_DADO,
         "cifra o NOME das contas do plano contábil do cliente (S16, BACK 16.1) — dado do "
-        "tenant, no molde do glossário. Plano entra por PLANILHA, nunca pela origem: "
-        "nenhuma chamada ao provedor. NÃO converter",
+        "tenant, no molde do glossário — e o documento do vínculo (86e3qhhrn), e os decifra "
+        "em memória para a planilha da Omie (86e3qhhrr). Plano entra por PLANILHA, nunca "
+        "pela origem: nenhuma chamada ao provedor. NÃO converter",
     ),
     Entry(
         "app/modules/client_mapping/accounting.py",

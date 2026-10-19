@@ -46,6 +46,10 @@
  * `manage_client_accounting_chart` — ler os vínculos pede a permissão no servidor, e
  * ação que o servidor nega não aparece (§4.9). A aba vive na URL (`aba`); deep link
  * para a aba sem permissão cai em "Contas" em silêncio.
+ *
+ * **Planilha da Omie** (86e3qhhrr): na aba "Contas", "Gerar planilha da Omie" (só
+ * `generate_accounting_file`, cliente aberto e plano com contas) abre um diálogo com a
+ * prévia e baixa a planilha de importação de plano de contas do Painel do Contador.
  */
 
 import { CheckCircle2, Download, Loader2, Pencil, Plus, Search, Upload, X } from 'lucide-react';
@@ -95,6 +99,7 @@ import { AccountingPartiesTab } from './accounting-parties-tab';
 import { BankAccountsSection } from './bank-accounts-section';
 import { classificationDepth, indentClassFor } from './chart-hierarchy';
 import { FilterGroup } from './filter-group';
+import { OmieChartExportAction } from './omie-chart-export-dialog';
 
 const PARAM = {
   page: 'page',
@@ -187,6 +192,9 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
   const isClosed = clientDetail.data?.closed_at != null;
   const canManage = hasPermission(currentUser, 'manage_client_accounting_chart');
   const showImport = canManage && !isClosed;
+  // A planilha da Omie é artefato do ESCRITÓRIO (86e3qhhrr), como o arquivo contábil:
+  // a mesma permissão no servidor; encerrado é 409, então o botão some.
+  const canGenerateOmieSheet = hasPermission(currentUser, 'generate_accounting_file') && !isClosed;
   // A aba de vínculos pede a permissão no servidor: sem ela, o deep link cai em "Contas".
   const tab: ChartTab =
     tabParam === 'clientes-fornecedores' && canManage ? 'clientes-fornecedores' : 'contas';
@@ -275,6 +283,9 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
               )}
               {exportMutation.isPending ? 'Baixando…' : 'Baixar planilha'}
             </Button>
+          )}
+          {hasPlan && canGenerateOmieSheet && tab === 'contas' && (
+            <OmieChartExportAction clientId={clientId} />
           )}
           {/* Sem plano, o botão mora no estado vazio, junto do modelo — um só na tela. */}
           {showImport && (

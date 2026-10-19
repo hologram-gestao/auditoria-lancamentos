@@ -23,12 +23,15 @@ from sqlalchemy import CheckConstraint, UniqueConstraint
 from app.core import crypto_service
 from app.db.models import (
     ACCOUNTING_ACCOUNT_NAME_PAIR_CONSTRAINT,
+    ACCOUNTING_ACCOUNT_NATURE_CONSTRAINT,
+    ACCOUNTING_ACCOUNT_NATURE_OVERRIDE_CONSTRAINT,
     ACCOUNTING_ACCOUNT_PARTY_PAIR_CONSTRAINT,
     ACCOUNTING_ACCOUNT_PARTY_TYPE_CONSTRAINT,
     ACCOUNTING_ACCOUNT_TYPE_CONSTRAINT,
     MAX_ACCOUNTING_ACCOUNT_CLASSIFICATION_CHARS,
     MAX_ACCOUNTING_ACCOUNT_CODE_CHARS,
     UQ_ACCOUNTING_ACCOUNT_CLIENT_CODE,
+    AccountingAccountNature,
     AccountingAccountType,
     AccountingPartyType,
     Client,
@@ -36,6 +39,8 @@ from app.db.models import (
     ClientCategory,
     ClientChartOfAccount,
     accounting_account_name_pair_check,
+    accounting_account_nature_check,
+    accounting_account_nature_override_check,
     accounting_account_party_pair_check,
     accounting_account_party_type_check,
     accounting_account_type_check,
@@ -91,7 +96,38 @@ class TestModeloEMigrationBatem:
         # `absent_since` nasceu em `a94a539e1d34` (86e3qhhrm), conferido logo abaixo.
         # 86e3qhhrn (`7c3e9a1d5f28`): o vínculo conta ↔ pessoa, conferido logo abaixo.
         party_columns = {"party_document_encrypted", "party_document_iv", "party_type"}
-        assert migration_columns | {"sort_key", "absent_since"} | party_columns == model_columns
+        # 86e3qhhrr (`5d8e2b7c4a91`): a natureza, conferida logo abaixo.
+        nature_columns = {"nature", "nature_overridden"}
+        assert (
+            migration_columns | {"sort_key", "absent_since"} | party_columns | nature_columns
+            == model_columns
+        )
+
+    def test_natureza_da_migration_bate_com_o_modelo(self) -> None:
+        """86e3qhhrr: os CHECKs, o tamanho e o default da natureza são SNAPSHOTS do modelo."""
+        path = next(_VERSIONS.glob("5d8e2b7c4a91_*.py"))
+        spec = importlib.util.spec_from_file_location("mig_nature_schema", path)
+        assert spec is not None
+        assert spec.loader is not None
+        mig = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mig)
+        assert mig.down_revision == "7c3e9a1d5f28"
+        assert accounting_account_nature_check() == mig._CK_NATURE
+        assert accounting_account_nature_override_check() == mig._CK_NATURE_OVERRIDE
+        prefix = "ck_client_accounting_accounts_"
+        assert prefix + mig._CK_NATURE_LABEL == ACCOUNTING_ACCOUNT_NATURE_CONSTRAINT
+        assert (
+            prefix + mig._CK_NATURE_OVERRIDE_LABEL == ACCOUNTING_ACCOUNT_NATURE_OVERRIDE_CONSTRAINT
+        )
+        table = ClientAccountingAccount.__table__
+        assert table.c.nature.type.length == mig._NATURE_MAX
+        assert table.c.nature.nullable is True
+        assert table.c.nature_overridden.nullable is False
+        assert str(table.c.nature_overridden.server_default.arg) == "false"  # type: ignore[union-attr]
+        assert {m.value for m in AccountingAccountNature} == {"devedora", "credora"}
+        source = path.read_text(encoding="utf-8")
+        assert "from app" not in source
+        assert "op.drop_column(_TABLE, _COLUMN_NATURE)" in source.split("def downgrade()", 1)[1]
 
     def test_vinculo_de_terceiros_da_migration_bate_com_o_modelo(self) -> None:
         """86e3qhhrn: os CHECKs e os tamanhos do vínculo são SNAPSHOTS do modelo."""
@@ -204,6 +240,11 @@ class TestModeloDeclaraAsGarantias:
             # 86e3qhhrn: o vínculo conta ↔ pessoa (documento, IV e tipo juntos; tipo fechado).
             ACCOUNTING_ACCOUNT_PARTY_PAIR_CONSTRAINT: accounting_account_party_pair_check(),
             ACCOUNTING_ACCOUNT_PARTY_TYPE_CONSTRAINT: accounting_account_party_type_check(),
+            # 86e3qhhrr: a natureza (vocabulário fechado; a escolhida à mão existe).
+            ACCOUNTING_ACCOUNT_NATURE_CONSTRAINT: accounting_account_nature_check(),
+            ACCOUNTING_ACCOUNT_NATURE_OVERRIDE_CONSTRAINT: (
+                accounting_account_nature_override_check()
+            ),
         }
 
     def test_tipo_e_o_vocabulario_fechado(self) -> None:

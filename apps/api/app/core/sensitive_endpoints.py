@@ -1078,6 +1078,26 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "vinculadas lidas por client_id no próprio SELECT; documento decifrado com a DEK "
         "do cliente do path e devolvido só mascarado",
     ),
+    # ------------- planilha do plano de contas da Omie (86e3qhhrr)
+    # O plano inteiro, com nome e CNPJ/CPF decifrados em memória: artefato do escritório.
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/accounting-chart/omie-export",
+        ScopeKind.COLLECTION,
+        "app/modules/client_accounting_chart/routes.py",
+        f"{_VIA_CLIENT_PATH} + GenerateAccountingFileDep (guard auditado) + OpenClientDep; "
+        "as contas lidas por client_id no próprio SELECT; nome e documento decifrados com "
+        "a DEK do cliente do path só para montar o arquivo; 1 linha export na trilha",
+    ),
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/accounting-chart/omie-export/preview",
+        ScopeKind.COLLECTION,
+        "app/modules/client_accounting_chart/routes.py",
+        f"{_VIA_CLIENT_PATH} + GenerateAccountingFileDep (guard auditado) + OpenClientDep; "
+        "só contagens e códigos de conta; os documentos comparados em memória com o "
+        "diretório de cadastros do Omie do MESMO cliente",
+    ),
     # ------------- arquivo contábil do cliente (S13, BACK 13.4 — R3)
     # Gerar, listar e baixar: o arquivo leva o histórico do cliente final.
     SensitiveEndpoint(

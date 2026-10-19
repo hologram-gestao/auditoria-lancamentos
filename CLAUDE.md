@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19, as sprints do agents-hub (tabela da §8) e os épicos de fora do hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **132/132** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **134/134** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -196,7 +196,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**132** hoje — o arquivo é a fonte, confira com
+      (**134** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -204,7 +204,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **132/132**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **134/134**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
@@ -229,7 +229,11 @@
       próprio SELECT), e as 2 do vínculo conta contábil ↔ cliente/fornecedor (86e3qhhrn:
       `POST …/accounting-chart/parties/import` e `GET …/accounting-chart/parties`,
       coleção, as duas sob `manage_client_accounting_chart`, o documento só sai
-      MASCARADO). As 8 da S13 (arquivo contábil)
+      MASCARADO), e as 2 da planilha do plano de contas da Omie (86e3qhhrr:
+      `GET …/accounting-chart/omie-export` e `…/omie-export/preview`, coleção, sob
+      `generate_accounting_file` e `OpenClientDep`, como o arquivo contábil da S13: nome
+      e documento só decifrados em memória para montar o arquivo, 1 linha `export` no
+      download). As 8 da S13 (arquivo contábil)
       também: gerar, listar e baixar
       (`POST`/`GET /clients/{id}/accounting-files`,
       `GET …/accounting-files/{generation_id}/download`) e as 5 dos layouts de
@@ -599,6 +603,26 @@
      nunca sai da API: a lista (`GET …/parties`) devolve só a máscara (raiz do CNPJ
      escondida, quatro últimos do CPF). Texto de documento nunca passa por `int`: um CNPJ
      que começa com zeros perderia os zeros (caso real da relação da Hologram).
+   - **O plano contábil vai para a Omie pela PLANILHA do Painel do Contador, nunca pela
+     API** (86e3qhhrr; a API pública da Omie não tem plano de contas). O gerador
+     (`client_accounting_chart/omie_sheet.py`) COPIA o modelo vazio versionado
+     (`app/resources/omie/Omie_Plano_Contas_v1_1_3.xlsx`, extraído da amostra real por
+     `scripts/extract_omie_chart_template.py`, que confere que nada da amostra sobrou) e
+     só preenche células, editando o XML: regravar pelo `openpyxl` descartaria as listas de
+     opções (`x14:dataValidations`). Uma linha por conta, na ordem do plano; o CNPJ/CPF do
+     vínculo vai COM máscara na coluna `CNPJ do Estabelecimento`, que é por onde a Omie
+     liga a conta ao cadastro (documento sem cadastro: a Omie não cria, a conta cai como
+     "diversos"; a prévia conta quantos, pelo diretório em memória da busca de fornecedor).
+     Mesma entrada, mesmos bytes; recusa com 409 `PLANILHA_OMIE_RECUSADA` nomeando só
+     CÓDIGOS (molde da S13), nunca altera texto. **A natureza (`Devedora`/`Credora`) é
+     DERIVADA, nunca perguntada em massa**: `client_accounting_accounts.nature` pela regra
+     única `nature.derive_nature` (o grupo é o primeiro dígito significativo da
+     classificação: 1 devedora, 2 e 3 credora, 4 em diante devedora; sem grupo, nula),
+     gravada na importação, na conta manual e no backfill da migration (mesma regra em
+     SQL, paridade provada); a escolhida à mão (`nature_overridden`) a reimportação
+     respeita, e `nature: null` no PATCH volta ao automático. A regra veio da amostra do
+     Gabriel (489 de 496 contas batem; as 7 restantes são redutoras da receita), não da
+     descrição da task, que dava o grupo 4 como credora.
    - **No PDF dividido em blocos, o total da fatura de cartão vem da identidade da
      página 1; o saldo final de extrato vem do último bloco** (86e3n70qf). A fatura
      imprime o total no cabeçalho (páginas 1 e 2) e a última página costuma ter só
@@ -1788,6 +1812,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.102, 19/10/2026. **O plano contábil passou a sair como a planilha de importação de plano de contas da Omie, com o CNPJ/CPF do vínculo, e a conta ganhou natureza Devedora/Credora (86e3qhhrr, subtask 4 do épico 86e3qhhr0; modelo e respostas do Gabriel de 19/10).** Regra nova na §4.8. Duas rotas (lista canônica 132 → **134**, bateria dos três atacantes): `GET …/accounting-chart/omie-export` (XLSX; `generate_accounting_file` + `OpenClientDep`; 1 linha `export`; evento `planilha_omie_gerada` só com contagens) e `…/omie-export/preview` (contagens, os problemas com os códigos e quantos documentos vinculados não têm cadastro no Omie, pelo diretório da 86e3qhhrd; sem Omie volta o motivo, nunca erro). Migration `5d8e2b7c4a91` (`nature` e `nature_overridden`, dois CHECKs, backfill idempotente; ciclo up/down/up e `alembic check` limpos). O documento continua cifrado: é decifrado em memória só para o arquivo, e o modelo versionado não tem nada da amostra (46 strings do modelo, nenhuma sequência de documento). Teste-ouro pelas partes DESCOMPRIMIDAS do XLSX (o hash do zip dependeria da zlib). Na tela, "Gerar planilha da Omie" na aba Contas (prévia num diálogo, recusa 409 dentro dele) e o campo "Natureza" na gaveta da conta. Matriz (**29**) e pares de AAD (**18**) iguais._
 
 _Versão 1.101, 19/10/2026. **A linha conciliada da revisão passou a mostrar a situação do lançamento NO OMIE, e a tela explica que ela não decide o cruzamento (86e3t4vpq, subtask 1 do épico 86e3t4vpe, terceiro fato do FCA de 09/10; prometida antes da implantação da Felicity).** Só front, sem rota nem contrato novo: a aba Movimentações já recebia `status` (o `cSituacao`) do lookup `GET /omie/lancamentos` e o descartava. Agora a linha `conciliado` e `conciliado_data_divergente` ganha, sob a categoria do Omie, o selo "No Omie: <situação>" com o texto como a Omie devolveu (neutro para "Conciliado", `warning` para qualquer outro valor, tooltip no padrão `role="img"` + `aria-label` + `tabIndex`), e o topo da aba ganhou o bloco recolhível "Conciliado aqui e conciliado no Omie" pela moldura `CollapsibleSummary` (estado `revisao-situacao-no-omie`). Sem `cSituacao` o cache grava `""` e não há selo. Contraste do selo com a linha em hover, composto: 5,50 / 5,81 / 7,57:1 neutro e 4,84 / 8,09 / 7,69:1 em atenção (claro / escuro / Hologram). Regra nova §5.9. Endpoints sensíveis (**132**), matriz (**29**) e pares de AAD (**18**) iguais._
 
