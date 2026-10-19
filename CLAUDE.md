@@ -971,8 +971,11 @@ is_primary`) — um responsável por cliente; o predicado é COPIADO na migratio
    do FCA de 09/10/2026). Ela é a marcação que o cliente faz lá dentro e pode discordar do
    par: "Conciliado" aqui e "Não conciliado" no Omie significa que o Omie está
    desatualizado, não que o par está errado. A revisão a MOSTRA na linha com par (selo
-   "No Omie: <texto como veio>", `OmieStatusBadge`) e explica no topo da aba; sem
-   `cSituacao` (o cache grava `""`) não há selo, nunca um "Conciliado" inventado.
+   "No Omie: <texto como veio>", `OmieStatusBadge`, neutro só para "Conciliado" sem
+   olhar caixa e acento) e explica no topo da aba. Sem situação no lookup não há selo,
+   nunca um "Conciliado" inventado: lançamento sem `cSituacao` (o cache grava `""`) e
+   par com título em aberto (Atrasado/Previsto, fora do cache do extrato, como o
+   fornecedor e a categoria dessas linhas).
 
 ---
 

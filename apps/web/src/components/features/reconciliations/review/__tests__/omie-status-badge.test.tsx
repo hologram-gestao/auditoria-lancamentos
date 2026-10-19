@@ -160,6 +160,27 @@ describe('MovementsTab — situação do lançamento no Omie (86e3t4vpq)', () =>
     expect(selo).toHaveClass('text-warning');
   });
 
+  it('variação de caixa e acento de "Conciliado" continua neutra, sem ícone de alerta', () => {
+    lookup = [omie('CONCILIADO')];
+    renderTab();
+
+    const selo = within(rowOf('PIX FORNECEDOR X')).getByRole('img', {
+      name: /^No Omie: CONCILIADO\./,
+    });
+    expect(selo).toHaveClass('bg-muted', 'text-muted-foreground');
+    expect(selo.querySelector('svg')).toBeNull();
+  });
+
+  it('o selo em atenção leva o ícone de alerta, como os outros selos de atenção', () => {
+    lookup = [omie('Não conciliado')];
+    renderTab();
+
+    const selo = within(rowOf('PIX FORNECEDOR X')).getByRole('img', {
+      name: /^No Omie: Não conciliado\./,
+    });
+    expect(selo.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+  });
+
   it('sem situação na resposta, a linha fica como sempre foi (sem selo)', () => {
     lookup = [omie('')];
     renderTab();

@@ -72,8 +72,20 @@ function BadgeComDica({
 export const OMIE_STATUS_EXPLANATION =
   "Marcação feita no próprio Omie. Ela não entra no cruzamento: a plataforma compara o arquivo do banco com os lançamentos do Omie. Um lançamento com par aqui e 'Não conciliado' lá significa que o Omie está desatualizado.";
 
-/** O único valor que a Omie devolve para "já conciliado lá dentro" (fixtures reais). */
-const OMIE_RECONCILED_STATUS = 'Conciliado';
+/**
+ * "Já conciliado lá dentro". As fixtures reais trazem só a grafia "Conciliado",
+ * mas o campo é texto livre na Omie: a comparação ignora caixa e acento, para
+ * uma variação de grafia não pintar de atenção uma linha que está em dia.
+ */
+const OMIE_RECONCILED_STATUS = 'conciliado';
+
+function normalizeOmieStatus(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
 
 /**
  * Selo "No Omie: <situação>", com o texto como a Omie devolveu (o campo é
@@ -84,17 +96,19 @@ const OMIE_RECONCILED_STATUS = 'Conciliado';
 export function OmieStatusBadge({ status }: { status: string | null | undefined }) {
   const text = status?.trim() ?? '';
   if (text === '') return null;
-  const reconciled = text === OMIE_RECONCILED_STATUS;
+  const reconciled = normalizeOmieStatus(text) === OMIE_RECONCILED_STATUS;
   const label = `No Omie: ${text}`;
   return (
     <BadgeComDica
       dica={OMIE_STATUS_EXPLANATION}
       ariaLabel={`${label}. ${OMIE_STATUS_EXPLANATION}`}
       className={cn(
-        'inline-flex w-fit items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium',
+        'inline-flex w-fit items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium',
         reconciled ? 'bg-muted text-muted-foreground' : 'bg-warning-muted text-warning',
       )}
     >
+      {/* Mesmo ícone dos outros selos de atenção: a cor nunca é o único aviso. */}
+      {!reconciled && <AlertTriangle className="h-3 w-3" aria-hidden="true" />}
       {label}
     </BadgeComDica>
   );

@@ -12,11 +12,14 @@
  * de-para (`CollapsibleSummary`, estado por tela no `localStorage`).
  */
 
+import { useId } from 'react';
+
 import { CollapsibleSummary } from '@/components/shared/collapsible-summary';
 
 import { OMIE_STATUS_EXPLANATION } from './situation-badge';
 
 export function OmieStatusExplainer() {
+  const headingId = useId();
   return (
     <CollapsibleSummary
       storageKey="revisao-situacao-no-omie"
@@ -30,11 +33,8 @@ export function OmieStatusExplainer() {
       }
       footnote="O que o selo “No Omie” quer dizer."
     >
-      <section
-        aria-labelledby="omie-status-explainer-heading"
-        className="bg-card space-y-1 rounded-lg border p-3"
-      >
-        <h2 id="omie-status-explainer-heading" className="text-sm font-semibold">
+      <section aria-labelledby={headingId} className="bg-card space-y-1 rounded-lg border p-3">
+        <h2 id={headingId} className="text-sm font-semibold">
           Conciliado aqui e conciliado no Omie
         </h2>
         <p className="text-muted-foreground text-sm">{OMIE_STATUS_EXPLANATION}</p>
