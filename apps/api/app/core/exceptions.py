@@ -105,6 +105,9 @@ class ErrorCode(StrEnum):
     #: 86e3qhhrn: a relação de clientes/fornecedores do Domínio enviada é de OUTRA
     #: empresa (o CNPJ do cabeçalho não bate com o dos relatórios já importados).
     RELATORIO_DE_OUTRA_EMPRESA = "RELATORIO_DE_OUTRA_EMPRESA"
+    #: 86e3qhhrr: a planilha de importação do plano de contas da Omie não pode ser
+    #: gerada (plano vazio, conta sem classificação ou natureza, texto que não cabe).
+    PLANILHA_OMIE_RECUSADA = "PLANILHA_OMIE_RECUSADA"
     # Sprint 16 (BACK 16.2) — o de-para no destino `conta_contabil` aponta para o
     # plano do CLIENTE, e só ele: catálogo da org nesse destino, conta do plano em
     # outro destino e a importação da planilha nesse destino são recusas tipadas.
@@ -1167,6 +1170,22 @@ class ExportLayoutInUseError(ConflictError):
 
     code = ErrorCode.LAYOUT_EM_USO
     default_user_message = "Este layout já gerou arquivo contábil e por isso não pode ser excluído."
+
+
+class OmieChartExportRefusedError(ConflictError):
+    """409 — a planilha de importação do plano de contas da Omie não sai (86e3qhhrr).
+
+    Molde do arquivo contábil da S13: recusa, nunca altera texto. `details.problems` =
+    `[{reason, accountCodes, count}]` com `reason` de vocabulário fechado e só os
+    CÓDIGOS das contas (código não é nome, §4.5); nada é gerado. O nome, a
+    classificação e o documento da conta nunca saem.
+    """
+
+    code = ErrorCode.PLANILHA_OMIE_RECUSADA
+    default_user_message = (
+        "A planilha da Omie não pode ser gerada: corrija as contas indicadas no plano "
+        "contábil e gere de novo."
+    )
 
 
 class AccountingFileWrongDestinationError(ConflictError):

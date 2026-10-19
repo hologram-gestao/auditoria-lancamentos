@@ -688,7 +688,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Importa a RELAÇÃO DE CLIENTES ou a RELAÇÃO DE FORNECEDORES exportada do Domínio (XLS ou XLSX, reconhecida pelo título e pelo cabeçalho `Código`/`Conta`/`Nome`/`Razão Social`/`C.N.P.J./C.P.F.`, em qualquer ordem de colunas) e vincula cada conta do plano contábil do cliente (a coluna `Conta` é o código reduzido) ao CNPJ ou CPF da pessoa, cifrado com a chave do cliente. O tipo do vínculo (`cliente`/`fornecedor`) vem do título do relatório. Por arquivo, tudo ou nada: conta que não existe no plano ou é sintética recusa o arquivo inteiro com 422 `LINHAS_INVALIDAS` (`details.lines=[{line, reason, accountCode}]`, `reason` ∈ `conta_nao_encontrada`, `conta_sintetica`, `conta_ausente`, `linha_fora_do_bloco`). Não recusam, mas ficam SEM vínculo e voltam em `naoVinculadas`: conta `0` (`sem_conta`), `documento_ausente`, `documento_invalido` (dígito verificador errado no Domínio) e `conta_compartilhada` (a mesma conta em mais de uma pessoa). Reimportar é idempotente; a conta vinculada que não vem no relatório fica como está. O CNPJ da empresa no cabeçalho do relatório é comparado (por impressão digital, nunca em claro) com o dos relatórios já importados: outra empresa é 422 `RELATORIO_DE_OUTRA_EMPRESA`. Arquivo que não é a relação: 422 `CABECALHO_DIVERGENTE`; sem título ou sem o CNPJ da empresa: 422 `ARQUIVO_INVALIDO` com `details.reason` (`relatorio_nao_reconhecido`, `empresa_nao_identificada`, `sem_pessoas`); CSV ou PDF: 422 `FORMATO_NAO_SUPORTADO`. Requer `manage_client_accounting_chart`; cliente encerrado 409. Nenhum documento, nome ou razão social sai na resposta nem vai para o log. */
+        /** Importa a RELAÇÃO DE CLIENTES ou a RELAÇÃO DE FORNECEDORES exportada do Domínio (XLS ou XLSX, reconhecida pelo título e pelo cabeçalho `Código`/`Conta`/`Nome`/`Razão Social`/`C.N.P.J./C.P.F.`, em qualquer ordem de colunas) e vincula cada conta do plano contábil do cliente (a coluna `Conta` é o código reduzido) ao CNPJ ou CPF da pessoa, cifrado com a chave do cliente. O tipo do vínculo (`cliente`/`fornecedor`) vem do título do relatório. Por arquivo, tudo ou nada: conta que não existe no plano ou é sintética recusa o arquivo inteiro com 422 `LINHAS_INVALIDAS` (`details.lines=[{line, reason, accountCode}]`, `reason` ∈ `conta_nao_encontrada`, `conta_sintetica`, `conta_ausente`, `conta_invalida`, `linha_fora_do_bloco`). Não recusam, mas ficam SEM vínculo e voltam em `naoVinculadas`: conta `0` (`sem_conta`), `documento_ausente`, `documento_invalido` (dígito verificador errado no Domínio) e `conta_compartilhada` (a mesma conta em mais de uma pessoa). Reimportar é idempotente; a conta vinculada que não vem no relatório fica como está. O CNPJ da empresa no cabeçalho do relatório é comparado (por impressão digital, nunca em claro) com o dos relatórios já importados: outra empresa é 422 `RELATORIO_DE_OUTRA_EMPRESA`. Arquivo que não é a relação: 422 `CABECALHO_DIVERGENTE`; sem título ou sem o CNPJ da empresa: 422 `ARQUIVO_INVALIDO` com `details.reason` (`relatorio_nao_reconhecido`, `empresa_nao_identificada`, `sem_pessoas`); CSV ou PDF: 422 `FORMATO_NAO_SUPORTADO`. Requer `manage_client_accounting_chart`; cliente encerrado 409. Nenhum documento, nome ou razão social sai na resposta nem vai para o log. */
         post: operations["import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post"];
         delete?: never;
         options?: never;
@@ -705,6 +705,40 @@ export interface paths {
         };
         /** Lista as contas do plano contábil do cliente COM vínculo a um cliente ou fornecedor (importado das relações do Domínio): conta, nome (decifrado na leitura), tipo do vínculo e o documento MASCARADO (`**.***.***\/0001-91` para CNPJ, `***.***.*89-00` para CPF; o inteiro nunca sai da API), paginado (`page`/`pageSize`, máximo 100) na ordem do plano, com o filtro `type` (`cliente`/`fornecedor`) e o resumo `summary` (`contasVinculadas`, `clientes`, `fornecedores`). Requer `manage_client_accounting_chart` (documento de terceiro é configuração do escritório); cliente encerrado continua legível, com o documento sem máscara nenhuma (`documentResolved=false`). */
         get: operations["list_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/accounting-chart/omie-export/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** O que a planilha de importação do plano de contas da Omie (modelo `Omie_Plano_Contas` v1.1.3 do Painel do Contador) levaria, SEM gerar o arquivo: `contas` (todas as contas do plano), `vinculadas` (as que saem com o CNPJ/CPF do cliente ou fornecedor), `semVinculo`, `inativas`, `ausentes`, `naturezaManual`, os `problems` que impedem a geração (cada um com `reason` e os CÓDIGOS das contas; vazio = a planilha sai) e `omieRegistry`: quantos documentos vinculados NÃO existem no cadastro do Omie do cliente (na importação a Omie não cria o cadastro e a conta cai como diversos), lido do diretório em memória da busca de fornecedor, sem gravar. Cliente sem Omie ou com a Omie fora do ar: `checked=false` com o `reason`, nunca erro. Requer `generate_accounting_file` (plataforma, admin e gerente da carteira; usuários do cliente recebem 403 e a negação fica na trilha); cliente encerrado 409. */
+        get: operations["preview_omie_export_api_v1_clients__client_id__accounting_chart_omie_export_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clients/{client_id}/accounting-chart/omie-export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Baixa a planilha de importação do plano de contas da Omie (modelo `Omie_Plano_Contas` v1.1.3 do Painel do Contador, XLSX) preenchida com o plano contábil do cliente: uma linha por conta, na ordem do plano, com classificação, código reduzido, nome, natureza (`Devedora`/`Credora`), tipo (`Analítica`/`Totalizadora (Sintética)`) e, na conta vinculada a um cliente ou fornecedor, o CNPJ/CPF com máscara na coluna `CNPJ do Estabelecimento`, que é por onde a Omie liga a conta ao cadastro. O arquivo é o modelo da Omie com as células preenchidas: listas de opções, proteção e aba `Config` intactas. Mesma entrada, mesmos bytes. Recusa com 409 `PLANILHA_OMIE_RECUSADA` e nada gerado quando o plano está vazio, passa de 10.000 contas ou alguma conta não tem classificação, natureza, nome ou documento legível, ou tem texto que começa com `= + - @`, passa do teto da coluna ou tem quebra de linha (`details.problems=[{reason, accountCodes, count}]`, só códigos). Requer `generate_accounting_file` (a negação fica na trilha); cliente encerrado 409. Registra a exportação na trilha de acesso; o conteúdo não persiste. */
+        get: operations["export_omie_chart_api_v1_clients__client_id__accounting_chart_omie_export_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2217,6 +2251,8 @@ export interface components {
              * @description Classificação hierárquica opcional (`1.1.1.02.001`); decide a ordem.
              */
             classification?: string | null;
+            /** @description `devedora` ou `credora`, escolhida à mão. Ausente ou `null` = derivada da classificação. */
+            nature?: components["schemas"]["AccountingAccountNature"] | null;
         };
         /**
          * AccountingAccountEnvelope
@@ -2225,6 +2261,17 @@ export interface components {
         AccountingAccountEnvelope: {
             data: components["schemas"]["AccountingAccountResponse"];
         };
+        /**
+         * AccountingAccountNature
+         * @description A natureza da conta (86e3qhhrr): o lado em que ela normalmente recebe lançamento.
+         *
+         *     Fonte ÚNICA do CHECK `nature`. A planilha de importação do plano de contas da Omie
+         *     exige a coluna ("Natureza da Operação": `Devedora`/`Credora`), e o plano importado
+         *     do Domínio não a traz: ela é DERIVADA da classificação (`nature.derive_nature`) e
+         *     pode ser trocada à mão (`nature_overridden`).
+         * @enum {string}
+         */
+        AccountingAccountNature: "devedora" | "credora";
         /**
          * AccountingAccountResponse
          * @description Uma conta do plano contábil, como a API a devolve.
@@ -2273,6 +2320,14 @@ export interface components {
              * @description Pode receber decisão NOVA do de-para ou virar conta do banco: analítica E ativa. É o filtro do seletor de conta.
              */
             postable: boolean;
+            /** @description `devedora` ou `credora`: a natureza que a planilha de importação do plano de contas da Omie exige. Derivada da classificação (grupo 1 devedora, 2 e 3 credora, 4 em diante devedora) ou escolhida à mão (`natureOverridden`). `null` = conta sem classificação e sem escolha. */
+            nature?: components["schemas"]["AccountingAccountNature"] | null;
+            /**
+             * Natureoverridden
+             * @description `true` = a natureza foi escolhida à mão: a reimportação e a troca de classificação não a recalculam.
+             * @default false
+             */
+            natureOverridden: boolean;
             /**
              * Updatedat
              * Format: date-time
@@ -2308,6 +2363,8 @@ export interface components {
              * @description `false` inativa a conta (ela fica, sem receber decisão nova); `true` reativa.
              */
             active?: boolean | null;
+            /** @description `devedora` ou `credora` ESCOLHE a natureza à mão (a reimportação passa a respeitá-la); `null` volta ao automático, derivado da classificação; ausente mantém. */
+            nature?: components["schemas"]["AccountingAccountNature"] | null;
         };
         /**
          * AccountingCategoryResponse
@@ -6209,6 +6266,73 @@ export interface components {
             pagination: components["schemas"]["PaginationMeta"];
         };
         /**
+         * OmieExportPreviewEnvelope
+         * @description Body de `GET /clients/{client_id}/accounting-chart/omie-export/preview`.
+         */
+        OmieExportPreviewEnvelope: {
+            data: components["schemas"]["OmieExportPreviewPayload"];
+        };
+        /**
+         * OmieExportPreviewPayload
+         * @description O que a planilha da Omie levaria, sem gerar o arquivo.
+         */
+        OmieExportPreviewPayload: {
+            /**
+             * Contas
+             * @description Linhas da planilha: todas as contas do plano.
+             */
+            contas: number;
+            /**
+             * Vinculadas
+             * @description Contas que saem com o CNPJ/CPF do vínculo.
+             */
+            vinculadas: number;
+            /** Semvinculo */
+            semVinculo: number;
+            /**
+             * Inativas
+             * @description Contas inativas no plano (saem na planilha como as outras).
+             */
+            inativas: number;
+            /**
+             * Ausentes
+             * @description Contas com o selo "não veio na última importação" (saem também).
+             */
+            ausentes: number;
+            /**
+             * Naturezamanual
+             * @description Contas com a natureza escolhida à mão.
+             */
+            naturezaManual: number;
+            /**
+             * Problems
+             * @description Vazio = a planilha pode ser gerada; senão, o que impede (a geração é 409).
+             */
+            problems: components["schemas"]["OmieExportProblemPayload"][];
+            omieRegistry: components["schemas"]["OmieRegistryCheckPayload"];
+        };
+        /**
+         * OmieExportProblemPayload
+         * @description Um motivo que impede a planilha, com os CÓDIGOS das contas (nunca o nome).
+         */
+        OmieExportProblemPayload: {
+            /**
+             * Reason
+             * @description `plano_vazio`, `plano_grande_demais` (mais de 10.000 contas), `conta_sem_classificacao`, `conta_sem_natureza`, `nome_indecifravel`, `documento_indecifravel`, `texto_formula` (começa com `= + - @`), `texto_longo` (classificação ou nome acima de 60, código acima de 20) ou `texto_invalido` (quebra de linha ou caractere de controle).
+             */
+            reason: string;
+            /**
+             * Accountcodes
+             * @description Códigos reduzidos, na ordem do plano (até 50).
+             */
+            accountCodes: string[];
+            /**
+             * Count
+             * @description Quantas contas têm o motivo (a lista para em 50).
+             */
+            count: number;
+        };
+        /**
          * OmieFornecedorItem
          * @description O cadastro do fornecedor de um CNPJ no Omie do cliente (86e3n70q0, bloco B).
          *
@@ -6466,6 +6590,27 @@ export interface components {
             error_code: string | null;
             /** Error Message */
             error_message: string | null;
+        };
+        /**
+         * OmieRegistryCheckPayload
+         * @description Quantos documentos vinculados NÃO existem no cadastro do Omie do cliente.
+         */
+        OmieRegistryCheckPayload: {
+            /**
+             * Checked
+             * @description `false` = a conferência não rodou (ver `reason`); `missing` vem nulo.
+             */
+            checked: boolean;
+            /**
+             * Missing
+             * @description Contas vinculadas cujo CNPJ/CPF não tem cadastro no Omie: na importação a Omie não cria o cadastro e a conta cai como diversos.
+             */
+            missing?: number | null;
+            /**
+             * Reason
+             * @description `sem_omie` (cliente sem conexão Omie, ou só por arquivo) ou `omie_indisponivel` (a Omie não respondeu ou recusou a credencial).
+             */
+            reason?: ("sem_omie" | "omie_indisponivel") | null;
         };
         /**
          * OrganizationCreate
@@ -9882,6 +10027,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PartyLinksListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_omie_export_api_v1_clients__client_id__accounting_chart_omie_export_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OmieExportPreviewEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_omie_chart_api_v1_clients__client_id__accounting_chart_omie_export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": unknown;
                 };
             };
             /** @description Validation Error */

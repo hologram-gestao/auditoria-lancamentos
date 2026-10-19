@@ -251,6 +251,15 @@ class UsageEventName(StrEnum):
     # Leitura (quantos clientes têm vínculo e quanto cada importação muda):
     #     count(DISTINCT props->>'client_id') WHERE event = 'plano_contabil_vinculos_importados'
     PLANO_CONTABIL_VINCULOS_IMPORTADOS = "plano_contabil_vinculos_importados"
+    # 86e3qhhrr — a planilha de importação do plano de contas da Omie foi gerada e
+    # baixada. De BACKEND, sem `session_id`, fora da dedup: cada download é uma linha
+    # (a recusa 409 não emite). Só o id do cliente e contagens: NUNCA código, nome nem
+    # documento.
+    #
+    # Leitura (quantos clientes levam o plano para a Omie, e com quanto vínculo):
+    #     count(DISTINCT props->>'client_id') WHERE event = 'planilha_omie_gerada'
+    #     sum((props->>'vinculadas')::int) / sum((props->>'contas')::int)
+    PLANILHA_OMIE_GERADA = "planilha_omie_gerada"
     # Sprint 13 (BACK 13.1, emitido pela geração do arquivo contábil da 13.4) —
     # **a métrica da Sprint 13**. De BACKEND, sem `session_id`, fora da dedup:
     # cada geração (inclusive a segunda da mesma materialização) é uma linha.
@@ -680,7 +689,7 @@ class PlanoContabilImportadoProps(_StrictProps):
 
 #: O que a edição manual mudou (86e3nb816). Espelho de
 #: `client_accounting_chart.service.AccountChange` (o teste do evento compara os dois).
-AccountChangeField = Literal["nome", "tipo", "classificacao", "situacao"]
+AccountChangeField = Literal["nome", "tipo", "classificacao", "situacao", "natureza"]
 
 
 class PlanoContabilContaEditadaProps(_StrictProps):
@@ -694,12 +703,26 @@ class PlanoContabilContaEditadaProps(_StrictProps):
     client_id: UUID
     account_id: UUID
     operacao: Literal["criada", "editada"]
-    campos: list[AccountChangeField] = Field(max_length=4)
+    campos: list[AccountChangeField] = Field(max_length=5)
 
 
 #: De que relatório veio o vínculo (86e3qhhrn). Espelho de
 #: `db.models.client_accounting_account.AccountingPartyType` (o teste da métrica compara).
 PartyReportKind = Literal["cliente", "fornecedor"]
+
+
+class PlanilhaOmieGeradaProps(_StrictProps):
+    """`planilha_omie_gerada` (86e3qhhrr) — o cliente e as contagens da planilha.
+
+    `contas` = linhas da planilha (todas as contas do plano); `vinculadas` = as que
+    saíram com o CNPJ/CPF de um cliente ou fornecedor; `sem_vinculo` = o resto. Nenhum
+    `str` livre: código, nome e documento não têm onde caber.
+    """
+
+    client_id: UUID
+    contas: int = Field(ge=0)
+    vinculadas: int = Field(ge=0)
+    sem_vinculo: int = Field(ge=0)
 
 
 class PlanoContabilVinculosImportadosProps(_StrictProps):

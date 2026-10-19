@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
-from sqlalchemy import Table, bindparam, func, insert, select, text, update
+from sqlalchemy import Table, bindparam, case, func, insert, select, text, update
 
 from app.db.models.client import Client
 from app.db.models.client_accounting_account import ClientAccountingAccount
@@ -207,9 +207,11 @@ class AccountingChartRepository:
         tira o selo de ausente (a conta veio na planilha).
 
         Cada item: `{"b_client", "b_id", "b_ct", "b_iv", "b_type", "b_class",
-        "b_sort", "b_author"}`. `client_id` no WHERE junto da pk (§3.15). `updated_at`
-        pelo `clock_timestamp()`: o `onupdate` do ORM não vale para UPDATE de Core.
-        A SITUAÇÃO não é tocada (86e3qhhrm): a planilha não reativa nem inativa.
+        "b_sort", "b_nature", "b_author"}`. `client_id` no WHERE junto da pk (§3.15).
+        `updated_at` pelo `clock_timestamp()`: o `onupdate` do ORM não vale para UPDATE
+        de Core. A SITUAÇÃO não é tocada (86e3qhhrm): a planilha não reativa nem inativa.
+        A NATUREZA (86e3qhhrr) acompanha a classificação (`b_nature`, derivada), menos a
+        escolhida à mão: o `CASE` decide no próprio UPDATE, pela linha do banco.
         """
         if not updates:
             return
@@ -223,6 +225,10 @@ class AccountingChartRepository:
                 account_type=bindparam("b_type"),
                 classification=bindparam("b_class"),
                 sort_key=bindparam("b_sort"),
+                nature=case(
+                    (table.c.nature_overridden, table.c.nature),
+                    else_=bindparam("b_nature"),
+                ),
                 absent_since=None,
                 updated_by=bindparam("b_author"),
                 updated_at=func.clock_timestamp(),

@@ -50,6 +50,7 @@ from app.modules.usage_events.schemas import (
     OrganizacaoCriadaProps,
     OrganizacaoDesativadaProps,
     PartyReportKind,
+    PlanilhaOmieGeradaProps,
     PlanoContabilContaEditadaProps,
     PlanoContabilImportadoProps,
     PlanoContabilVinculosImportadosProps,
@@ -744,6 +745,34 @@ class UsageEventService:
                 vinculos_atualizados=vinculos_atualizados,
                 vinculos_sem_mudanca=vinculos_sem_mudanca,
                 nao_vinculadas=nao_vinculadas,
+            ),
+        )
+        if props is None:
+            return False
+        return await self.emit(event, props=props)
+
+    async def emit_planilha_omie_gerada(
+        self,
+        *,
+        client_id: UUID,
+        contas: int,
+        vinculadas: int,
+        sem_vinculo: int,
+    ) -> bool:
+        """86e3qhhrr — a planilha de importação do plano de contas da Omie foi gerada.
+
+        O ponto de chamada é `AccountingChartService.omie_export`, depois de montar o
+        arquivo: a recusa 409 não emite. Props no caminho fail-soft, sem `session_id`,
+        sem dedup.
+        """
+        event = UsageEventName.PLANILHA_OMIE_GERADA
+        props = self._props_or_none(
+            event,
+            lambda: PlanilhaOmieGeradaProps(
+                client_id=client_id,
+                contas=contas,
+                vinculadas=vinculadas,
+                sem_vinculo=sem_vinculo,
             ),
         )
         if props is None:

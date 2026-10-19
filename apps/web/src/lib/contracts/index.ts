@@ -640,6 +640,19 @@ export type AccountingPartyLink = Schemas['PartyLinkResponse'];
 /** `{ data, pagination, summary }` — TRÊS chaves: o `apiGet` entrega o objeto inteiro. */
 export type AccountingPartyLinksListResponse = Schemas['PartyLinksListResponse'];
 export type AccountingPartyLinksSummary = Schemas['PartyLinksSummaryPayload'];
+/**
+ * A natureza da conta (86e3qhhrr): `devedora` ou `credora`, a coluna obrigatória da
+ * planilha de importação do plano de contas da Omie. Enum FECHADO.
+ */
+export type AccountingAccountNature = Schemas['AccountingAccountNature'];
+/**
+ * A prévia da planilha da Omie (86e3qhhrr): contagens, os `problems` que impedem a
+ * geração (motivo + CÓDIGOS das contas) e a conferência dos documentos no cadastro do
+ * Omie do cliente. Chave ÚNICA `data`: chega desempacotada.
+ */
+export type OmieExportPreview = Schemas['OmieExportPreviewPayload'];
+export type OmieExportProblem = Schemas['OmieExportProblemPayload'];
+export type OmieRegistryCheck = Schemas['OmieRegistryCheckPayload'];
 /** Query real de `GET …/accounting-chart/parties` (`page`, `pageSize`, `type`). */
 export type ListAccountingPartiesQuery = NonNullable<
   paths['/api/v1/clients/{client_id}/accounting-chart/parties']['get']['parameters']['query']

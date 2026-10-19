@@ -165,6 +165,48 @@ def accounting_account_party_type_check() -> str:
     return f"party_type IS NULL OR party_type IN ({values})"
 
 
+class AccountingAccountNature(StrEnum):
+    """A natureza da conta (86e3qhhrr): o lado em que ela normalmente recebe lançamento.
+
+    Fonte ÚNICA do CHECK `nature`. A planilha de importação do plano de contas da Omie
+    exige a coluna ("Natureza da Operação": `Devedora`/`Credora`), e o plano importado
+    do Domínio não a traz: ela é DERIVADA da classificação (`nature.derive_nature`) e
+    pode ser trocada à mão (`nature_overridden`).
+    """
+
+    DEVEDORA = "devedora"
+    CREDORA = "credora"
+
+
+#: Rótulos dos CHECKs da natureza (86e3qhhrr) — a `NAMING_CONVENTION` prefixa
+#: `ck_client_accounting_accounts_`.
+ACCOUNTING_ACCOUNT_NATURE_CK_LABEL = "nature"
+ACCOUNTING_ACCOUNT_NATURE_OVERRIDE_CK_LABEL = "nature_override"
+ACCOUNTING_ACCOUNT_NATURE_CONSTRAINT = (
+    f"ck_client_accounting_accounts_{ACCOUNTING_ACCOUNT_NATURE_CK_LABEL}"
+)
+ACCOUNTING_ACCOUNT_NATURE_OVERRIDE_CONSTRAINT = (
+    f"ck_client_accounting_accounts_{ACCOUNTING_ACCOUNT_NATURE_OVERRIDE_CK_LABEL}"
+)
+#: Largura da coluna `nature`: cabe o maior valor do enum com folga.
+MAX_ACCOUNTING_ACCOUNT_NATURE_CHARS = 20
+
+
+def accounting_account_nature_check() -> str:
+    """Predicado SQL do CHECK da natureza, montado do enum — copiado na migration."""
+    values = ", ".join(f"'{member.value}'" for member in AccountingAccountNature)
+    return f"nature IS NULL OR nature IN ({values})"
+
+
+def accounting_account_nature_override_check() -> str:
+    """Predicado SQL do CHECK da natureza editada à mão — copiado na migration.
+
+    A natureza escolhida pela pessoa existe: a marca de "editada à mão" sem natureza
+    seria uma escolha de nada, e a reimportação a respeitaria para sempre.
+    """
+    return "NOT nature_overridden OR nature IS NOT NULL"
+
+
 class ClientAccountingAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Uma conta do plano contábil do cliente."""
 
@@ -186,6 +228,13 @@ class ClientAccountingAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint(
             text(accounting_account_party_type_check()),
             name=ACCOUNTING_ACCOUNT_PARTY_TYPE_CK_LABEL,
+        ),
+        CheckConstraint(
+            text(accounting_account_nature_check()), name=ACCOUNTING_ACCOUNT_NATURE_CK_LABEL
+        ),
+        CheckConstraint(
+            text(accounting_account_nature_override_check()),
+            name=ACCOUNTING_ACCOUNT_NATURE_OVERRIDE_CK_LABEL,
         ),
         Index(IX_ACCOUNTING_ACCOUNT_CLIENT_SORT_KEY, "client_id", "sort_key"),
     )
@@ -240,6 +289,23 @@ class ClientAccountingAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     #: segue ausente fica a data da PRIMEIRA importação em que sumiu; limpa quando
     #: ela volta. A conta continua ativa: o selo avisa, não bloqueia.
     absent_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # ---- natureza da conta (86e3qhhrr) ------------------------------------------
+    #: `devedora` ou `credora` (`AccountingAccountNature`), a coluna obrigatória da
+    #: planilha de importação do plano de contas da Omie. DERIVADA da classificação
+    #: (`client_accounting_chart.nature.derive_nature`) em toda gravação, a menos que a
+    #: pessoa a tenha escolhido à mão (`nature_overridden`). Nula = conta sem
+    #: classificação e sem escolha: a planilha da Omie recusa a conta. Em claro: é
+    #: vocabulário fechado.
+    nature: Mapped[str | None] = mapped_column(
+        String(MAX_ACCOUNTING_ACCOUNT_NATURE_CHARS), nullable=True
+    )
+    #: `true` = a natureza foi escolhida à mão na edição da conta: a reimportação e a
+    #: troca de classificação NÃO a recalculam. Voltar ao automático é a edição mandar
+    #: `nature: null`.
+    nature_overridden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     # ---- vínculo conta ↔ cliente/fornecedor (86e3qhhrn) -------------------------
     #: O CNPJ ou CPF da pessoa a quem a conta pertence no sistema contábil, como veio

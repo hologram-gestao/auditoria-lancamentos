@@ -15,7 +15,10 @@
  *   - associar a conta do banco atualiza as contas de origem e o de-para (a
  *     prévia lista as contas de origem pendentes);
  *   - importar uma relação de clientes/fornecedores (86e3qhhrn) invalida a árvore
- *     do plano (os vínculos são colunas da conta); listar vínculos é leitura.
+ *     do plano (os vínculos são colunas da conta); listar vínculos é leitura;
+ *   - a prévia e o download da planilha da Omie (86e3qhhrr) são leitura: a prévia
+ *     mora na árvore do plano (importar ou editar a refaz) e nunca fica em cache
+ *     entre aberturas do diálogo (`staleTime: 0`).
  */
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -23,12 +26,14 @@ import type { BlobResponse } from '@/lib/api/client';
 import {
   createAccountingAccount,
   exportAccountingChart,
+  exportOmieChart,
   importAccountingChart,
   importAccountingParties,
   listAccountingChart,
   listAccountingParties,
   listSourceAccounts,
   previewAccountingChartImport,
+  previewOmieChartExport,
   setSourceAccountBinding,
   updateAccountingAccount,
   type ListAccountingChartParams,
@@ -43,6 +48,7 @@ import type {
   AccountingChartListResponse,
   AccountingPartiesImportResult,
   AccountingPartyLinksListResponse,
+  OmieExportPreview,
   SourceAccountBindingPayload,
   SourceAccountBindingRequest,
   SourceAccountEntry,
@@ -57,6 +63,8 @@ export const accountingChartKeys = {
   sourceAccounts: (clientId: string) => ['accounting-chart', clientId, 'source-accounts'] as const,
   parties: (clientId: string, params: ListAccountingPartiesParams) =>
     ['accounting-chart', clientId, 'parties', params] as const,
+  omieExportPreview: (clientId: string) =>
+    ['accounting-chart', clientId, 'omie-export-preview'] as const,
 };
 
 export function useAccountingChartList(
@@ -165,5 +173,24 @@ export function useImportAccountingParties(clientId: string) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: accountingChartKeys.all(clientId) });
     },
+  });
+}
+
+/** A prévia da planilha da Omie (86e3qhhrr): só com o diálogo aberto, sempre fresca. */
+export function useOmieChartExportPreview(clientId: string, options: { enabled: boolean }) {
+  return useQuery<OmieExportPreview>({
+    queryKey: accountingChartKeys.omieExportPreview(clientId),
+    queryFn: () => previewOmieChartExport(clientId),
+    enabled: options.enabled,
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  });
+}
+
+/** Baixar a planilha da Omie (86e3qhhrr): leitura, sem invalidação. */
+export function useExportOmieChart(clientId: string) {
+  return useMutation<BlobResponse, Error, void>({
+    mutationFn: () => exportOmieChart(clientId),
   });
 }
