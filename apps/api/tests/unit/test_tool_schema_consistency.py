@@ -8,6 +8,7 @@ proibia — a IA ficava entre uma instrução e um schema que a contradizia.
 
 from __future__ import annotations
 
+import re
 import typing
 from typing import Any, cast
 
@@ -72,6 +73,41 @@ def test_pagamento_do_resumo_da_fatura_nao_e_transacao_no_prompt_na_nota_e_na_to
     schema = EXTRACT_MOVEMENTS_TOOL["input_schema"]
     prop = schema["properties"]["transactions"]["items"]["properties"]["is_payment"]
     assert "RESUMO da fatura" in prop["description"]
+
+
+def test_encargos_do_resumo_da_fatura_nao_sao_transacao_no_prompt_e_na_tool() -> None:
+    """86e3tpu7r — a fatura da Cora (13/10/2026) saía, em 8 de 10 rodadas, com uma
+    linha a MAIS: o "IOF de compras internacionais" do RESUMO da página 2, que é
+    totalizador, com o ano inventado. A regra 11 mandava emitir todo IOF como linha
+    própria. Agora o encargo só vira linha quando está na LISTA de transações, e as
+    linhas do resumo são totalizadores (regra 4). A regra não exige "data impressa
+    ao lado da linha" (o Nubank agrupa por dia, e essa exigência esvaziou blocos em
+    86e3qyu04), e a NOTA DE BLOCO segue sem falar de resumo."""
+    from app.integrations.anthropic.prompts import PART_NOTE_TEMPLATE
+
+    regra_11 = SYSTEM_PROMPT.split("11. **")[1].split("12. **")[0]
+    assert "Encargos da LISTA de transações" in regra_11
+    assert "bloco de RESUMO" in regra_11
+    assert '"IOF de compras' in regra_11
+    assert "totalizadores (regra 4)" in regra_11
+    assert "não as extraia" in regra_11
+    assert "agrupamento por dia" in regra_11
+    assert "impressa ao lado" not in regra_11
+    assert "resumo" not in PART_NOTE_TEMPLATE.lower()
+    assert "outro bloco" not in PART_NOTE_TEMPLATE
+    schema = EXTRACT_MOVEMENTS_TOOL["input_schema"]
+    description = schema["properties"]["transactions"]["description"]
+    assert "LISTA de transações" in description
+    assert "RESUMO da fatura" in description
+    assert "não são extraídas" in description
+    # As duas listas de linhas do resumo são a MESMA: uma mais curta na tool deixaria
+    # o modelo entre uma proibição do prompt e um silêncio do schema.
+    resumo = regra_11.split("bloco de RESUMO")[1]
+    nomes = re.findall(r'"([^"]+)"', resumo)
+    for nome in nomes:
+        if nome in {"Fatura anterior", "Total a pagar"}:
+            continue
+        assert f"'{nome}'" in description, f"{nome!r} está na regra 11 mas não na tool"
 
 
 def test_parcela_esta_na_tool_no_prompt_e_no_schema() -> None:
