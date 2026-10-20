@@ -15,10 +15,10 @@
 
 | | |
 | --- | --- |
-| Endpoints sensíveis (denominador) | **134** |
-| Com caso negativo cross-tenant verde | **134** |
+| Endpoints sensíveis (denominador) | **136** |
+| Com caso negativo cross-tenant verde | **136** |
 | Pendentes (implementação em outra task) | **0** |
-| Cobertura | **134/134 = 100%** |
+| Cobertura | **136/136 = 100%** |
 
 ## Lista canônica
 
@@ -147,6 +147,8 @@ Legenda de `tipo`: **coleção** = vaza forjando `client_id` na URL/payload · *
 | `PATCH` | `/api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}` | detalhe (PK) | `app/modules/client_accounting_chart/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageClientAccountingChartDep; a conta é lida com client_id no próprio SELECT (FOR UPDATE): conta de outro cliente = 404 sem vazar existência | ✅ verde |
 | `POST` | `/api/v1/clients/{client_id}/accounting-chart/parties/import` | coleção | `app/modules/client_accounting_chart/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageClientAccountingChartDep (guard auditado); contas lidas e vinculadas com o client_id do path validado, sob a trava por cliente; cliente encerrado = 409 | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/accounting-chart/parties` | coleção | `app/modules/client_accounting_chart/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + ManageClientAccountingChartDep (guard auditado); as contas vinculadas lidas por client_id no próprio SELECT; documento decifrado com a DEK do cliente do path e devolvido só mascarado | ✅ verde |
+| `PUT` | `/api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}/party` | detalhe (PK) | `app/modules/client_accounting_chart/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageClientAccountingChartDep (guard auditado); a conta é lida com client_id no próprio SELECT (FOR UPDATE): conta de outro cliente = 404; o documento repetido é procurado só nos vínculos do mesmo cliente e a recusa leva o código da conta, nunca o documento | ✅ verde |
+| `DELETE` | `/api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}/party` | detalhe (PK) | `app/modules/client_accounting_chart/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + OpenClientDep + ManageClientAccountingChartDep (guard auditado); a conta é lida com client_id no próprio SELECT (FOR UPDATE): conta de outro cliente = 404; UPDATE por pk com client_id no WHERE | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/accounting-chart/omie-export` | coleção | `app/modules/client_accounting_chart/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + GenerateAccountingFileDep (guard auditado) + OpenClientDep; as contas lidas por client_id no próprio SELECT; nome e documento decifrados com a DEK do cliente do path só para montar o arquivo; 1 linha export na trilha | ✅ verde |
 | `GET` | `/api/v1/clients/{client_id}/accounting-chart/omie-export/preview` | coleção | `app/modules/client_accounting_chart/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + GenerateAccountingFileDep (guard auditado) + OpenClientDep; só contagens e códigos de conta; os documentos comparados em memória com o diretório de cadastros do Omie do MESMO cliente | ✅ verde |
 | `POST` | `/api/v1/clients/{client_id}/accounting-files` | coleção | `app/modules/accounting_files/routes.py` | AccessibleClientDep -> require_client_access -> resolve_client_access (o client_id do path só passa se for o tenant da linha) + GenerateAccountingFileDep (guard auditado) + OpenClientDep; layout só da organização DO CLIENTE (outra org = 404); materialização carregada com client_id no WHERE; geração gravada com o client_id do path validado | ✅ verde |

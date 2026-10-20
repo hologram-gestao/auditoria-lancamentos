@@ -120,6 +120,9 @@ vi.mock('@/hooks/use-client-accounting-chart', () => ({
   // 86e3qhhrn — a aba "Clientes e fornecedores" (testada em accounting-parties-tab.test.tsx).
   useAccountingPartiesList: () => partiesListState,
   useImportAccountingParties: () => partiesImportState,
+  // 86e3tttaf — vínculo manual (testado em accounting-parties-tab.test.tsx).
+  useSetAccountingPartyLink: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRemoveAccountingPartyLink: () => ({ mutateAsync: vi.fn(), isPending: false }),
   // 86e3qhhrr — o diálogo da planilha da Omie (testado em omie-chart-export-dialog.test.tsx).
   useOmieChartExportPreview: () => ({ data: undefined, isLoading: true, isError: false }),
   useExportOmieChart: () => ({ mutateAsync: vi.fn(), isPending: false }),

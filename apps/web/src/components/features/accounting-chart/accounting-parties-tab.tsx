@@ -25,12 +25,19 @@
  * para mostrar, e não há busca por ele. Nunca escreva a máscara literal num comentário de
  * bloco: `***` seguido de `/` fecha o comentário.
  *
- * Estado na URL (`vinculo`, `vpage`, `vpageSize`), separado do da aba de contas para
- * um filtro não zerar o outro. A página rola, a tabela não (padrão da tela pai).
+ * **Duas listas, uma por tipo** (86e3tttaf, pedido do Lucas Landim em 20/10/2026):
+ * sub-abas "Clientes (N)" e "Fornecedores (N)", com a contagem do `summary` que a lista já
+ * devolve, cada uma o `GET …/parties?type=<tipo>` de sempre. À direita da faixa, "Vincular
+ * conta" abre a gaveta do vínculo manual; em cada linha, "Remover vínculo" (importado ou
+ * manual). As duas ações seguem o gate do "Importar relação": cliente aberto com plano.
+ *
+ * Estado na URL (`vinculo`, `cliente` por padrão; `vpage`, `vpageSize`), separado do da
+ * aba de contas para um filtro não zerar o outro; trocar de sub-aba volta à página 1. A
+ * página rola, a tabela não (padrão da tela pai).
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { CheckCircle2, Loader2, Upload, X } from 'lucide-react';
+import { CheckCircle2, Link2, Loader2, Unlink, Upload, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
@@ -57,6 +64,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   useAccountingPartiesList,
   useImportAccountingParties,
@@ -76,24 +85,20 @@ import type {
   AccountingPartyLink,
   AccountingPartyType,
 } from '@/lib/contracts';
-import { cn } from '@/lib/utils';
 import {
   accountingPartiesImportSchema,
   type AccountingPartiesImportValues,
 } from '@/lib/validation/accounting-parties';
 
 import { AccountingPartiesRefusalNotice } from './accounting-parties-refusal-notice';
-import { FilterGroup } from './filter-group';
+import { AccountingPartyLinkSheet } from './accounting-party-link-sheet';
+import { AccountingPartyUnlinkDialog } from './accounting-party-unlink-dialog';
 
 const PARAM = { type: 'vinculo', page: 'vpage', pageSize: 'vpageSize' } as const;
 const DEFAULT_PAGE_SIZE = 50;
 const PARTY_TYPES: readonly AccountingPartyType[] = ['cliente', 'fornecedor'];
 
-export const PARTY_TYPE_LABELS: Record<AccountingPartyType, string> = {
-  cliente: 'Cliente',
-  fornecedor: 'Fornecedor',
-};
-const PARTY_FILTER_LABELS: Record<AccountingPartyType, string> = {
+export const PARTY_LIST_LABELS: Record<AccountingPartyType, string> = {
   cliente: 'Clientes',
   fornecedor: 'Fornecedores',
 };
@@ -101,9 +106,6 @@ const REPORT_LABELS: Record<AccountingPartyType, string> = {
   cliente: 'Relação de clientes',
   fornecedor: 'Relação de fornecedores',
 };
-
-const baseBadge =
-  'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset';
 
 /** "Relação de clientes importada: 89 pessoas, 89 contas vinculadas (89 novas, …)." */
 export function partiesImportSuccessMessage(result: AccountingPartiesImportResult): string {
@@ -141,16 +143,19 @@ export function AccountingPartiesTab({ clientId, isClosed, hasPlan }: Accounting
     readPositiveInt(get(PARAM.pageSize), DEFAULT_PAGE_SIZE),
     ACCOUNTING_CHART_MAX_PAGE_SIZE,
   );
-  const type = readEnum(get(PARAM.type), PARTY_TYPES);
+  const type: AccountingPartyType = readEnum(get(PARAM.type), PARTY_TYPES) ?? 'cliente';
 
   const params = useMemo<ListAccountingPartiesParams>(
-    () => ({ page, pageSize, type: type ?? null }),
+    () => ({ page, pageSize, type }),
     [page, pageSize, type],
   );
   const listQuery = useAccountingPartiesList(clientId, params);
   const importMutation = useImportAccountingParties(clientId);
   const [lastImport, setLastImport] = useState<AccountingPartiesImportResult | null>(null);
   const [refusal, setRefusal] = useState<unknown>(null);
+  const [linkSheetOpen, setLinkSheetOpen] = useState(false);
+  const [linkSheetKey, setLinkSheetKey] = useState(0);
+  const [unlinking, setUnlinking] = useState<AccountingPartyLink | null>(null);
 
   const form = useForm<AccountingPartiesImportValues>({
     resolver: zodResolver(accountingPartiesImportSchema),
@@ -188,8 +193,9 @@ export function AccountingPartiesTab({ clientId, isClosed, hasPlan }: Accounting
         Importe a <strong className="text-foreground font-medium">Relação de clientes</strong> e a{' '}
         <strong className="text-foreground font-medium">Relação de fornecedores</strong> exportadas
         do Domínio (uma de cada vez). Cada linha vincula uma conta do plano contábil ao CNPJ ou CPF
-        da pessoa; o documento fica cifrado com a chave do cliente e só aparece aqui com o início
-        escondido.
+        da pessoa. A conta criada no Domínio depois da última exportação pode ser vinculada à mão,
+        em &quot;Vincular conta&quot;. O documento fica cifrado com a chave do cliente e só aparece
+        aqui com o início escondido.
       </p>
 
       {canImport ? (
@@ -252,81 +258,130 @@ export function AccountingPartiesTab({ clientId, isClosed, hasPlan }: Accounting
       )}
       {refusal !== null && <AccountingPartiesRefusalNotice error={refusal} />}
 
-      <div className="flex flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-center xl:justify-between">
-        <dl
-          className="grid grid-cols-3 gap-3 text-sm"
-          aria-label="Resumo dos vínculos"
-          data-testid="accounting-parties-summary"
-        >
-          <Stat label="Contas vinculadas" value={summary?.contasVinculadas} />
-          <Stat label="Clientes" value={summary?.clientes} />
-          <Stat label="Fornecedores" value={summary?.fornecedores} />
-        </dl>
-        <FilterGroup
-          label="Vínculo"
-          value={type ?? null}
-          options={PARTY_TYPES.map((value) => ({ value, label: PARTY_FILTER_LABELS[value] }))}
-          onChange={(value) => setMany({ [PARAM.type]: value, [PARAM.page]: null })}
-        />
-      </div>
+      <dl
+        className="grid grid-cols-3 gap-3 text-sm sm:max-w-md"
+        aria-label="Resumo dos vínculos"
+        data-testid="accounting-parties-summary"
+      >
+        <Stat label="Contas vinculadas" value={summary?.contasVinculadas} />
+        <Stat label="Clientes" value={summary?.clientes} />
+        <Stat label="Fornecedores" value={summary?.fornecedores} />
+      </dl>
 
-      <div aria-busy={listQuery.isFetching}>
-        {listQuery.isError ? (
-          <div
-            role="alert"
-            className="bg-destructive-muted text-destructive space-y-3 rounded-lg p-6"
-          >
-            <p className="text-sm font-medium">Não foi possível carregar os vínculos</p>
-            <p className="text-sm">
-              {listQuery.error instanceof ApiError
-                ? listQuery.error.userMessage
-                : 'Tente novamente em instantes.'}
-            </p>
-            <Button variant="outline" size="sm" onClick={() => void listQuery.refetch()}>
-              Tentar novamente
-            </Button>
-          </div>
-        ) : (
-          <TableCard pageScroll>
-            <Table
-              stickyHeader="page"
-              scrollRegionLabel="Contas com vínculo a cliente ou fornecedor (rolável)"
-              className="[&_td]:py-2 [&_th]:h-10"
+      <Tabs
+        value={type}
+        onValueChange={(next) => {
+          const value = readEnum(next, PARTY_TYPES);
+          if (value !== undefined) setMany({ [PARAM.type]: value, [PARAM.page]: null });
+        }}
+        className="flex flex-col gap-4"
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <TabsList className="self-start" aria-label="Tipo do vínculo">
+            {PARTY_TYPES.map((value) => (
+              <TabsTrigger
+                key={value}
+                value={value}
+                data-testid={`accounting-parties-tab-${value}`}
+              >
+                {PARTY_LIST_LABELS[value]}
+                <span className="ml-1 tabular-nums">
+                  ({(value === 'cliente' ? summary?.clientes : summary?.fornecedores) ?? '—'})
+                </span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          {canImport && (
+            <Button
+              type="button"
+              variant="outline"
+              className="self-start sm:self-auto"
+              onClick={() => {
+                setLinkSheetKey((key) => key + 1);
+                setLinkSheetOpen(true);
+              }}
+              data-testid="accounting-parties-link-button"
             >
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="whitespace-nowrap">Código</TableHead>
-                  <TableHead>Nome da conta</TableHead>
-                  <TableHead>Vínculo</TableHead>
-                  <TableHead className="whitespace-nowrap">Documento</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {listQuery.isLoading
-                  ? Array.from({ length: 4 }).map((_, index) => (
-                      <TableRow key={index} aria-hidden="true">
-                        {Array.from({ length: 4 }).map((__, cell) => (
-                          <TableCell key={cell}>
-                            <div className="bg-muted h-4 w-full animate-pulse rounded" />
-                          </TableCell>
-                        ))}
+              <Link2 className="h-4 w-4" aria-hidden="true" />
+              Vincular conta
+            </Button>
+          )}
+        </div>
+
+        {PARTY_TYPES.map((value) => (
+          <TabsContent key={value} value={value} className="mt-0" aria-busy={listQuery.isFetching}>
+            {value === type &&
+              (listQuery.isError ? (
+                <div
+                  role="alert"
+                  className="bg-destructive-muted text-destructive space-y-3 rounded-lg p-6"
+                >
+                  <p className="text-sm font-medium">Não foi possível carregar os vínculos</p>
+                  <p className="text-sm">
+                    {listQuery.error instanceof ApiError
+                      ? listQuery.error.userMessage
+                      : 'Tente novamente em instantes.'}
+                  </p>
+                  <Button variant="outline" size="sm" onClick={() => void listQuery.refetch()}>
+                    Tentar novamente
+                  </Button>
+                </div>
+              ) : (
+                <TableCard pageScroll>
+                  <Table
+                    stickyHeader="page"
+                    scrollRegionLabel={`Contas vinculadas a ${PARTY_LIST_LABELS[value].toLowerCase()} (rolável)`}
+                    className="[&_td]:py-2 [&_th]:h-10"
+                  >
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="whitespace-nowrap">Código</TableHead>
+                        <TableHead>Nome da conta</TableHead>
+                        <TableHead className="whitespace-nowrap">Documento</TableHead>
+                        {canImport && (
+                          <TableHead className="w-16 text-right">
+                            <span className="sr-only">Ações</span>
+                          </TableHead>
+                        )}
                       </TableRow>
-                    ))
-                  : rows.map((link) => <PartyRow key={link.accountId} link={link} />)}
-              </TableBody>
-            </Table>
-            {!listQuery.isLoading && rows.length === 0 && (
-              <TableEmpty>
-                <p className="text-muted-foreground text-sm" data-testid="accounting-parties-empty">
-                  {type !== undefined
-                    ? 'Nenhuma conta com este tipo de vínculo.'
-                    : 'Nenhuma conta vinculada ainda. Importe as relações de clientes e de fornecedores do Domínio.'}
-                </p>
-              </TableEmpty>
-            )}
-          </TableCard>
-        )}
-      </div>
+                    </TableHeader>
+                    <TableBody>
+                      {listQuery.isLoading
+                        ? Array.from({ length: 4 }).map((_, index) => (
+                            <TableRow key={index} aria-hidden="true">
+                              {Array.from({ length: canImport ? 4 : 3 }).map((__, cell) => (
+                                <TableCell key={cell}>
+                                  <div className="bg-muted h-4 w-full animate-pulse rounded" />
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                          ))
+                        : rows.map((link) => (
+                            <PartyRow
+                              key={link.accountId}
+                              link={link}
+                              onUnlink={canImport ? () => setUnlinking(link) : null}
+                            />
+                          ))}
+                    </TableBody>
+                  </Table>
+                  {!listQuery.isLoading && rows.length === 0 && (
+                    <TableEmpty>
+                      <p
+                        className="text-muted-foreground text-sm"
+                        data-testid="accounting-parties-empty"
+                      >
+                        {value === 'cliente'
+                          ? 'Nenhuma conta vinculada a cliente ainda. Importe a Relação de clientes do Domínio ou vincule uma conta à mão.'
+                          : 'Nenhuma conta vinculada a fornecedor ainda. Importe a Relação de fornecedores do Domínio ou vincule uma conta à mão.'}
+                      </p>
+                    </TableEmpty>
+                  )}
+                </TableCard>
+              ))}
+          </TabsContent>
+        ))}
+      </Tabs>
 
       {!listQuery.isError && (pagination?.total ?? 0) > 0 && (
         <PaginationBar
@@ -342,11 +397,38 @@ export function AccountingPartiesTab({ clientId, isClosed, hasPlan }: Accounting
           itemLabel="contas"
         />
       )}
+
+      {canImport && (
+        <AccountingPartyLinkSheet
+          key={linkSheetKey}
+          clientId={clientId}
+          open={linkSheetOpen}
+          onOpenChange={setLinkSheetOpen}
+          defaultPartyType={type}
+          onLinked={(linkedType) => {
+            if (linkedType !== type) setMany({ [PARAM.type]: linkedType, [PARAM.page]: null });
+          }}
+        />
+      )}
+      <AccountingPartyUnlinkDialog
+        clientId={clientId}
+        link={unlinking}
+        onOpenChange={(open) => {
+          if (!open) setUnlinking(null);
+        }}
+      />
     </div>
   );
 }
 
-function PartyRow({ link }: { link: AccountingPartyLink }) {
+function PartyRow({
+  link,
+  onUnlink,
+}: {
+  link: AccountingPartyLink;
+  /** `null` = sem a ação (cliente encerrado ou sem plano). */
+  onUnlink: (() => void) | null;
+}) {
   return (
     <TableRow>
       <TableCell className="whitespace-nowrap font-medium tabular-nums">{link.code}</TableCell>
@@ -356,19 +438,6 @@ function PartyRow({ link }: { link: AccountingPartyLink }) {
         ) : (
           <span className="text-muted-foreground">Nome indisponível (indecifrável)</span>
         )}
-      </TableCell>
-      <TableCell>
-        <span
-          className={cn(
-            baseBadge,
-            link.partyType === 'cliente'
-              ? 'bg-info-muted text-info ring-info/30'
-              : 'bg-muted text-muted-foreground ring-border',
-          )}
-        >
-          <span className="sr-only">Vínculo: </span>
-          {PARTY_TYPE_LABELS[link.partyType]}
-        </span>
       </TableCell>
       <TableCell className="whitespace-nowrap font-mono text-sm tabular-nums">
         {link.documentResolved && link.documentMasked !== null ? (
@@ -380,6 +449,29 @@ function PartyRow({ link }: { link: AccountingPartyLink }) {
           <span className="text-muted-foreground font-sans">Documento indisponível</span>
         )}
       </TableCell>
+      {onUnlink !== null && (
+        <TableCell className="text-right">
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Remover vínculo da conta ${link.code}`}
+                  onClick={onUnlink}
+                  data-testid={`accounting-party-unlink-${link.code}`}
+                >
+                  <Unlink className="h-4 w-4" aria-hidden="true" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left" className="text-xs leading-snug">
+                Remover vínculo
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </TableCell>
+      )}
     </TableRow>
   );
 }

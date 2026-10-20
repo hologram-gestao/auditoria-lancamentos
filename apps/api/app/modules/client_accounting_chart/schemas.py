@@ -562,6 +562,36 @@ class PartyLinkResponse(BaseModel):
         )
 
 
+#: Teto do documento DIGITADO no vínculo manual (86e3tttaf). Não há coluna em claro
+#: para amarrar (o documento é cifrado, `Text`): o teto é o do CNPJ com máscara
+#: (`00.000.000/0000-00`, 18) com folga para espaços; o servidor confere os dígitos.
+MAX_PARTY_DOCUMENT_INPUT_CHARS = 24
+
+
+class PartyLinkRequest(BaseModel):
+    """Body de `PUT /clients/{client_id}/accounting-chart/accounts/{account_id}/party`."""
+
+    party_type: AccountingPartyType = Field(
+        alias="partyType", description="`cliente` ou `fornecedor`."
+    )
+    document: str = Field(
+        min_length=1,
+        max_length=MAX_PARTY_DOCUMENT_INPUT_CHARS,
+        description=(
+            "CNPJ (14 dígitos) ou CPF (11), com ou sem máscara. Cifrado com a chave do "
+            "cliente; nunca sai inteiro da API."
+        ),
+    )
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+
+class PartyLinkEnvelope(BaseModel):
+    """Body da resposta do vínculo manual: a linha como a lista a mostra."""
+
+    data: PartyLinkResponse
+
+
 class PartyLinksSummaryPayload(BaseModel):
     """Quantas contas do plano têm vínculo, por tipo — só contagens."""
 
