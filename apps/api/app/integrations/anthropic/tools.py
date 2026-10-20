@@ -85,8 +85,11 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
                     "Todas as movimentações na ordem em que aparecem. Em faturas de "
                     "cartão: cada parcela é uma linha (valor unitário + data da "
                     "parcela, sem agrupar); estornos com amount positivo; encargos "
-                    "(juros/IOF/multa) como linhas separadas; o pagamento da fatura "
-                    "anterior TAMBÉM é extraído, marcado com is_payment=true."
+                    "(juros/IOF/multa) da LISTA de transações como linhas separadas, "
+                    "mas as linhas do RESUMO da fatura ('Total de compras', 'Juros', "
+                    "'IOF', 'IOF de compras internacionais', 'Multa') são totalizadores "
+                    "e não são extraídas; o pagamento da fatura anterior TAMBÉM é "
+                    "extraído, marcado com is_payment=true."
                 ),
                 "items": {
                     "type": "object",

@@ -64,9 +64,17 @@ escritos na própria linha; nas demais linhas, omita os dois.
 10. **Estornos são crédito (`amount` POSITIVO).** Estornos, devoluções e \
 créditos reduzem o valor da fatura — emita com sinal positivo.
 
-11. **Encargos são transações SEPARADAS.** Juros, IOF, multa, mora e anuidade \
-são linhas próprias (não embuta em outra), com a descrição EXATA do documento \
-e `amount` negativo (são cobranças).
+11. **Encargos da LISTA de transações são transações SEPARADAS.** Juros, IOF, \
+multa, mora e anuidade que aparecem na lista de transações da fatura, com a data \
+que o documento dá a eles (na própria linha ou no agrupamento por dia acima \
+dela), são linhas próprias (não embuta em outra), com a descrição EXATA do \
+documento e `amount` negativo (são cobranças). **As linhas do bloco de RESUMO \
+da fatura** (ao lado de "Fatura anterior" e "Total a pagar"), como "Total de \
+compras", "Juros", "Juros de rotativo", "IOF", "IOF de compras \
+internacionais", "Multa", "Multa por atraso" e "Parcelamentos de fatura", são \
+totalizadores (regra 4), não transações: não as extraia. O IOF mostrado como \
+detalhe de uma compra internacional já está no valor da compra: não vira \
+linha própria.
 
 12. **Pagamento da fatura anterior: EXTRAIA e MARQUE com `is_payment: true`.** \
 Linhas de "PAGAMENTO FATURA", "PGTO EFETUADO", "pagamento recebido", "pgto \
