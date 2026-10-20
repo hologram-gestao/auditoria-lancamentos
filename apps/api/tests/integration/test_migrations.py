@@ -2936,3 +2936,114 @@ class TestVinculoDeTerceirosRoundTrip:
 
         assert _columns(url, "clients", "party_reports_company_fingerprint") == 1
         assert "7c3e9a1d5f28" in _revisions_in_chain(alembic_cfg)
+
+
+# ----------------------------------------------------------------------
+# 86e3qhhtb — parcelas de compra parcelada
+# ----------------------------------------------------------------------
+
+INSTALLMENT_COLUMNS_REV = "b4e7c2a9d613"
+INSTALLMENTS_TABLE_REV = "c8d1f4e6a2b9"
+BEFORE_INSTALLMENTS_REV = "5d8e2b7c4a91"
+
+
+def _seed_installment_row(url: str) -> str:
+    """Uma intenção de provisão concluída e UMA parcela futura com título, em SQL cru."""
+    posting_id = _seed_posting_row(url, kind="provisao")
+    client_id = _scalar(
+        url, "SELECT client_id FROM reconciliation_omie_postings WHERE id = :pid", pid=posting_id
+    )
+    installment_id = str(uuid4())
+    _execute(
+        url,
+        "INSERT INTO reconciliation_omie_posting_installments (id, posting_id, client_id, "
+        "omie_conta_id, supplier_code, amount, installment_number, installment_total, "
+        "due_date, issue_date, payable_key, step, payable_id) VALUES (:iid, :pid, :cid, 1, 10, "
+        "100.00, 8, 10, '2026-10-10', '2026-11-05', 'HCPAAAAAAAAAAAAAAAAAP08', 'concluido', 30)",
+        iid=installment_id,
+        pid=posting_id,
+        cid=client_id,
+    )
+    return installment_id
+
+
+class TestParcelasDeCompraParceladaRoundTrip:
+    """As colunas do par na linha e a tabela das parcelas futuras: sobem, descem e sobem."""
+
+    def test_ciclo_converge_sem_parcela_registrada(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, BEFORE_INSTALLMENTS_REV)
+        _seed_posting_row(url)  # linha da fatura anterior às colunas
+        command.upgrade(alembic_cfg, "head")
+        assert (
+            _columns(url, "reconciliation_file_entries", "installment_number", "installment_total")
+            == 2
+        )
+        assert _table_exists(url, "reconciliation_omie_posting_installments")
+        assert (
+            _scalar(url, "SELECT count(*) FROM anomaly_types WHERE code = 'parcela_nao_veio'") == 1
+        )
+        # A linha antiga nasce sem o par e cumpre o CHECK.
+        assert (
+            _scalar(
+                url,
+                "SELECT count(*) FROM reconciliation_file_entries "
+                "WHERE installment_number IS NULL AND installment_total IS NULL",
+            )
+            == 1
+        )
+
+        for _ in range(2):
+            command.downgrade(alembic_cfg, BEFORE_INSTALLMENTS_REV)
+            assert not _table_exists(url, "reconciliation_omie_posting_installments")
+            assert _columns(url, "reconciliation_file_entries", "installment_number") == 0
+            assert (
+                _scalar(url, "SELECT count(*) FROM anomaly_types WHERE code = 'parcela_nao_veio'")
+                == 0
+            )
+            assert _scalar(url, "SELECT count(*) FROM reconciliation_file_entries") == 1
+            command.upgrade(alembic_cfg, "head")
+        assert {INSTALLMENT_COLUMNS_REV, INSTALLMENTS_TABLE_REV} <= _revisions_in_chain(alembic_cfg)
+
+    def test_downgrade_aborta_com_parcela_registrada(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        """Derrubar a tabela com título já criado faria a fatura seguinte duplicar."""
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        _seed_installment_row(url)
+        with pytest.raises(Exception, match="Downgrade bloqueado"):
+            command.downgrade(alembic_cfg, INSTALLMENT_COLUMNS_REV)
+        assert _table_exists(url, "reconciliation_omie_posting_installments")
+
+    def test_o_banco_recusa_par_e_parcela_incoerentes(
+        self, alembic_cfg: Config, migrations_db_url: str
+    ) -> None:
+        url = migrations_db_url
+        command.upgrade(alembic_cfg, "head")
+        installment_id = _seed_installment_row(url)
+        with pytest.raises(Exception, match="installment_pair"):
+            _execute(
+                url,
+                "UPDATE reconciliation_file_entries SET installment_number = 7, "
+                "installment_total = 6",
+            )
+        with pytest.raises(Exception, match="installment_pair"):
+            _execute(url, "UPDATE reconciliation_file_entries SET installment_number = 3")
+        with pytest.raises(Exception, match="step_coherent"):
+            _execute(
+                url,
+                "UPDATE reconciliation_omie_posting_installments SET payable_id = NULL "
+                "WHERE id = :iid",
+                iid=installment_id,
+            )
+        with pytest.raises(Exception, match="claim_after_title"):
+            _execute(
+                url,
+                "UPDATE reconciliation_omie_posting_installments SET step = 'titulo', "
+                "payable_id = NULL, claimed_by_file_entry_id = "
+                "(SELECT id FROM reconciliation_file_entries LIMIT 1) WHERE id = :iid",
+                iid=installment_id,
+            )

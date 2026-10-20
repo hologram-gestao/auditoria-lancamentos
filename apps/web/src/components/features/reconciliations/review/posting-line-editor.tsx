@@ -19,7 +19,12 @@ import { Button } from '@/components/ui/button';
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import { Switch } from '@/components/ui/switch';
 import { useOmieFornecedorByCode } from '@/hooks/use-omie-postings';
-import type { OmieFornecedorItem, OmiePostingMode, OmiePostingState } from '@/lib/contracts';
+import type {
+  FileEntryInstallment,
+  OmieFornecedorItem,
+  OmiePostingMode,
+  OmiePostingState,
+} from '@/lib/contracts';
 import {
   initialCategoryParts,
   initialDepartmentParts,
@@ -28,6 +33,7 @@ import {
   type SupplierValue,
 } from '@/lib/validation/omie-posting';
 
+import { FutureInstallmentsField } from './future-installments-field';
 import { DIRECT_IN_DUE_DATE_PROCESS_MESSAGE } from './omie-posting-eligibility';
 import {
   CategorySplitEditor,
@@ -51,6 +57,8 @@ export interface PostingEditorContext {
   departmentsUnavailable: boolean;
   onRetryDepartments: () => void;
   retryingDepartments: boolean;
+  /** 86e3qhhtb: a sessão oferece provisionar as parcelas futuras (flag no servidor). */
+  installmentPostingEnabled: boolean;
   disabled: boolean;
 }
 
@@ -75,6 +83,8 @@ interface PostingLineEditorProps {
   lockedMode: OmiePostingMode | null;
   /** Cadastros sugeridos pela descrição da compra (86e3qhhrd); vazio = nenhum. */
   supplierSuggestions?: readonly OmieFornecedorItem[];
+  /** 86e3qhhtb: a parcela `N/M` da compra, lida pelo servidor; `null` à vista. */
+  installment?: FileEntryInstallment | null;
   context: PostingEditorContext;
 }
 
@@ -86,6 +96,7 @@ export function PostingLineEditor({
   posting,
   lockedMode,
   supplierSuggestions,
+  installment = null,
   context,
 }: PostingLineEditorProps) {
   const isProvision = draft.modo === 'provisionar';
@@ -102,7 +113,7 @@ export function PostingLineEditor({
             <strong className="text-foreground font-medium">
               {POSTING_MODE_LABEL[lockedMode]}
             </strong>
-            {posting?.kind === 'provisao' && posting.step
+            {posting?.kind === 'provisao' && posting.step && posting.step !== 'concluido'
               ? ` (parou no passo ${POSTING_STEP_LABEL[posting.step] ?? posting.step})`
               : ''}
             . Esta compra já teve envio ao Omie nesta forma, e ela não pode ser trocada: trocar
@@ -154,6 +165,15 @@ export function PostingLineEditor({
             amount={amount}
             purchaseLabel={purchaseLabel}
             context={context}
+          />
+          <FutureInstallmentsField
+            installment={installment}
+            series={posting?.installments ?? []}
+            checked={draft.futureInstallments}
+            onCheckedChange={(futureInstallments) => onChange({ ...draft, futureInstallments })}
+            enabled={context.installmentPostingEnabled}
+            purchaseLabel={purchaseLabel}
+            disabled={disabled}
           />
         </>
       )}

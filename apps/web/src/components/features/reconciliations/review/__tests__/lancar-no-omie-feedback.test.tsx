@@ -250,6 +250,63 @@ describe('Selo do lançamento no Omie (estado do servidor)', () => {
     const { container } = render(<OmiePostingBadge posting={null} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  const SERIE = [
+    {
+      numero: 8,
+      total: 10,
+      vencimento: '2026-10-10',
+      valor: '100.00',
+      step: 'concluido',
+      payable_id: 8800010,
+      error_message: null,
+    },
+    {
+      numero: 9,
+      total: 10,
+      vencimento: '2026-11-10',
+      valor: '100.00',
+      step: 'concluido',
+      payable_id: 8800011,
+      error_message: null,
+    },
+    {
+      numero: 10,
+      total: 10,
+      vencimento: '2026-12-10',
+      valor: '100.00',
+      step: 'concluido',
+      payable_id: 8800012,
+      error_message: null,
+    },
+  ];
+
+  it('86e3qhhtb: provisão com série: "Provisionado · 3 parcelas futuras", títulos na dica', async () => {
+    const { container } = render(
+      <OmiePostingBadge posting={{ ...PROVISIONADA, installments: SERIE }} />,
+    );
+    const selo = screen.getByRole('img', { name: /Provisionado · 3 parcelas futuras/ });
+    expect(selo).toHaveTextContent('Provisionado · 3 parcelas futuras');
+    expect(selo).toHaveAccessibleName(/9\/10 \(título nº 8800011\)/);
+    await assertNoA11yViolations(container);
+  });
+
+  it('86e3qhhtb: parcela futura sem título: aviso de lançamento parado', () => {
+    render(
+      <OmiePostingBadge
+        posting={{
+          ...PROVISIONADA,
+          installments: [
+            ...SERIE.slice(0, 2),
+            { ...SERIE[2]!, step: 'titulo', payable_id: null, error_message: 'recusa' },
+          ],
+        }}
+      />,
+    );
+    const selo = screen.getByRole('img', { name: /Lançamento parado · parcelas futuras/ });
+    expect(selo).toHaveClass('text-warning');
+    expect(selo).toHaveAccessibleName(/1 parcela futura não entrou/);
+  });
 });
 
 describe('Aba Movimentações', () => {

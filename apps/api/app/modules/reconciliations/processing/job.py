@@ -64,6 +64,9 @@ from app.modules.client_connections.origin import (
 from app.modules.client_connections.repository import ClientConnectionRepository
 from app.modules.notifications.repository import NotificationRepository
 from app.modules.notifications.service import NotificationService
+from app.modules.reconciliations.omie_posting.missing_installments import (
+    flag_missing_installments,
+)
 from app.modules.reconciliations.processing.anomalies import (
     DivergentMatch,
     _AnomalyTypeMissingError,
@@ -578,7 +581,12 @@ async def _execute_processing(
             account_type=account_type,
             cipher=cipher,
         )
-        anomaly_count = structural_count + qualification_count
+        # 86e3qhhtb — parcela futura provisionada que a fatura desta conciliação
+        # deveria trazer e não trouxe (o reprocessamento também passa por aqui).
+        installment_count = await _flag_missing_installments_safely(
+            db, session_id=session_id, cipher=cipher
+        )
+        anomaly_count = structural_count + qualification_count + installment_count
 
         total = len(file_entries_for_matcher)
         conciliated = len(match_pairs_uuid)
@@ -630,6 +638,25 @@ async def _execute_processing(
         if balances.balance_difference is not None
         else None,
     )
+
+
+async def _flag_missing_installments_safely(
+    db: AsyncSession, *, session_id: UUID, cipher: ClientCipher
+) -> int:
+    """O aviso da parcela que não veio, num SAVEPOINT: falhar nunca derruba o cruzamento.
+
+    O aviso é informação extra sobre títulos já existentes no Omie; perder o aviso é
+    mais barato que perder a conciliação inteira.
+    """
+    session_obj = await db.get(ReconciliationSession, session_id)
+    if session_obj is None:  # pragma: no cover  -- carregada no passo 1
+        return 0
+    try:
+        async with db.begin_nested():
+            return await flag_missing_installments(db, session=session_obj, cipher=cipher)
+    except Exception:
+        log.warning("missing_installments_flag_failed", session_id=str(session_id))
+        return 0
 
 
 def _safe_decrypt_description(cipher: ClientCipher, entry: ReconciliationFileEntry) -> str:

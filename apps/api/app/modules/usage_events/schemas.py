@@ -922,6 +922,11 @@ class LancamentoOmieProvisaoProps(_StrictProps):
     fornecedores_criados: int = Field(ge=0)
     titulos_criados: int = Field(ge=0)
     baixas_criadas: int = Field(ge=0)
+    #: 86e3qhhtb: títulos de parcelas FUTURAS criados neste lote, e linhas que
+    #: ENCONTRARAM a parcela provisionada por uma fatura anterior (o duplicado que
+    #: deixou de existir). Só contagens.
+    parcelas_futuras: int = Field(default=0, ge=0)
+    parcelas_encontradas: int = Field(default=0, ge=0)
     duracao_ms: int = Field(ge=0)
 
 

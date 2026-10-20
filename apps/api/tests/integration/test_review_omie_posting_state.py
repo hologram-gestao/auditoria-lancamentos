@@ -117,6 +117,7 @@ async def test_listagem_traz_o_estado_de_cada_linha(
         "omie_lancamento_id": 4_321_001,
         "error_code": None,
         "error_message": None,
+        "installments": [],
     }
     assert by_id[str(stuck.id)] == {
         "kind": "provisao",
@@ -129,6 +130,7 @@ async def test_listagem_traz_o_estado_de_cada_linha(
         "omie_lancamento_id": None,
         "error_code": "OMIE_FAULT",
         "error_message": PROVIDER_MESSAGE,
+        "installments": [],
     }
     assert by_id[str(untouched.id)] is None
 

@@ -53,6 +53,11 @@ from app.modules.reconciliations.processing.omie_window import omie_window_for_s
 from app.modules.reconciliations.qualification.service import (
     QUALIFICATION_FLAG_CODES,
 )
+from app.modules.reconciliations.review.installment_info import (
+    InstallmentContext,
+    installment_info,
+    load_installment_context,
+)
 from app.modules.reconciliations.review.omie_posting_state import load_omie_posting_states
 from app.modules.reconciliations.review.repository import ReviewRepository
 from app.modules.reconciliations.review.schemas import (
@@ -276,6 +281,7 @@ class ReviewService:
         session = await self._session_or_404(session_id)
         cipher = await self._cipher_for_client(session.client_id, provision=False)
         postings = await self._posting_states(session.client_id, [row.id for row in page_rows])
+        installment_ctx = await load_installment_context(self._repo.session, session)
         decrypted: list[ListedFileEntry] = []
         for row in page_rows:
             description = self._decrypt_optional(
@@ -304,6 +310,7 @@ class ReviewService:
                     user_note=user_note,
                     omie_lancamento_id=row.omie_lancamento_id,
                     omie_posting=postings.get(row.id),
+                    installment=installment_info(row, description, installment_ctx),
                 )
             )
 
@@ -427,7 +434,8 @@ class ReviewService:
         )
 
         postings = await self._posting_states(session.client_id, [entry.id])
-        return self._file_entry_to_listed(cipher, entry, postings.get(entry.id))
+        installment_ctx = await load_installment_context(self._repo.session, session)
+        return self._file_entry_to_listed(cipher, entry, postings.get(entry.id), installment_ctx)
 
     # ------------------------------------------------------------------
     # BACK 9.4 — Lançamentos disponíveis para "Trocar"
@@ -825,6 +833,7 @@ class ReviewService:
         session = await self._session_or_404(session_id)
         cipher = await self._cipher_for_client(session.client_id, provision=False)
         postings = await self._posting_states(session.client_id, list(file_entries))
+        installment_ctx = await load_installment_context(self._repo.session, session)
         items = [
             self._anomaly_to_item(
                 cipher=cipher,
@@ -833,6 +842,7 @@ class ReviewService:
                 file_entries=file_entries,
                 omie_entries=omie_entries,
                 postings=postings,
+                installment_ctx=installment_ctx,
             )
             for anomaly, atype in rows
         ]
@@ -941,6 +951,9 @@ class ReviewService:
             file_entries=file_entries,
             omie_entries=omie_entries,
             postings=await self._posting_states_for_session(session_id, list(file_entries)),
+            installment_ctx=await load_installment_context(
+                self._repo.session, await self._session_or_404(session_id)
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -1030,6 +1043,9 @@ class ReviewService:
             file_entries=file_entries,
             omie_entries=omie_entries,
             postings=await self._posting_states_for_session(session_id, list(file_entries)),
+            installment_ctx=await load_installment_context(
+                self._repo.session, await self._session_or_404(session_id)
+            ),
         )
 
     @staticmethod
@@ -1122,17 +1138,19 @@ class ReviewService:
         cipher: ClientCipher,
         entry: ReconciliationFileEntry,
         omie_posting: OmiePostingState | None,
+        installment_ctx: InstallmentContext | None = None,
     ) -> ListedFileEntry:
+        description = self._decrypt_optional(
+            cipher,
+            entry.description_encrypted,
+            entry.description_iv,
+            AAD_FILE_ENTRY_DESCRIPTION,
+            entry.id,
+        )
         return ListedFileEntry(
             id=entry.id,
             transaction_date=entry.transaction_date,
-            description=self._decrypt_optional(
-                cipher,
-                entry.description_encrypted,
-                entry.description_iv,
-                AAD_FILE_ENTRY_DESCRIPTION,
-                entry.id,
-            ),
+            description=description,
             amount=entry.amount,
             balance=entry.balance,
             situation=entry.situation,
@@ -1146,6 +1164,7 @@ class ReviewService:
             ),
             omie_lancamento_id=entry.omie_lancamento_id,
             omie_posting=omie_posting,
+            installment=installment_info(entry, description, installment_ctx),
         )
 
     def _anomaly_to_item(
@@ -1157,21 +1176,24 @@ class ReviewService:
         file_entries: dict[UUID, ReconciliationFileEntry],
         omie_entries: dict[UUID, ReconciliationOmieEntry],
         postings: dict[UUID, OmiePostingState],
+        installment_ctx: InstallmentContext | None = None,
     ) -> AnomalyItem:
         related_file: AnomalyRelatedFileEntry | None = None
         if anomaly.file_entry_id is not None and (fe := file_entries.get(anomaly.file_entry_id)):
+            fe_description = self._decrypt_optional(
+                cipher,
+                fe.description_encrypted,
+                fe.description_iv,
+                AAD_FILE_ENTRY_DESCRIPTION,
+                fe.id,
+            )
             related_file = AnomalyRelatedFileEntry(
                 id=fe.id,
                 transaction_date=fe.transaction_date,
-                description=self._decrypt_optional(
-                    cipher,
-                    fe.description_encrypted,
-                    fe.description_iv,
-                    AAD_FILE_ENTRY_DESCRIPTION,
-                    fe.id,
-                ),
+                description=fe_description,
                 amount=fe.amount,
                 omie_posting=postings.get(fe.id),
+                installment=installment_info(fe, fe_description, installment_ctx),
             )
         related_omie: AnomalyRelatedOmieEntry | None = None
         if anomaly.omie_entry_id is not None and (oe := omie_entries.get(anomaly.omie_entry_id)):

@@ -54,11 +54,13 @@ import {
   useOmieDepartamentos,
   useOmieSupplierSuggestions,
   usePostOmieLancamentos,
+  withSeries,
 } from '@/hooks/use-omie-postings';
 import { ApiError, NetworkError } from '@/lib/api/client';
 import type {
   OmieFornecedorItem,
   OmiePostingBatchPayload,
+  OmiePostingInstallmentResult,
   OmiePostingLineRequest,
   OmiePostingLineResult,
   OmiePostingState,
@@ -104,6 +106,11 @@ export interface PostingClientContext {
   departmentRequired: boolean;
   /** `clients.omie_default_supplier_code`. */
   defaultSupplierCode: number | null;
+  /**
+   * 86e3qhhtb — a sessão oferece provisionar as parcelas futuras de compra
+   * parcelada (`installment_posting_enabled`, o kill-switch do servidor).
+   */
+  installmentPostingEnabled: boolean;
 }
 
 interface LancarNoOmieDrawerProps {
@@ -320,6 +327,7 @@ export function LancarNoOmieDrawer({
     departmentsUnavailable: departamentosQuery.isError,
     onRetryDepartments: () => void departamentosQuery.refetch(),
     retryingDepartments: departamentosQuery.isFetching,
+    installmentPostingEnabled: context.installmentPostingEnabled,
     disabled: postMutation.isPending,
   };
 
@@ -424,6 +432,7 @@ export function LancarNoOmieDrawer({
                           posting={postingFor(entry)}
                           lockedMode={lockedFor(entry)}
                           supplierSuggestions={suggestionsByEntry.get(entry.id)}
+                          installment={entry.installment ?? null}
                           context={editorContext}
                         />
                         {ev.issue !== null && (
@@ -671,13 +680,22 @@ function LinhaResultado({
 }) {
   const concluded = isPostingResultConcluded(line);
   const isProvision = line.kind === 'provisao';
+  // 86e3qhhtb: título (e baixa) feitos e alguma parcela futura não — não é um
+  // passo parado, é a série incompleta; a lista de parcelas abaixo diz qual.
+  const seriesIncomplete = line.reason === 'parcelas_incompletas';
   const stoppedMidway =
-    !concluded && isProvision && line.payable_id !== null && line.payable_id !== undefined;
+    !concluded &&
+    !seriesIncomplete &&
+    isProvision &&
+    line.payable_id !== null &&
+    line.payable_id !== undefined;
   const presentation = concluded
     ? RESULT_PRESENTATION.lancada
     : RESULT_PRESENTATION[line.status === 'lancada' ? 'bloqueada' : line.status];
   const Icon = presentation.icon;
   const dueProcess = context.cardPostingDateMode === 'invoice_due_date';
+  const foundInPreviousInvoice =
+    isProvision && line.status === 'lancada' && line.reason === 'ja_lancada';
 
   let rotulo: string;
   if (concluded && isProvision) {
@@ -690,6 +708,8 @@ function LinhaResultado({
       line.omie_lancamento_id !== null && line.omie_lancamento_id !== undefined
         ? `Lançada no Omie · lançamento nº ${line.omie_lancamento_id}`
         : 'Lançada no Omie';
+  } else if (seriesIncomplete) {
+    rotulo = `Provisionada no Omie · título nº ${line.payable_id ?? '—'} · parcelas futuras pendentes`;
   } else if (stoppedMidway) {
     rotulo = `Parou no passo: ${POSTING_STEP_LABEL[line.step ?? ''] ?? line.step ?? '—'}`;
   } else {
@@ -702,10 +722,12 @@ function LinhaResultado({
         <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <span>
           <strong className="font-medium">{rotulo}</strong>
-          {/* No concluído a frase do servidor ("já foi provisionada…") repete o rótulo. */}
-          {!concluded && line.message !== null && line.message !== undefined && (
-            <> — {line.message}</>
-          )}
+          {/* No concluído a frase do servidor ("já foi provisionada…") repete o rótulo;
+              a exceção é a parcela ENCONTRADA numa fatura anterior (86e3qhhtb), que
+              diz de onde veio o título. */}
+          {(!concluded || foundInPreviousInvoice) &&
+            line.message !== null &&
+            line.message !== undefined && <> — {line.message}</>}
         </span>
       </p>
       {stoppedMidway && (
@@ -728,9 +750,51 @@ function LinhaResultado({
           Na conta do cartão no Omie, na data da compra ({formatBRDate(purchaseDate)}).
         </p>
       )}
+      {(line.parcelas ?? []).length > 0 && <ParcelasResultado line={line} />}
     </div>
   );
 }
+
+/** 86e3qhhtb — cada parcela futura do envio: o título dela, ou onde parou. */
+function ParcelasResultado({ line }: { line: OmiePostingLineResult }) {
+  return (
+    <ul className="space-y-0.5 pl-5" aria-label="Parcelas futuras">
+      {(line.parcelas ?? []).map((p) => (
+        <li
+          key={p.numero}
+          className={cn(
+            'flex flex-wrap gap-x-2',
+            p.status === 'erro'
+              ? 'text-destructive'
+              : p.status === 'pendente'
+                ? 'text-warning'
+                : 'text-muted-foreground',
+          )}
+        >
+          <span className="text-foreground font-medium tabular-nums">
+            Parcela {p.numero}/{p.total}
+          </span>
+          <span className="tabular-nums">vence {formatBRDate(p.vencimento)}</span>
+          <span>{PARCELA_RESULT_LABEL[p.status](p)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Um rótulo por desfecho da parcela — os quatro do contrato, sem `default`. */
+const PARCELA_RESULT_LABEL: Record<
+  OmiePostingInstallmentResult['status'],
+  (p: OmiePostingInstallmentResult) => string
+> = {
+  provisionada: (p) => `· título nº ${p.payable_id ?? '—'}`,
+  ja_existia: (p) =>
+    p.payable_id !== null && p.payable_id !== undefined
+      ? `· já existia (título nº ${p.payable_id})`
+      : '· já registrada por outra conciliação',
+  pendente: (p) => `· sem confirmação: ${p.message ?? 'confira no Omie'}`,
+  erro: (p) => `· não entrou: ${p.message ?? 'erro do Omie'}`,
+};
 
 /**
  * Contagens do lote do ponto de vista da pessoa: `ja_lancada` (direto vinculado,
@@ -779,9 +843,12 @@ function postingFromResult(
   if (line === undefined || line.kind === undefined || line.kind === null) return previous;
   if (line.status === 'bloqueada' && !isStoppedMidway(line)) return previous;
   const fault = line.reason === 'erro_omie' || line.reason === 'competencia_fechada';
+  // 86e3qhhtb: título feito e parcela futura pendente é provisão CONCLUÍDA com a
+  // série incompleta (o servidor grava `confirmed`), nunca um passo parado.
+  const concludedStep = line.kind === 'provisao' && line.step === 'concluido';
   return {
     kind: line.kind,
-    status: line.status === 'lancada' ? 'confirmed' : fault ? 'failed' : 'pending',
+    status: line.status === 'lancada' || concludedStep ? 'confirmed' : fault ? 'failed' : 'pending',
     step: line.step ?? null,
     attempts: fault ? (line.kind === 'direto' ? 1 : 0) : 1,
     supplier_code: line.supplier_code ?? null,
@@ -790,6 +857,7 @@ function postingFromResult(
     omie_lancamento_id: line.omie_lancamento_id ?? null,
     error_code: fault ? 'OMIE_FAULT' : null,
     error_message: line.message ?? null,
+    ...withSeries(line),
   };
 }
 

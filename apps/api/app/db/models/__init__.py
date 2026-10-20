@@ -223,6 +223,10 @@ from app.db.models.reconciliation_omie_posting import (
     OmiePostingStep,
     ReconciliationOmiePosting,
 )
+from app.db.models.reconciliation_omie_posting_installment import (
+    InstallmentStep,
+    ReconciliationOmiePostingInstallment,
+)
 from app.db.models.reconciliation_session import (
     CARD_DUE_DATE_COHERENT_CHECK,
     CARD_DUE_DATE_COHERENT_CK_LABEL,
@@ -400,6 +404,7 @@ __all__ = [
     "InputDateFormat",
     "InputEncoding",
     "InputFileFormat",
+    "InstallmentStep",
     "Lead",
     "MappingDestination",
     "MappingTarget",
@@ -422,6 +427,7 @@ __all__ = [
     "ReconciliationFileStatus",
     "ReconciliationOmieEntry",
     "ReconciliationOmiePosting",
+    "ReconciliationOmiePostingInstallment",
     "ReconciliationSession",
     "ReconciliationStatus",
     "SessionAccountType",

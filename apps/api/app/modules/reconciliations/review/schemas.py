@@ -45,6 +45,20 @@ def field_provided(body: BaseModel, field: str) -> bool:
 # ----------------------------------------------------------------------
 
 
+class OmiePostingInstallmentState(BaseModel):
+    """Uma parcela FUTURA provisionada pela linha (86e3qhhtb): só número, datas, valor e ids."""
+
+    numero: int
+    total: int
+    vencimento: _date
+    valor: Decimal
+    #: `titulo` (título ainda não confirmado) ou `concluido`.
+    step: str
+    payable_id: int | None
+    #: Mensagem do provedor da última recusa, para a pessoa ler (nunca logada).
+    error_message: str | None
+
+
 class OmiePostingState(BaseModel):
     """O que o sistema JÁ escreveu (ou tentou escrever) no Omie por esta linha.
 
@@ -73,6 +87,31 @@ class OmiePostingState(BaseModel):
     omie_lancamento_id: int | None
     error_code: str | None
     error_message: str | None
+    #: 86e3qhhtb. As parcelas futuras que esta linha provisionou (vazia sem série).
+    installments: list[OmiePostingInstallmentState] = Field(default_factory=list)
+
+
+class FutureInstallmentPreview(BaseModel):
+    """Uma parcela que a provisão criaria: as datas da regra única e o valor."""
+
+    numero: int
+    total: int
+    vencimento: _date
+    emissao: _date
+    valor: Decimal
+
+
+class FileEntryInstallment(BaseModel):
+    """A parcela `N/M` da linha (86e3qhhtb), lida pelo servidor, e as que viriam depois.
+
+    `futuras` é o que a gaveta mostra para a pessoa conferir antes de pedir as
+    parcelas: calculado por `installment_plan.plan_future_installments`, a MESMA
+    função que cria os títulos. Vazia em `N == M`, fora do cartão e em estorno.
+    """
+
+    numero: int
+    total: int
+    futuras: list[FutureInstallmentPreview] = Field(default_factory=list)
 
 
 class ListedFileEntry(BaseModel):
@@ -90,6 +129,8 @@ class ListedFileEntry(BaseModel):
     #: 86e3n70q0 (bloco C): a intenção de lançamento no Omie desta linha, ou
     #: `null` quando o sistema nunca tentou lançá-la.
     omie_posting: OmiePostingState | None = None
+    #: 86e3qhhtb: a parcela `N/M` da compra, ou `null` (compra à vista).
+    installment: FileEntryInstallment | None = None
 
     model_config = ConfigDict(from_attributes=False)
 
@@ -250,6 +291,8 @@ class AnomalyRelatedFileEntry(BaseModel):
     #: 86e3n70q0 (bloco C): o MESMO objeto da listagem de movimentações, pelo
     #: MESMO helper — a aba Anomalias também oferece "Lançar no Omie".
     omie_posting: OmiePostingState | None = None
+    #: 86e3qhhtb: a parcela `N/M` da compra, pela mesma leitura da listagem.
+    installment: FileEntryInstallment | None = None
 
 
 class AnomalyRelatedOmieEntry(BaseModel):

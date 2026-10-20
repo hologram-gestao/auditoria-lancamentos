@@ -262,6 +262,18 @@ class Settings(BaseSettings):
         default=False,
         description="Ativa o lançamento das compras da fatura como Contas a Pagar (86e3n70q0).",
     )
+    # Kill-switch PRÓPRIO das parcelas FUTURAS de compra parcelada (86e3qhhtb):
+    # a linha `7/10` provisiona também os títulos das parcelas 8, 9 e 10. É mais
+    # uma escrita (um título por parcela, meses à frente), e o critério de
+    # rollback da §3.16 vale por parcela. Default `False`, ligado por ambiente via
+    # `--update-env-vars`. Desligado, a gaveta não oferece a opção e a linha que
+    # pedir as parcelas volta `bloqueada/parcelas_futuras_desligadas`, sem nada
+    # enviado. O ENCONTRO da parcela já provisionada pela fatura seguinte NÃO
+    # depende desta flag: ele impede duplicar, e é a provisão que o executa.
+    OMIE_INSTALLMENT_POSTING_ENABLED: bool = Field(
+        default=False,
+        description="Ativa a provisão das parcelas futuras de compra parcelada (86e3qhhtb).",
+    )
     # Teto de linhas por lote, validado NO SERVIDOR.
     #
     # O lote é enviado à Omie **em sequência**, nunca em paralelo: a Omie impõe

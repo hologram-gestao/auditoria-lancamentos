@@ -21,8 +21,12 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
-from app.db.models import ReconciliationOmiePosting
-from app.modules.reconciliations.review.schemas import OmiePostingState
+from app.db.models import ReconciliationOmiePosting, ReconciliationOmiePostingInstallment
+from app.modules.reconciliations.omie_posting.repository import InstallmentRepository
+from app.modules.reconciliations.review.schemas import (
+    OmiePostingInstallmentState,
+    OmiePostingState,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Collection
@@ -31,7 +35,25 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 
-def posting_state_from_row(row: ReconciliationOmiePosting) -> OmiePostingState:
+def installment_state_from_row(
+    row: ReconciliationOmiePostingInstallment,
+) -> OmiePostingInstallmentState:
+    """Uma parcela futura da série como a tela a lê (só número, datas, valor e ids)."""
+    return OmiePostingInstallmentState(
+        numero=row.installment_number,
+        total=row.installment_total,
+        vencimento=row.due_date,
+        valor=row.amount,
+        step=row.step,
+        payable_id=row.payable_id,
+        error_message=row.error_message,
+    )
+
+
+def posting_state_from_row(
+    row: ReconciliationOmiePosting,
+    installments: list[ReconciliationOmiePostingInstallment] | None = None,
+) -> OmiePostingState:
     """A linha de `reconciliation_omie_postings` como a tela a lê (só códigos e ids)."""
     return OmiePostingState(
         kind=row.kind,
@@ -44,6 +66,7 @@ def posting_state_from_row(row: ReconciliationOmiePosting) -> OmiePostingState:
         omie_lancamento_id=row.omie_lancamento_id,
         error_code=row.error_code,
         error_message=row.error_message,
+        installments=[installment_state_from_row(i) for i in installments or []],
     )
 
 
@@ -61,4 +84,8 @@ async def load_omie_posting_states(
         ReconciliationOmiePosting.file_entry_id.in_(list(file_entry_ids)),
     )
     rows = (await session.execute(stmt)).scalars().all()
-    return {row.file_entry_id: posting_state_from_row(row) for row in rows}
+    # 86e3qhhtb: as parcelas futuras das séries, numa query só para a página.
+    series = await InstallmentRepository(session).list_for_postings(
+        client_id=client_id, posting_ids=[row.id for row in rows]
+    )
+    return {row.file_entry_id: posting_state_from_row(row, series.get(row.id)) for row in rows}

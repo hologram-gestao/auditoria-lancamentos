@@ -31,6 +31,7 @@ import type {
   CreateReconciliationPayload as CreateReconciliationContract,
   CreateReconciliationRequest,
   ExtractedStatement,
+  FileEntryInstallment,
   OmiePostingState,
   PaginationMeta,
   ReconciliationFileInput,
@@ -386,6 +387,12 @@ export interface FileEntryItem {
    * objetos montados à mão (testes): o servidor sempre manda a chave.
    */
   omie_posting?: OmiePostingState | null;
+  /**
+   * 86e3qhhtb — a parcela `N/M` da compra (com as futuras e as datas que a
+   * provisão usaria), ou `null` na compra à vista. Opcional no TIPO pelo mesmo
+   * motivo do `omie_posting`.
+   */
+  installment?: FileEntryInstallment | null;
 }
 
 export interface ListFileEntriesParams {

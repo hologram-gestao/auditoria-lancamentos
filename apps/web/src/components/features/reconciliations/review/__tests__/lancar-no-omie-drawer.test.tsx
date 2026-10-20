@@ -841,6 +841,164 @@ describe('Resumo do lote', () => {
   });
 });
 
+describe('Parcelas futuras (86e3qhhtb)', () => {
+  const FUTURAS = [
+    { numero: 8, total: 10, vencimento: '2026-07-10', emissao: '2026-08-05', valor: '100.00' },
+    { numero: 9, total: 10, vencimento: '2026-08-10', emissao: '2026-09-05', valor: '100.00' },
+    { numero: 10, total: 10, vencimento: '2026-09-10', emissao: '2026-10-05', valor: '100.00' },
+  ];
+  const PARCELADA = entry({
+    description: 'Loja Demo 7/10',
+    amount: '-100.00',
+    installment: { numero: 7, total: 10, futuras: FUTURAS },
+  });
+  const LIGADA = { installmentPostingEnabled: true, defaultSupplierCode: 700000001 };
+
+  async function classificar(ui: UI) {
+    await escolher(ui, /Categoria da compra de 10\/06\/2026/, /Combustível/);
+    await ui.click(screen.getByRole('checkbox', { name: /Usar o fornecedor padrão do cliente/ }));
+  }
+
+  it('flag desligada: a opção não aparece e o pedido não leva parcelas', async () => {
+    const ui = userEvent.setup();
+    renderDrawer([PARCELADA], { context: { defaultSupplierCode: 700000001 } });
+    await classificar(ui);
+
+    expect(screen.queryByRole('switch', { name: /parcelas restantes/ })).toBeNull();
+    postMock.mockResolvedValue(payload([line('e1', 'lancada', { kind: 'provisao' })]));
+    await ui.click(screen.getByRole('button', { name: /Confirmar e lançar 1 de 1/ }));
+    expect(postMock).toHaveBeenCalledWith([
+      { file_entry_id: 'e1', modo: 'provisionar', cod_categoria: '1.01.01' },
+    ]);
+  });
+
+  it('ligada: desligada por padrão; ao ligar mostra vencimentos e valores, e o pedido leva o pedido', async () => {
+    const ui = userEvent.setup();
+    renderDrawer([PARCELADA], { context: LIGADA });
+    await classificar(ui);
+
+    const opcao = screen.getByRole('switch', {
+      name: /Provisionar também as 3 parcelas restantes — 10\/06\/2026/,
+    });
+    expect(opcao).not.toBeChecked();
+    expect(screen.queryByRole('list', { name: /Parcelas a provisionar/ })).toBeNull();
+
+    await ui.click(opcao);
+    const lista = screen.getByRole('list', { name: /Parcelas a provisionar/ });
+    const itens = within(lista).getAllByRole('listitem');
+    expect(itens).toHaveLength(3);
+    expect(itens[0]).toHaveTextContent(/Parcela 8\/10.*vence 10\/07\/2026.*R\$\s?100,00/);
+    expect(itens[2]).toHaveTextContent(/Parcela 10\/10.*vence 10\/09\/2026/);
+
+    postMock.mockResolvedValue(
+      payload([
+        line('e1', 'lancada', {
+          kind: 'provisao',
+          step: 'concluido',
+          payable_id: 8800001,
+          parcelas: FUTURAS.map((p, i) => ({
+            ...p,
+            status: 'provisionada',
+            payable_id: 8800010 + i,
+          })),
+        }),
+      ]),
+    );
+    await ui.click(screen.getByRole('button', { name: /Confirmar e lançar 1 de 1/ }));
+    expect(postMock).toHaveBeenCalledWith([
+      {
+        file_entry_id: 'e1',
+        modo: 'provisionar',
+        cod_categoria: '1.01.01',
+        parcelas_futuras: true,
+      },
+    ]);
+    const resultado = await screen.findByRole('list', { name: 'Parcelas futuras' });
+    expect(within(resultado).getAllByRole('listitem')[1]).toHaveTextContent(
+      /Parcela 9\/10.*vence 10\/08\/2026.*título nº 8800011/,
+    );
+  });
+
+  it('o direto nunca leva o pedido das parcelas', async () => {
+    const ui = userEvent.setup();
+    renderDrawer([PARCELADA], { context: LIGADA });
+    await escolher(ui, /Categoria da compra de 10\/06\/2026/, /Combustível/);
+    await ui.click(screen.getByRole('radio', { name: /Lançar direto na conta do cartão/ }));
+
+    expect(screen.queryByRole('switch', { name: /parcelas restantes/ })).toBeNull();
+    postMock.mockResolvedValue(payload([line('e1', 'lancada', { kind: 'direto' })]));
+    await ui.click(screen.getByRole('button', { name: /Confirmar e lançar 1 de 1/ }));
+    expect(postMock).toHaveBeenCalledWith([
+      { file_entry_id: 'e1', cod_categoria: '1.01.01', modo: 'direto' },
+    ]);
+  });
+
+  it('compra à vista ou última parcela não oferece a opção', async () => {
+    const ui = userEvent.setup();
+    renderDrawer(
+      [entry(), entry({ id: 'e2', installment: { numero: 10, total: 10, futuras: [] } })],
+      { context: LIGADA },
+    );
+    await escolher(ui, /Categoria para todas as compras/, /Combustível/);
+
+    expect(screen.queryByRole('switch', { name: /parcelas restantes/ })).toBeNull();
+  });
+
+  it('linha que já provisionou a série abre TRAVADA, com o título de cada parcela', () => {
+    renderDrawer(
+      [
+        {
+          ...PARCELADA,
+          omie_posting: posting({
+            status: 'confirmed',
+            step: 'concluido',
+            error_code: null,
+            error_message: null,
+            installments: [
+              {
+                numero: 8,
+                total: 10,
+                vencimento: '2026-07-10',
+                valor: '100.00',
+                step: 'concluido',
+                payable_id: 8800010,
+                error_message: null,
+              },
+              {
+                numero: 9,
+                total: 10,
+                vencimento: '2026-08-10',
+                valor: '100.00',
+                step: 'titulo',
+                payable_id: null,
+                error_message: 'Ocorreu um erro: 101 - recusa',
+              },
+            ],
+          }),
+        },
+      ],
+      { context: LIGADA },
+    );
+
+    expect(screen.queryByRole('switch', { name: /parcelas restantes/ })).toBeNull();
+    expect(
+      screen.getByText(/Parcelas futuras já provisionadas por esta compra/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/1 parcela ainda não entrou/)).toBeInTheDocument();
+    expect(screen.getByText('título nº 8800010')).toBeInTheDocument();
+    expect(screen.getByText('Ocorreu um erro: 101 - recusa')).toBeInTheDocument();
+  });
+
+  it('sem violações com a lista de parcelas aberta', async () => {
+    const ui = userEvent.setup();
+    renderDrawer([PARCELADA], { context: LIGADA });
+    await classificar(ui);
+    await ui.click(screen.getByRole('switch', { name: /parcelas restantes/ }));
+
+    await assertNoA11yViolations(document.body);
+  });
+});
+
 describe('Acessibilidade', () => {
   it('sem violações critical/serious com o combobox ABERTO', async () => {
     const ui = userEvent.setup();
