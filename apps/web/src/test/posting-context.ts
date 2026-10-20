@@ -11,4 +11,5 @@ export const TEST_POSTING_CONTEXT: PostingClientContext = {
   invoiceDueDate: null,
   departmentRequired: false,
   defaultSupplierCode: null,
+  installmentPostingEnabled: false,
 };

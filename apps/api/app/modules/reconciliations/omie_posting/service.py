@@ -56,7 +56,7 @@ import time
 from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 from sqlalchemy import select
@@ -85,12 +85,14 @@ from app.db.models import (
     AnomalyType,
     CardPostingDateMode,
     FileEntrySituation,
+    InstallmentStep,
     OmiePostingKind,
     OmiePostingStatus,
     OmiePostingStep,
     ReconciliationAnomaly,
     ReconciliationFileEntry,
     ReconciliationOmiePosting,
+    ReconciliationOmiePostingInstallment,
     SessionAccountType,
 )
 from app.integrations.omie.client import omie_error_code
@@ -105,15 +107,28 @@ from app.integrations.omie.schemas import (
     LancCCDetalhes,
 )
 from app.modules.omie_data.payables_service import pick_supplier
+from app.modules.reconciliations.installments import Installment, entry_installment
+from app.modules.reconciliations.omie_posting.installment_plan import (
+    current_installment_date,
+    plan_future_installments,
+)
 from app.modules.reconciliations.omie_posting.keys import (
     derive_payable_key,
     derive_payment_key,
     derive_supplier_key,
 )
-from app.modules.reconciliations.omie_posting.repository import OmiePostingRepository
+from app.modules.reconciliations.omie_posting.missing_installments import (
+    flag_missing_installments,
+)
+from app.modules.reconciliations.omie_posting.repository import (
+    InstallmentRepository,
+    OmiePostingRepository,
+    invoice_anchor,
+)
 from app.modules.reconciliations.omie_posting.schemas import (
     SOMA_TOLERANCIA,
     OmiePostingBatchPayload,
+    OmiePostingInstallmentResult,
     OmiePostingLineRequest,
     OmiePostingLineResult,
     PostingLineReason,
@@ -219,6 +234,7 @@ class OmiePostingService:
         self._factory = omie_client_factory
         self._cipher = cipher
         self._repo = OmiePostingRepository(db)
+        self._installments = InstallmentRepository(db)
         # Instrumentação da BACK 07.5. Fail-soft por construção (o `emit` do
         # service engole a falha e loga): sink fora do ar não pode derrubar um
         # lançamento que já aconteceu no ERP do cliente.
@@ -295,8 +311,14 @@ class OmiePostingService:
             if line.modo == "provisionar":
                 provision.count(result)
 
+        # 86e3qhhtb — parcela futura de uma série que a fatura desta conciliação
+        # deveria ter trazido e não trouxe vira aviso. Depois do lote, porque o
+        # lote pode ter acabado de encontrar parcelas. Fail-soft: o aviso nunca
+        # derruba um lote que já escreveu no Omie.
+        flagged = await self._flag_missing_installments_safely(session)
+
         posted = [r for r in results if r.status == "lancada"]
-        if posted:
+        if posted or flagged:
             # Fonte ÚNICA dos totalizadores (CLAUDE.md §7 / totals.py) — nunca
             # somar/subtrair contador na mão aqui.
             await refresh_session_counters(self._db, session.id)
@@ -335,6 +357,8 @@ class OmiePostingService:
                 fornecedores_criados=provision.fornecedores_criados,
                 titulos_criados=provision.titulos_criados,
                 baixas_criadas=provision.baixas_criadas,
+                parcelas_futuras=provision.parcelas_futuras,
+                parcelas_encontradas=provision.parcelas_encontradas,
                 duracao_ms=duration_ms,
             )
         log.info(
@@ -348,6 +372,22 @@ class OmiePostingService:
             com_erro=payload.com_erro,
         )
         return payload
+
+    async def _flag_missing_installments_safely(self, session: ReconciliationSession) -> int:
+        """O aviso num SAVEPOINT: falhar (ex.: cliente sem DEK para cifrar o contexto)
+        desfaz só o aviso. Um `rollback()` da sessão inteira expiraria os objetos que
+        o lote ainda lê depois daqui."""
+        session_id = session.id
+        try:
+            async with self._db.begin_nested():
+                created = await flag_missing_installments(
+                    self._db, session=session, cipher=self._cipher
+                )
+        except Exception:
+            log.warning("missing_installments_flag_failed", session_id=str(session_id))
+            created = 0
+        await self._db.commit()
+        return created
 
     async def _emit_unavailable(self, session_id: UUID, exc: Exception) -> None:
         user_message = getattr(exc, "user_message", "")
@@ -664,10 +704,29 @@ class OmiePostingService:
             return _line_blocked(entry.id, "categorias_nao_fecham", _CATEGORIES_MISMATCH_MSG)
         if client.omie_department_required and not line.departamentos:
             return _line_blocked(entry.id, "departamento_pendente", _DEPARTMENT_REQUIRED_MSG)
+        # 86e3qhhtb — a parcela é lida pelo SERVIDOR (colunas da extração ou,
+        # sem elas, a descrição decifrada), nunca do pedido.
+        installment = entry_installment(entry, self._describe(entry))
+        if line.parcelas_futuras:
+            if not self._settings.OMIE_INSTALLMENT_POSTING_ENABLED:
+                return _line_blocked(
+                    entry.id, "parcelas_futuras_desligadas", _INSTALLMENTS_DISABLED_MSG
+                )
+            if installment is None or not installment.has_future:
+                return _line_blocked(entry.id, "sem_parcelas_futuras", _NO_FUTURE_MSG)
 
         if existing is not None:
             if existing.status == OmiePostingStatus.CONFIRMED.value:
-                return _provision_already_done(existing)
+                return await self._after_provision(
+                    session=session,
+                    line=line,
+                    entry=entry,
+                    posting=existing,
+                    installment=installment,
+                    categorias=categorias,
+                    tally=tally,
+                    already_done=True,
+                )
             if existing.kind == OmiePostingKind.DIRETO.value:
                 if not _kind_switch_allowed(existing):
                     return _line_blocked(entry.id, "modo_divergente", _MODE_LOCKED_MSG)
@@ -712,6 +771,7 @@ class OmiePostingService:
                     omie=omie_client,
                     total=total,
                     categorias=categorias,
+                    installment=installment,
                     tally=tally,
                 )
                 if outcome is not None:
@@ -720,7 +780,16 @@ class OmiePostingService:
             await omie_client.aclose()
 
         await self._conclude_provision(session=session, entry=entry, posting=posting)
-        return _provision_result(posting, status="lancada")
+        return await self._after_provision(
+            session=session,
+            line=line,
+            entry=entry,
+            posting=posting,
+            installment=installment,
+            categorias=categorias,
+            tally=tally,
+            already_done=False,
+        )
 
     async def _run_step(
         self,
@@ -733,6 +802,7 @@ class OmiePostingService:
         omie: OmieClient,
         total: Decimal,
         categorias: list[tuple[str, Decimal]],
+        installment: Installment | None,
         tally: _ProvisionTally,
     ) -> OmiePostingLineResult | None:
         """Executa o passo CORRENTE e avança. `None` = seguiu; resultado = parou."""
@@ -756,6 +826,7 @@ class OmiePostingService:
                 omie=omie,
                 total=total,
                 categorias=categorias,
+                installment=installment,
                 tally=tally,
             )
         if step == OmiePostingStep.BAIXA.value:
@@ -860,6 +931,7 @@ class OmiePostingService:
         omie: OmieClient,
         total: Decimal,
         categorias: list[tuple[str, Decimal]],
+        installment: Installment | None,
         tally: _ProvisionTally,
     ) -> OmiePostingLineResult | None:
         """O título a pagar. Emissão = data da compra; vencimento = o da fatura.
@@ -870,6 +942,21 @@ class OmiePostingService:
         """
         if posting.supplier_code is None:  # pragma: no cover  -- CHECK do banco
             raise ValueError(f"intenção {posting.id} no título sem fornecedor")
+        if installment is not None and installment.number >= 2:
+            # 86e3qhhtb — a parcela desta linha pode já estar no Omie, criada pela
+            # fatura anterior. ENCONTRAR é o que impede o título duplicado.
+            found = await self._claim_series_installment(
+                session=session,
+                entry=entry,
+                posting=posting,
+                total=total,
+                installment=installment,
+                tally=tally,
+            )
+            if found is True:
+                return None
+            if found is not None:
+                return found
         due = session.invoice_due_date or entry.transaction_date
         single = categorias[0][0] if len(categorias) == 1 else None
         request = IncluirContaPagarRequest(
@@ -1033,6 +1120,353 @@ class OmiePostingService:
             "competencia_fechada" if omie_code == OMIE_CODE_CLOSED_COMPETENCE else "erro_omie"
         )
         return _provision_result(posting, status="erro", reason=reason, message=exc.user_message)
+
+    # ------------------------------------------------------------------
+    # Parcelas FUTURAS de compra parcelada (86e3qhhtb)
+    # ------------------------------------------------------------------
+
+    async def _claim_series_installment(
+        self,
+        *,
+        session: ReconciliationSession,
+        entry: ReconciliationFileEntry,
+        posting: ReconciliationOmiePosting,
+        total: Decimal,
+        installment: Installment,
+        tally: _ProvisionTally,
+    ) -> OmiePostingLineResult | Literal[True] | None:
+        """A fatura seguinte ENCONTRA a parcela já provisionada, em vez de criar outra.
+
+        `True`: encontrou — a intenção avança com o título EXISTENTE (no processo
+        "na data da compra", só a baixa será lançada). Resultado: a parcela está
+        registrada, mas o título dela ainda não foi confirmado; criar outro aqui
+        poderia duplicar, então a linha para. `None`: não há parcela registrada
+        com esta identidade, e a linha cria o próprio título.
+
+        Mesma identidade = mesmo cliente, cartão, fornecedor, valor e `N/M`, com o
+        vencimento perto da data desta parcela. Perder a corrida para outra linha
+        (duas compras iguais na mesma fatura) só faz procurar a próxima.
+        """
+        if posting.supplier_code is None:  # pragma: no cover  -- CHECK do banco
+            return None
+        anchor = await invoice_anchor(self._db, session.id) or entry.transaction_date
+        around = current_installment_date(installment, entry.transaction_date, anchor)
+        for _ in range(_CLAIM_RETRIES):
+            found = await self._installments.find_in_series(
+                client_id=session.client_id,
+                omie_conta_id=session.omie_conta_id,
+                supplier_code=posting.supplier_code,
+                amount=total,
+                number=installment.number,
+                total=installment.total,
+                around=around,
+            )
+            if found is None:
+                return None
+            if found.step != InstallmentStep.CONCLUIDO.value or found.payable_id is None:
+                return _provision_result(
+                    posting,
+                    status="bloqueada",
+                    reason="parcela_pendente_na_fatura_anterior",
+                    message=_PENDING_IN_PREVIOUS_MSG.format(
+                        n=installment.number, m=installment.total, key=found.payable_key
+                    ),
+                )
+            claimed = await self._installments.claim(
+                client_id=session.client_id, installment_id=found.id, file_entry_id=entry.id
+            )
+            if claimed is None or claimed.payable_id is None:
+                continue
+            await self._repo.record_provision_step(
+                client_id=session.client_id,
+                file_entry_id=entry.id,
+                next_step=(
+                    OmiePostingStep.CONCLUIDO
+                    if _process_of(session) == CardPostingDateMode.INVOICE_DUE_DATE.value
+                    else OmiePostingStep.BAIXA
+                ),
+                payable_id=claimed.payable_id,
+            )
+            await self._db.commit()
+            tally.parcelas_encontradas += 1
+            log.info(
+                "omie_installment_claimed",
+                session_id=str(session.id),
+                file_entry_id=str(entry.id),
+                installment_id=str(claimed.id),
+            )
+            return True
+        return None
+
+    async def _after_provision(
+        self,
+        *,
+        session: ReconciliationSession,
+        line: OmiePostingLineRequest,
+        entry: ReconciliationFileEntry,
+        posting: ReconciliationOmiePosting,
+        installment: Installment | None,
+        categorias: list[tuple[str, Decimal]],
+        tally: _ProvisionTally,
+        already_done: bool,
+    ) -> OmiePostingLineResult:
+        """O resultado da linha com o título dela feito: as parcelas futuras, se houver.
+
+        Três casos. A linha que ENCONTROU a parcela de uma série anterior é
+        `ja_lancada` com o título dessa série, e as parcelas seguintes dela já
+        existem (a série tem um dono só: esta linha nunca as cria). A linha que
+        pediu as parcelas, ou que já tem parcelas registradas (retomada), as
+        provisiona agora. O resto é o resultado de sempre.
+        """
+        claimed = await self._installments.claimed_by(
+            client_id=session.client_id, file_entry_id=entry.id
+        )
+        if claimed is not None:
+            siblings = [
+                row
+                for row in await self._installments.list_for_posting(
+                    client_id=session.client_id, posting_id=claimed.posting_id
+                )
+                if row.installment_number > claimed.installment_number
+            ]
+            return _provision_result(
+                posting,
+                status="lancada",
+                reason="ja_lancada",
+                message=_CLAIMED_MSG.format(
+                    n=claimed.installment_number,
+                    m=claimed.installment_total,
+                    payable_id=claimed.payable_id,
+                ),
+            ).model_copy(
+                update={
+                    "parcelas": [_installment_result(r, "ja_existia") for r in siblings] or None
+                }
+            )
+
+        own = await self._installments.list_for_posting(
+            client_id=session.client_id, posting_id=posting.id
+        )
+        if not (line.parcelas_futuras or own):
+            if already_done:
+                return _provision_already_done(posting)
+            return _provision_result(posting, status="lancada")
+
+        before = tally.parcelas_futuras
+        parcelas = await self._run_future_installments(
+            session=session,
+            line=line,
+            entry=entry,
+            posting=posting,
+            installment=installment,
+            categorias=categorias,
+            own=own,
+            tally=tally,
+        )
+        if any(p.status in ("pendente", "erro") for p in parcelas):
+            return _provision_result(
+                posting,
+                status="erro",
+                reason="parcelas_incompletas",
+                message=_INCOMPLETE_MSG,
+            ).model_copy(update={"parcelas": parcelas})
+        if already_done and tally.parcelas_futuras == before:
+            return _provision_already_done(posting).model_copy(update={"parcelas": parcelas})
+        return _provision_result(posting, status="lancada").model_copy(
+            update={"parcelas": parcelas}
+        )
+
+    async def _run_future_installments(
+        self,
+        *,
+        session: ReconciliationSession,
+        line: OmiePostingLineRequest,
+        entry: ReconciliationFileEntry,
+        posting: ReconciliationOmiePosting,
+        installment: Installment | None,
+        categorias: list[tuple[str, Decimal]],
+        own: list[ReconciliationOmiePostingInstallment],
+        tally: _ProvisionTally,
+    ) -> list[OmiePostingInstallmentResult]:
+        """Registra (antes de enviar) e provisiona os títulos das parcelas `N+1` a `M`.
+
+        Mesma disciplina do título da linha: a parcela é REGISTRADA e COMMITADA
+        antes do envio, a tentativa é contada antes do POST, a chave é derivada da
+        linha e do número (a Omie devolve o mesmo título no 2º envio), `faultstring`
+        não cria nada e o timeout reenvia com a MESMA chave até `MAX_STEP_SENDS`.
+
+        Parcela que já existe por OUTRA linha com a mesma identidade (a mesma compra
+        provisionada noutra conciliação) não é criada: volta `ja_existia`.
+        """
+        if posting.supplier_code is None:  # pragma: no cover  -- CHECK do banco
+            raise ValueError(f"intenção {posting.id} com parcelas sem fornecedor")
+        by_number = {row.installment_number: row for row in own}
+        elsewhere: dict[int, OmiePostingInstallmentResult] = {}
+        if installment is not None and installment.has_future:
+            anchor = await invoice_anchor(self._db, session.id) or entry.transaction_date
+            plan = plan_future_installments(
+                installment=installment,
+                line_date=entry.transaction_date,
+                invoice_anchor=anchor,
+                amount=abs(Decimal(entry.amount)).quantize(_CENT, rounding=ROUND_HALF_UP),
+                process=_process_of(session),
+                invoice_due_date=session.invoice_due_date,
+            )
+            for planned in plan:
+                if planned.number in by_number:
+                    continue
+                other = await self._installments.find_in_series(
+                    client_id=session.client_id,
+                    omie_conta_id=session.omie_conta_id,
+                    supplier_code=posting.supplier_code,
+                    amount=planned.amount,
+                    number=planned.number,
+                    total=planned.total,
+                    around=planned.due_date,
+                    exclude_posting_id=posting.id,
+                )
+                if other is not None:
+                    elsewhere[planned.number] = _installment_result(other, "ja_existia")
+                    continue
+                by_number[planned.number] = await self._installments.register(
+                    client_id=session.client_id,
+                    posting_id=posting.id,
+                    file_entry_id=entry.id,
+                    omie_conta_id=session.omie_conta_id,
+                    supplier_code=posting.supplier_code,
+                    planned=planned,
+                )
+            # Barreira de durabilidade: a parcela existe na memória do ADL ANTES de
+            # qualquer envio, como a intenção da linha.
+            await self._db.commit()
+
+        results: dict[int, OmiePostingInstallmentResult] = dict(elsewhere)
+        to_send = [
+            row
+            for row in sorted(by_number.values(), key=lambda r: r.installment_number)
+            if row.step != InstallmentStep.CONCLUIDO.value
+        ]
+        for row in by_number.values():
+            if row.step == InstallmentStep.CONCLUIDO.value:
+                results[row.installment_number] = _installment_result(row, "provisionada")
+        if to_send:
+            omie_client = await self._factory()
+            try:
+                for row in to_send:
+                    results[row.installment_number] = await self._send_installment(
+                        session=session,
+                        line=line,
+                        entry=entry,
+                        posting=posting,
+                        row=row,
+                        categorias=categorias,
+                        omie=omie_client,
+                        tally=tally,
+                        done_so_far=[results[k] for k in sorted(results)],
+                    )
+            finally:
+                await omie_client.aclose()
+        return [results[k] for k in sorted(results)]
+
+    async def _send_installment(
+        self,
+        *,
+        session: ReconciliationSession,
+        line: OmiePostingLineRequest,
+        entry: ReconciliationFileEntry,
+        posting: ReconciliationOmiePosting,
+        row: ReconciliationOmiePostingInstallment,
+        categorias: list[tuple[str, Decimal]],
+        omie: OmieClient,
+        tally: _ProvisionTally,
+        done_so_far: list[OmiePostingInstallmentResult],
+    ) -> OmiePostingInstallmentResult:
+        """O título de UMA parcela futura: conta antes, envia, grava o id e commita."""
+        if row.attempts >= MAX_STEP_SENDS:
+            return _installment_result(
+                row,
+                "pendente",
+                message=_INSTALLMENT_STUCK_MSG.format(attempts=row.attempts, key=row.payable_key),
+            )
+        scaled = _scale_categories(categorias, row.amount)
+        single = scaled[0][0] if len(scaled) == 1 else None
+        description = self._describe(entry)
+        observacao = _INSTALLMENT_NOTE.format(
+            description=description or "Compra parcelada",
+            n=row.installment_number,
+            m=row.installment_total,
+        )
+        request = IncluirContaPagarRequest(
+            codigo_lancamento_integracao=row.payable_key,
+            codigo_cliente_fornecedor=row.supplier_code,
+            data_emissao=row.issue_date.strftime(_OMIE_DATE),
+            data_vencimento=row.due_date.strftime(_OMIE_DATE),
+            data_previsao=row.issue_date.strftime(_OMIE_DATE),
+            valor_documento=row.amount,
+            codigo_categoria=single,
+            categorias=(
+                None
+                if single is not None
+                else [
+                    ContaPagarCategoria(codigo_categoria=codigo, valor=valor, percentual=pct)
+                    for (codigo, valor), pct in zip(
+                        scaled, _percentuals([v for _, v in scaled], row.amount), strict=True
+                    )
+                ]
+            ),
+            id_conta_corrente=row.omie_conta_id,
+            observacao=observacao[:_OBSERVACAO_MAX],
+            distribuicao=_department_split(line, row.amount),
+        )
+        await self._installments.increment_attempts(
+            client_id=session.client_id, installment_id=row.id
+        )
+        await self._db.commit()
+        try:
+            response = await omie.incluir_conta_pagar(request)
+        except OmieFaultError as exc:
+            await self._installments.mark_failed(
+                client_id=session.client_id,
+                installment_id=row.id,
+                error_code=exc.code.value,
+                error_message=exc.user_message,
+            )
+            await self._db.commit()
+            log.info(
+                "omie_installment_failed",
+                session_id=str(session.id),
+                file_entry_id=str(entry.id),
+                installment_number=row.installment_number,
+                omie_code=omie_error_code(exc),
+            )
+            await self._events.emit_omie_lancamento_rejeitado(
+                session_id=session.id, codigo="OMIE_FAULT", fault_message=exc.user_message
+            )
+            return _installment_result(row, "erro", message=exc.user_message)
+        except (OmieTimeoutError, OmieServerError, OmieAuthError) as exc:
+            log.info(
+                "omie_installment_unconfirmed",
+                session_id=str(session.id),
+                file_entry_id=str(entry.id),
+                installment_number=row.installment_number,
+            )
+            partial = [*done_so_far, _installment_result(row, "pendente", message=exc.user_message)]
+            raise _DependencyFailureError(
+                _provision_result(
+                    posting, status="erro", reason="omie_indisponivel", message=exc.user_message
+                ).model_copy(update={"parcelas": partial}),
+                exc,
+            ) from exc
+        await self._installments.mark_done(
+            client_id=session.client_id,
+            installment_id=row.id,
+            payable_id=response.codigo_lancamento_omie,
+        )
+        await self._db.commit()
+        tally.parcelas_futuras += 1
+        row.step = InstallmentStep.CONCLUIDO.value
+        row.payable_id = response.codigo_lancamento_omie
+        return _installment_result(row, "provisionada")
 
     async def _conclude_provision(
         self,
@@ -1321,6 +1755,39 @@ _MODE_LOCKED_MSG = (
     "ou confira no Omie antes: trocar agora poderia lançar a mesma compra duas vezes."
 )
 
+_INSTALLMENTS_DISABLED_MSG = (
+    "A provisão das parcelas futuras está desativada neste ambiente. Provisione só a "
+    "compra desta fatura (sem as parcelas) ou fale com o suporte."
+)
+_NO_FUTURE_MSG = (
+    "Esta compra não é uma parcela com outras depois dela: não há parcelas futuras a provisionar."
+)
+_PENDING_IN_PREVIOUS_MSG = (
+    "A parcela {n}/{m} desta compra já foi registrada por uma fatura anterior, mas o título "
+    "dela ainda não foi confirmado no Omie (chave {key}). Termine o lançamento naquela "
+    "conciliação antes: criar outro título aqui poderia duplicar."
+)
+_CLAIMED_MSG = (
+    "A parcela {n}/{m} já estava provisionada no Omie por uma fatura anterior (título nº "
+    "{payable_id}): nenhum título novo foi criado."
+)
+_INCOMPLETE_MSG = (
+    "O título da compra está no Omie, mas alguma parcela futura não entrou. Tentar de novo "
+    "continua delas, sem recriar o que já existe."
+)
+_INSTALLMENT_STUCK_MSG = (
+    "Houve {attempts} envios sem confirmação do Omie (título {key}). Confira no Omie antes "
+    "de tentar de novo."
+)
+#: Observação do título da parcela futura: a compra e QUAL parcela é. A descrição da
+#: linha diz `7/10`; sem o número a parcela 8 pareceria a 7 (§4.5: vai só ao Omie).
+_INSTALLMENT_NOTE = "{description} (parcela {n} de {m})"
+#: `observacao` do `IncluirContaPagar` (`text`, sem teto documentado); limitamos
+#: para o título nunca carregar um texto inteiro de extrato.
+_OBSERVACAO_MAX = 500
+#: Quantas vezes a linha procura de novo quando perde a parcela para outra linha.
+_CLAIM_RETRIES = 3
+
 _CENT = Decimal("0.01")
 _HUNDRED = Decimal(100)
 
@@ -1401,11 +1868,20 @@ class _ProvisionTally:
     fornecedores_criados: int = 0
     titulos_criados: int = 0
     baixas_criadas: int = 0
+    #: 86e3qhhtb: títulos de parcelas futuras CRIADOS neste lote.
+    parcelas_futuras: int = 0
+    #: 86e3qhhtb: linhas que ENCONTRARAM a parcela provisionada por fatura anterior.
+    parcelas_encontradas: int = 0
 
     @property
     def wrote_anything(self) -> bool:
-        """Algum passo ESCREVEU no Omie neste lote (fornecedor, título ou baixa)."""
-        return bool(self.fornecedores_criados or self.titulos_criados or self.baixas_criadas)
+        """Algum passo ESCREVEU no Omie neste lote (fornecedor, título, baixa ou parcela)."""
+        return bool(
+            self.fornecedores_criados
+            or self.titulos_criados
+            or self.baixas_criadas
+            or self.parcelas_futuras
+        )
 
     def count(self, result: OmiePostingLineResult) -> None:
         self.linhas += 1
@@ -1539,3 +2015,43 @@ def _department_split(
         ContaPagarDistribuicao(c_cod_dep=d.codigo, n_val_dep=v, n_per_dep=p)
         for d, v, p in zip(line.departamentos, values, pcts, strict=True)
     ]
+
+
+def _installment_result(
+    row: ReconciliationOmiePostingInstallment,
+    status: str,
+    *,
+    message: str | None = None,
+) -> OmiePostingInstallmentResult:
+    """Uma parcela futura como a tela a lê: datas, valor, título e desfecho."""
+    return OmiePostingInstallmentResult.model_validate(
+        {
+            "numero": row.installment_number,
+            "total": row.installment_total,
+            "vencimento": row.due_date,
+            "emissao": row.issue_date,
+            "valor": row.amount,
+            "status": status,
+            "payable_id": row.payable_id,
+            "message": message if message is not None else row.error_message,
+        }
+    )
+
+
+def _scale_categories(
+    categorias: list[tuple[str, Decimal]], amount: Decimal
+) -> list[tuple[str, Decimal]]:
+    """As categorias da linha levadas ao valor da parcela, somando exatamente.
+
+    A parcela futura tem o valor da parcela corrente, então o caso comum é a
+    divisão igual à da linha. Se um dia diferirem, a proporção se mantém e o
+    centavo que sobra vai para a última, como em `_category_split`.
+    """
+    line_total = sum((v for _, v in categorias), Decimal(0))
+    if line_total == amount or line_total == 0:
+        return categorias if line_total == amount else [(categorias[0][0], amount)]
+    values = [
+        (v / line_total * amount).quantize(_CENT, rounding=ROUND_HALF_UP) for _, v in categorias
+    ]
+    values[-1] = amount - sum(values[:-1], Decimal(0))
+    return [(c, v) for (c, _), v in zip(categorias, values, strict=True)]

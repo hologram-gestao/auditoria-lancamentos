@@ -2168,7 +2168,12 @@ let sessionReprocessed = false;
  */
 let cardEntriesWithPostings = false;
 /** Resposta do lote: o parcial de sempre (direto) ou a provisão que parou na baixa. */
-let postingResponse: 'direto-parcial' | 'provisao-parcial' = 'direto-parcial';
+let postingResponse: 'direto-parcial' | 'provisao-parcial' | 'parcelas' = 'direto-parcial';
+/**
+ * 86e3qhhtb: a compra do posto é a parcela 7 de 10 (com as futuras que o servidor
+ * calcula) e a sessão oferece provisionar as parcelas (flag ligada).
+ */
+let cardInstallments = false;
 /** O cliente tem rateio obrigatório e um fornecedor padrão gravado (código). */
 let clientPayablesConfigured = false;
 
@@ -2215,6 +2220,11 @@ const CARD_FILE_ENTRIES = [
 
 /** As compras do cartão com a intenção gravada no servidor (86e3n70q0, bloco C). */
 function cardFileEntries() {
+  if (cardInstallments) {
+    return CARD_FILE_ENTRIES.map((entry, index) =>
+      index === 0 ? { ...entry, installment: CARD_INSTALLMENT } : entry,
+    );
+  }
   if (!cardEntriesWithPostings) return CARD_FILE_ENTRIES;
   const base = {
     kind: 'provisao',
@@ -2254,6 +2264,48 @@ function cardFileEntries() {
     return entry;
   });
 }
+
+/** 86e3qhhtb — a parcela 7/10 do posto e as três que viriam depois (datas do servidor). */
+const CARD_INSTALLMENT = {
+  numero: 7,
+  total: 10,
+  futuras: [
+    { numero: 8, total: 10, vencimento: '2026-07-03', emissao: '2026-08-05', valor: '150.50' },
+    { numero: 9, total: 10, vencimento: '2026-08-03', emissao: '2026-09-05', valor: '150.50' },
+    { numero: 10, total: 10, vencimento: '2026-09-03', emissao: '2026-10-05', valor: '150.50' },
+  ],
+};
+
+/** O lote com as parcelas: título da compra, as três futuras, uma recusada pela Omie. */
+const POSTING_BATCH_INSTALLMENTS = {
+  lines: [
+    {
+      file_entry_id: '99999999-9999-4999-8999-999999999801',
+      status: 'erro',
+      reason: 'parcelas_incompletas',
+      message:
+        'O título da compra está no Omie, mas alguma parcela futura não entrou. Tentar de novo continua delas, sem recriar o que já existe.',
+      kind: 'provisao',
+      step: 'concluido',
+      supplier_code: 700000001,
+      payable_id: 8800001,
+      payment_id: 9900001,
+      parcelas: [
+        { ...CARD_INSTALLMENT.futuras[0], status: 'provisionada', payable_id: 8800010 },
+        { ...CARD_INSTALLMENT.futuras[1], status: 'provisionada', payable_id: 8800011 },
+        {
+          ...CARD_INSTALLMENT.futuras[2],
+          status: 'erro',
+          payable_id: null,
+          message: 'Ocorreu um erro ao acessar o Omie: 101 - categoria inativa.',
+        },
+      ],
+    },
+  ],
+  lancadas: 0,
+  bloqueadas: 0,
+  com_erro: 1,
+};
 
 /** Departamentos ativos do Omie do cliente (86e3n70q0): a escolha busca por texto. */
 const OMIE_DEPARTAMENTOS = [
@@ -3388,6 +3440,7 @@ async function fulfillApi(route: Route): Promise<void> {
         ? { balance_end_omie: '1520.00', balance_difference: '-20.00' }
         : {}),
       qualification_used_glossary: sessionUsedGlossary,
+      installment_posting_enabled: cardInstallments,
     });
   }
   // Anomalias (BACK 9.7) + veredito do revisor (BACK 06.5). Rota literal antes
@@ -3465,9 +3518,11 @@ async function fulfillApi(route: Route): Promise<void> {
   // conta o desfecho é `lines[]`.
   if (path === `/api/v1/reconciliations/${SESSION_ID}/omie-postings`) {
     return json(
-      postingResponse === 'provisao-parcial'
-        ? POSTING_BATCH_PROVISION_PARTIAL
-        : POSTING_BATCH_PARTIAL,
+      postingResponse === 'parcelas'
+        ? POSTING_BATCH_INSTALLMENTS
+        : postingResponse === 'provisao-parcial'
+          ? POSTING_BATCH_PROVISION_PARTIAL
+          : POSTING_BATCH_PARTIAL,
     );
   }
   // 86e3n70q0 (bloco C): `{data, total}` — duas chaves, como as categorias.
@@ -3940,6 +3995,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   omie9001Status = 'Conciliado';
   sessionReprocessed = false;
   cardEntriesWithPostings = false;
+  cardInstallments = false;
   postingResponse = 'direto-parcial';
   clientPayablesConfigured = false;
   reviewVerdict = null;
@@ -6219,6 +6275,52 @@ for (const vp of VIEWPORTS) {
       await aguardarToastEstavel(page);
       await shot(page, `pr-gaveta-provisao-parcial-${slugP}`);
       await analyze(page, `resumo da provisão parada na baixa (${vp.label})`);
+    });
+
+    /**
+     * 86e3qhhtb — compra parcelada: a opção "Provisionar também as 3 parcelas
+     * restantes" nasce desligada; ligada, mostra os vencimentos e valores para
+     * conferir; depois do envio, o resumo diz o título de cada parcela e a que a
+     * Omie recusou. Mede o axe e a borda direita em 390px nos dois momentos.
+     */
+    test('gaveta: parcelas futuras de compra parcelada (86e3qhhtb)', async ({ page }) => {
+      sessionAccountType = 'credit_card';
+      cardInstallments = true;
+      postingResponse = 'parcelas';
+      await page.goto(`/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`);
+      const linha = page.getByRole('row', { name: /Posto Shell 1234/ });
+      await linha.getByRole('button', { name: /Lançar no Omie/ }).click();
+      const gaveta = page.getByRole('dialog', { name: 'Lançar no Omie' });
+      await aguardarAnimacao(gaveta);
+
+      await gaveta.getByRole('button', { name: /Categoria da compra de/ }).click();
+      await page.getByRole('option', { name: /Combustível/ }).click();
+      await gaveta.getByLabel(/Buscar fornecedor no Omie/).pressSequentially('12345678000195');
+      await gaveta.getByRole('button', { name: 'Buscar no Omie' }).click();
+      await expect(gaveta.getByText('PAPELARIA DEMO LTDA')).toBeVisible();
+      const opcao = gaveta.getByRole('switch', { name: /Provisionar também as 3 parcelas/ });
+      await expect(opcao).not.toBeChecked();
+      await opcao.click();
+      const lista = gaveta.getByRole('list', { name: /Parcelas a provisionar/ });
+      await expect(lista.getByRole('listitem')).toHaveCount(3);
+      await expect(lista.getByRole('listitem').first()).toContainText('vence 03/07/2026');
+      await expect(lista.getByRole('listitem').first()).toContainText('150,50');
+      const larguraViewport = page.viewportSize()?.width ?? 0;
+      const bordaLista = await lista.evaluate((el) => Math.round(el.getBoundingClientRect().right));
+      expect(bordaLista, 'lista de parcelas passando da borda direita').toBeLessThanOrEqual(
+        larguraViewport,
+      );
+      await shot(page, `pr-gaveta-parcelas-futuras-${slugP}`);
+      await analyze(page, `gaveta com as parcelas futuras abertas (${vp.label})`);
+
+      await gaveta.getByRole('button', { name: /Confirmar e lançar 1 de 1/ }).click();
+      const resultado = gaveta.getByRole('list', { name: 'Parcelas futuras' });
+      await expect(resultado.getByRole('listitem')).toHaveCount(3);
+      await expect(resultado.getByRole('listitem').nth(1)).toContainText('título nº 8800011');
+      await expect(resultado.getByRole('listitem').nth(2)).toContainText('categoria inativa');
+      await aguardarToastEstavel(page);
+      await shot(page, `pr-gaveta-parcelas-resultado-${slugP}`);
+      await analyze(page, `resumo das parcelas futuras (${vp.label})`);
     });
 
     test('linha da revisão: selo do servidor, provisionada e parada (86e3n70q0)', async ({

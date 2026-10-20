@@ -84,6 +84,11 @@ export interface LineDraft {
   supplier: SupplierValue;
   /** Rateio por departamento; vazio = sem rateio. */
   departments: DepartmentPart[];
+  /**
+   * 86e3qhhtb — provisionar também as parcelas `N+1` a `M` (só na provisão, só em
+   * compra parcelada com parcelas depois desta). Desligado por padrão.
+   */
+  futureInstallments: boolean;
 }
 
 /** O que a linha precisa saber de fora dela para ser validada. */
@@ -129,6 +134,7 @@ export function emptyDraft(modo: OmiePostingMode): LineDraft {
     parts: [],
     supplier: { kind: 'none' },
     departments: [],
+    futureInstallments: false,
   };
 }
 
@@ -202,6 +208,7 @@ export function lineDraftSchema(context: LineContext) {
       departments: z.array(
         z.object({ key: z.string(), codigo: z.string().nullable(), hundredths: z.string() }),
       ),
+      futureInstallments: z.boolean(),
     })
     .superRefine((draft, ctx) => {
       const usesSplit = draft.modo === 'provisionar' && draft.split;
@@ -349,5 +356,7 @@ export function buildPostingLine(
       (d): DepartamentoRateio => ({ codigo: d.codigo ?? '', percentual: decimal(d.hundredths) }),
     );
   }
+  // 86e3qhhtb: só o pedido. Qual parcela é a linha, e as datas, o SERVIDOR lê.
+  if (draft.futureInstallments) line.parcelas_futuras = true;
   return line;
 }

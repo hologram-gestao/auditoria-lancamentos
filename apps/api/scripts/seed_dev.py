@@ -93,6 +93,19 @@ ANOMALY_TYPES_SEED: list[dict[str, Any]] = [
             "manual ou ajuste automático de data para dia útil."
         ),
     },
+    # 86e3qhhtb — parcela futura provisionada que a fatura do mês não trouxe.
+    # Mesmo texto da migration `c8d1f4e6a2b9`, que a semeia nos ambientes.
+    {
+        "code": "parcela_nao_veio",
+        "name": "Parcela provisionada que não veio na fatura",
+        "severity": AnomalySeverity.MODERATE,
+        "description": (
+            "Uma parcela futura de compra parcelada foi provisionada no Contas a Pagar do "
+            "Omie, mas a fatura do mês em que ela deveria cair não trouxe a parcela. O título "
+            "continua em aberto no Omie: confira se a compra foi cancelada ou estornada e "
+            "decida por lá. A plataforma não exclui o título."
+        ),
+    },
     {
         "code": "wrong_account",
         "name": "Lançamento possivelmente na conta errada",

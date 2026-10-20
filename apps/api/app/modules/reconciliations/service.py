@@ -339,6 +339,10 @@ class ReconciliationService:
                         amount=tx.amount,
                         balance=tx.balance,
                         situation=FileEntrySituation.SEM_OMIE.value,
+                        # 86e3qhhtb — o par da extração (já coerente ou ausente,
+                        # validador de `ExtractedTransaction`).
+                        installment_number=tx.installment_number,
+                        installment_total=tx.installment_total,
                     )
                 )
         return file_obj, entries
@@ -775,6 +779,10 @@ class ReconciliationService:
                 else None
             ),
             invoice_due_date=session_obj.invoice_due_date,
+            installment_posting_enabled=(
+                self._settings.OMIE_INSTALLMENT_POSTING_ENABLED
+                and session_obj.account_type == SessionAccountType.CREDIT_CARD.value
+            ),
             created_by=author_for_viewer(session_obj.user, viewer),
             created_at=session_obj.created_at,
             credits_total=amounts.credits_total,

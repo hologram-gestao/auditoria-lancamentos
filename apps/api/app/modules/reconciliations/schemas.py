@@ -466,6 +466,11 @@ class SessionDetailPayload(BaseModel):
     # `false` em sessão antiga e em cliente sem glossário — a tela de revisão
     # simplesmente não mostra o selo, sem regressão.
     qualification_used_glossary: bool = False
+    # 86e3qhhtb — a gaveta "Lançar no Omie" oferece provisionar as parcelas
+    # futuras de compra parcelada? É o kill-switch `OMIE_INSTALLMENT_POSTING_ENABLED`
+    # (só em cartão). Desligado, a opção não aparece, e o servidor recusa por linha
+    # o pedido que viesse mesmo assim.
+    installment_posting_enabled: bool = False
 
 
 class SessionDetailResponse(BaseModel):

@@ -21,9 +21,10 @@
 > ⚠️ **O invariante "Omie read-only" acabou na Sprint 7.** O ADL agora **grava movimento
 > financeiro na contabilidade do cliente**, em duas formas escolhidas por linha: o
 > lançamento direto (`IncluirLancCC`) e, desde a 86e3n70q0, o título no Contas a Pagar
-> (fornecedor, título e baixa, uma máquina de estados com retomada). Antes de encostar
-> nesse fluxo, leia **§3.16** e **§4.11**: as duas nascem **desligadas**
-> (`OMIE_POSTING_ENABLED`, `OMIE_PAYABLE_POSTING_ENABLED`), os contratos foram verificados
+> (fornecedor, título e baixa, uma máquina de estados com retomada), e, desde a 86e3qhhtb,
+> os títulos das parcelas FUTURAS de compra parcelada. Antes de encostar nesse fluxo, leia
+> **§3.16** e **§4.11**: as três nascem **desligadas** (`OMIE_POSTING_ENABLED`,
+> `OMIE_PAYABLE_POSTING_ENABLED`, `OMIE_INSTALLMENT_POSTING_ENABLED`), os contratos foram verificados
 > contra a API real, e o critério de rollback é **um único lançamento duplicado em
 > produção**.
 >
@@ -336,6 +337,37 @@
       diz o passo e os ids. A provisão concluída fecha a anomalia `missing_in_omie` com
       os ids e **não** casa a linha (o id da baixa no extrato só aparece depois; o
       reprocessamento acha o par).
+    - **Parcelas FUTURAS de compra parcelada (86e3qhhtb): a fatura seguinte ENCONTRA o
+      título, nunca cria outro.** Com `parcelas_futuras` no pedido (só na provisão, flag
+      própria `OMIE_INSTALLMENT_POSTING_ENABLED`, desligada; desligada, a sessão diz
+      `installment_posting_enabled: false`, a gaveta não oferece e o pedido volta
+      `parcelas_futuras_desligadas` sem nada enviado), a linha `N/M` provisiona também as
+      parcelas `N+1` a `M`: o MESMO `IncluirContaPagar`, chave `HCP<sufixo da linha>P<nn>`
+      (`keys.derive_installment_payable_key`), mesmo fornecedor, categorias e rateio, sem
+      baixa, registrada e commitada ANTES do envio (`reconciliation_omie_posting_installments`,
+      §4.11), reenvio com a mesma chave até `MAX_STEP_SENDS`. **A parcela é lida pelo
+      SERVIDOR**, nunca do pedido: colunas `installment_number`/`installment_total` da
+      extração (regra 9 do prompt) e, sem elas, a descrição decifrada em memória
+      (`reconciliations/installments.py::entry_installment`, nunca backfill cifrado). **As
+      datas são UMA função** (`omie_posting/installment_plan.py`), que a revisão usa para a
+      lista da gaveta e o serviço para os títulos: vencimento no MESMO DIA da compra mês a
+      mês (dia inexistente vira o último do mês); emissão e previsão na data da fatura em
+      que a parcela cai (o vencimento da fatura + k meses) no processo "na data da
+      compra", e o próprio vencimento no outro. ⚠️ **A data que a linha da parcela traz
+      depende do emissor, e foi medido**: a fatura real da Cora (13/10/2026) imprime a
+      `3/6` com a data ORIGINAL da compra (22/07, fatura de 05/09 a 05/10); a regra escolhe,
+      entre a data da linha e ela mais `N-1` meses, a mais perto da compra mais recente da
+      conciliação. **O encontro:** antes de criar o título de uma linha `N/M` com `N >= 2`, o
+      serviço procura a parcela registrada com a MESMA identidade (cliente, cartão,
+      fornecedor, valor, `N/M`, vencimento a até 45 dias); achou com título, a linha vira
+      `ja_lancada` com esse `payable_id` e, no processo "na data da compra", só a BAIXA vai ao
+      Omie; achou SEM título, a linha bloqueia (`parcela_pendente_na_fatura_anterior`); a
+      série tem UM dono e a linha que encontrou nunca cria as seguintes (`ja_existia`). O
+      encontro não depende da flag (é ele que impede duplicar). **A parcela que não veio** é
+      a anomalia `parcela_nao_veio` (com o id do título, contexto cifrado), na conciliação
+      cuja janela de um mês cobre o vencimento dela, no processamento (e reprocessamento) e
+      no fim do lote; a plataforma NUNCA exclui título. O critério de rollback (um
+      duplicado) vale por parcela.
     - **Timeout: o `direto` nunca reenvia às cegas; a provisão reenvia com a MESMA
       chave.** O `ListarExtrato` **NÃO devolve `cCodIntLanc`**, então a reconciliação
       pós-timeout do `direto` é sempre inconclusiva e a linha trava em "confira no
@@ -853,6 +885,16 @@
     compra de novo como direto. A linha provisionada NÃO muda de situação na
     conciliação (segue `sem_omie`, sem `omie_lancamento_id`); quem diz "já lançada" é a
     intenção `confirmed`.
+    **As parcelas FUTURAS (86e3qhhtb) são uma tabela FILHA**,
+    `reconciliation_omie_posting_installments` (migration `c8d1f4e6a2b9`): uma linha por
+    parcela, com a identidade copiada (`client_id`, `omie_conta_id`, `supplier_code`,
+    `amount`, `N/M`), datas, chave, passo (`titulo`/`concluido`), id do título, a linha
+    que a ENCONTROU e a anomalia que avisou. No banco: `UNIQUE(posting_id,
+installment_number)`, `UNIQUE(client_id, payable_key)`, `UNIQUE(claimed_by_file_entry_id)`
+    e quatro CHECKs (passo coerente com o id, parcela futura `>= 2`, valor positivo, encontro
+    só depois do título); o encontro é um UPDATE condicional. O downgrade aborta com parcela
+    registrada. A linha da conciliação ganhou `installment_number`/`installment_total`
+    (migration `b4e7c2a9d613`, CHECK NULL-safe: as duas juntas ou nenhuma).
 
 12. **Dois modos de saída de cliente (86e34jd1d + 86e36pm1z) — e nunca um terceiro
     improvisado:**
@@ -1812,6 +1854,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.103, 19/10/2026. **A compra parcelada no cartão passou a poder provisionar as parcelas futuras no Contas a Pagar, e a fatura seguinte encontra o título em vez de duplicar (86e3qhhtb, subtask 6 do épico 86e3qhhr0; respostas do Gabriel e decisão do Pedro de 19/10).** Regras novas na §3.16 e na §4.11, e o topo passou a dizer TRÊS escritas desligadas. A extração ganhou `installment_number`/`installment_total` (tool, regra 9, `ExtractedTransaction` com par incoerente virando ausente); medido contra a fatura real da Cora: parcela reconhecida 0/10 antes e 12/12 depois, checksum OK em 6/10 antes e 5/12 depois, e toda falha dos dois lados é a MESMA linha de IOF das páginas 3 e 4 (−23,01, ano inventado), anterior a esta task; a primeira redação (que falava em "encargo") deu 0/6 e foi descartada. Duas migrations (`b4e7c2a9d613`, `c8d1f4e6a2b9`, esta com o tipo `parcela_nao_veio` no catálogo), sem rota nova: endpoints sensíveis (**134**), matriz (**29**) e pares de AAD (**18**) iguais. O detalhe da sessão ganhou `installment_posting_enabled`, a linha da revisão `installment` (o par e as futuras com as datas do servidor) e a intenção `installments` (a série); o evento `lancamento_omie_provisao` ganhou `parcelas_futuras` e `parcelas_encontradas`. Na tela, o interruptor "Provisionar também as M−N parcelas restantes" na gaveta, a série travada, o resumo por parcela e o selo "Provisionado · N parcelas futuras"._
 
 _Versão 1.102, 19/10/2026. **O plano contábil passou a sair como a planilha de importação de plano de contas da Omie, com o CNPJ/CPF do vínculo, e a conta ganhou natureza Devedora/Credora (86e3qhhrr, subtask 4 do épico 86e3qhhr0; modelo e respostas do Gabriel de 19/10).** Regra nova na §4.8. Duas rotas (lista canônica 132 → **134**, bateria dos três atacantes): `GET …/accounting-chart/omie-export` (XLSX; `generate_accounting_file` + `OpenClientDep`; 1 linha `export`; evento `planilha_omie_gerada` só com contagens) e `…/omie-export/preview` (contagens, os problemas com os códigos e quantos documentos vinculados não têm cadastro no Omie, pelo diretório da 86e3qhhrd; sem Omie volta o motivo, nunca erro). Migration `5d8e2b7c4a91` (`nature` e `nature_overridden`, dois CHECKs, backfill idempotente; ciclo up/down/up e `alembic check` limpos). O documento continua cifrado: é decifrado em memória só para o arquivo, e o modelo versionado não tem nada da amostra (46 strings do modelo, nenhuma sequência de documento). Teste-ouro pelas partes DESCOMPRIMIDAS do XLSX (o hash do zip dependeria da zlib). Na tela, "Gerar planilha da Omie" na aba Contas (prévia num diálogo, recusa 409 dentro dele) e o campo "Natureza" na gaveta da conta. Matriz (**29**) e pares de AAD (**18**) iguais._
 

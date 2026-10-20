@@ -40,12 +40,14 @@ class _FakeSession:
         self._rows = rows
 
     async def execute(self, stmt: Any) -> _FakeResult:
+        # A 1ª query devolve as intenções; a 2ª (as parcelas das séries), nada.
         self.statements.append(stmt)
-        return _FakeResult(self._rows)
+        return _FakeResult(self._rows if len(self.statements) == 1 else [])
 
 
 def _row(**overrides: Any) -> ReconciliationOmiePosting:
     values: dict[str, Any] = {
+        "id": uuid4(),
         "file_entry_id": uuid4(),
         "kind": "provisao",
         "status": "pending",
@@ -73,11 +75,20 @@ async def test_uma_query_com_client_id_no_where() -> None:
         file_entry_ids=ids,
     )
 
-    assert len(session.statements) == 1, "uma query para a página inteira, nunca N+1"
+    # 86e3qhhtb: DUAS queries constantes por página (as intenções e as parcelas futuras
+    # das séries delas), nunca uma por linha.
+    assert len(session.statements) == 2, "duas queries para a página inteira, nunca N+1"
     compiled = session.statements[0].compile(
         dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
     )
     sql = str(compiled)
+    series_sql = str(
+        session.statements[1].compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert "reconciliation_omie_posting_installments.client_id = " in series_sql
+    assert f"'{client_id}'" in series_sql
     assert "reconciliation_omie_postings.client_id = " in sql
     assert f"'{client_id}'" in sql
     assert "reconciliation_omie_postings.file_entry_id IN" in sql
@@ -124,4 +135,6 @@ def test_mapeia_todos_os_campos(row: ReconciliationOmiePosting) -> None:
         "omie_lancamento_id": row.omie_lancamento_id,
         "error_code": row.error_code,
         "error_message": row.error_message,
+        # 86e3qhhtb: sem série, a lista existe e vem vazia.
+        "installments": [],
     }

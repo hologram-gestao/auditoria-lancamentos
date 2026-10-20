@@ -206,6 +206,33 @@ export function OmiePostingBadge({ posting }: { posting: OmiePostingState | null
   const warning =
     'bg-warning-muted text-warning inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium';
 
+  const series = posting.installments ?? [];
+  if (posting.kind === 'provisao' && series.some((p) => p.step !== 'concluido')) {
+    // 86e3qhhtb: o título da compra existe, alguma parcela futura não.
+    const faltam = series.filter((p) => p.step !== 'concluido').length;
+    const rotulo = 'Lançamento parado · parcelas futuras';
+    const dica = `O título da compra está no Omie, mas ${faltam === 1 ? '1 parcela futura não entrou' : `${faltam} parcelas futuras não entraram`}. Retomar continua delas, sem recriar as outras.`;
+    return (
+      <BadgeComDica dica={dica} ariaLabel={`${rotulo}. ${dica}`} className={warning}>
+        <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+        {rotulo}
+      </BadgeComDica>
+    );
+  }
+  if (posting.status === 'confirmed' && posting.kind === 'provisao' && series.length > 0) {
+    // 86e3qhhtb: "Provisionado · N parcelas futuras", com os títulos na dica.
+    const rotulo = `Provisionado · ${series.length === 1 ? '1 parcela futura' : `${series.length} parcelas futuras`}`;
+    const titulos = series
+      .map((p) => `${p.numero}/${p.total} (título nº ${p.payable_id ?? '—'})`)
+      .join(', ');
+    const dica = `Título nº ${posting.payable_id ?? '—'} desta compra e das parcelas futuras ${titulos}, criados pelo ${PRODUCT_SHORT_NAME} no Contas a Pagar do Omie.`;
+    return (
+      <BadgeComDica dica={dica} ariaLabel={`${rotulo}. ${dica}`} className={success}>
+        <Upload className="h-3 w-3" aria-hidden="true" />
+        {rotulo}
+      </BadgeComDica>
+    );
+  }
   if (posting.status === 'confirmed' && posting.kind === 'provisao') {
     const rotulo =
       posting.payable_id === null

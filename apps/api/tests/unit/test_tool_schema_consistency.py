@@ -12,7 +12,7 @@ import typing
 from typing import Any, cast
 
 from app.integrations.anthropic.prompts import SYSTEM_PROMPT
-from app.integrations.anthropic.schemas import ExtractedStatement
+from app.integrations.anthropic.schemas import ExtractedStatement, ExtractedTransaction
 from app.integrations.anthropic.tools import EXTRACT_MOVEMENTS_TOOL
 
 
@@ -72,3 +72,23 @@ def test_pagamento_do_resumo_da_fatura_nao_e_transacao_no_prompt_na_nota_e_na_to
     schema = EXTRACT_MOVEMENTS_TOOL["input_schema"]
     prop = schema["properties"]["transactions"]["items"]["properties"]["is_payment"]
     assert "RESUMO da fatura" in prop["description"]
+
+
+def test_parcela_esta_na_tool_no_prompt_e_no_schema() -> None:
+    """86e3qhhtb — `installment_number`/`installment_total`: tool, regra 9 e DTO.
+
+    Opcionais nos três (compra à vista omite), inteiros na tool e mencionados na
+    regra 9, que é a das parcelas. A regra continua mandando preservar o texto
+    `N/M` na descrição: o campo estruturado é o mesmo dado, não um substituto.
+    """
+    schema = cast("dict[str, Any]", EXTRACT_MOVEMENTS_TOOL["input_schema"])
+    item = schema["properties"]["transactions"]["items"]
+    for field in ("installment_number", "installment_total"):
+        assert item["properties"][field]["type"] == "integer"
+        assert field not in item["required"]
+        assert f"`{field}`" in SYSTEM_PROMPT
+        assert ExtractedTransaction.model_fields[field].is_required() is False
+    regra_9 = SYSTEM_PROMPT.split("9. **Parcelas são linhas individuais.**")[1].split("10. **")[0]
+    assert "installment_number" in regra_9
+    assert "preserve esse texto na descrição" in regra_9
+    assert "omita" in regra_9

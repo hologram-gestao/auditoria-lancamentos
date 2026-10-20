@@ -8,6 +8,7 @@ casar string em português.
 
 from __future__ import annotations
 
+from datetime import date as _date
 from decimal import Decimal
 from typing import Literal, Self
 from uuid import UUID
@@ -72,14 +73,33 @@ PostingLineReason = Literal[
     # A linha já tem intenção registrada no OUTRO modo, e trocar poderia lançar
     # a mesma compra duas vezes.
     "modo_divergente",
+    # --- 86e3qhhtb: parcelas futuras de compra parcelada ---
+    # Parcelas futuras pedidas com `OMIE_INSTALLMENT_POSTING_ENABLED` desligado.
+    "parcelas_futuras_desligadas",
+    # Parcelas futuras pedidas numa linha que não é parcela `N/M` com `N < M`.
+    "sem_parcelas_futuras",
+    # A parcela desta linha já foi registrada por uma fatura anterior, mas o título
+    # dela ainda não foi confirmado: criar outro aqui poderia duplicar.
+    "parcela_pendente_na_fatura_anterior",
     # --- erros (houve tentativa) ---
     "erro_omie",
+    # O título da compra entrou e alguma parcela futura não: a linha retoma delas.
+    "parcelas_incompletas",
     "omie_indisponivel",
     # Erro 757 da Omie: a competência da data está fechada no Painel do Contador.
     "competencia_fechada",
     # --- sucesso por reconciliação (não houve novo POST) ---
     "reconciliada",
 ]
+
+#: Desfecho de UMA parcela futura (86e3qhhtb).
+#: - `provisionada`: título criado (neste envio ou num anterior);
+#: - `ja_existia`: a parcela já está no Omie por OUTRA linha (a série foi criada
+#:   numa fatura anterior, ou a mesma compra foi provisionada noutra conciliação):
+#:   nada foi criado;
+#: - `pendente`: envios sem confirmação no teto; conferir no Omie pela chave;
+#: - `erro`: a Omie recusou (mensagem verbatim).
+InstallmentResultStatus = Literal["provisionada", "ja_existia", "pendente", "erro"]
 
 #: Em que forma a linha foi (ou está indo) ao Omie, espelho de `OmiePostingKind`.
 PostingKindValue = Literal["direto", "provisao"]
@@ -197,6 +217,15 @@ class OmiePostingLineRequest(BaseModel):
             "percentuais somando 100. Obrigatório se o cliente exige departamento."
         ),
     )
+    parcelas_futuras: bool | None = Field(
+        None,
+        description=(
+            "Só na provisão (86e3qhhtb): numa compra parcelada `N/M` com `N < M`, "
+            "provisiona também os títulos das parcelas `N+1` a `M`, com o mesmo "
+            "fornecedor, categorias e rateio. A parcela é lida pelo SERVIDOR, nunca "
+            "do pedido."
+        ),
+    )
 
     @field_validator("cod_categoria", mode="after")
     @classmethod
@@ -246,6 +275,8 @@ class OmiePostingLineRequest(BaseModel):
             "razao_social": self.razao_social,
             "email": self.email,
             "departamentos": self.departamentos,
+            # `false` explícito num `direto` não é dado ignorado: é a ausência do pedido.
+            "parcelas_futuras": self.parcelas_futuras or None,
         }
         if self.modo == "direto":
             if self.cod_categoria is None:
@@ -304,6 +335,20 @@ class OmiePostingBatchRequest(BaseModel):
         return v
 
 
+class OmiePostingInstallmentResult(BaseModel):
+    """Uma parcela futura de compra parcelada: datas, valor e o que aconteceu com ela."""
+
+    numero: int
+    total: int
+    vencimento: _date
+    emissao: _date
+    valor: Decimal
+    status: InstallmentResultStatus
+    payable_id: int | None = None
+    #: Em `erro`, a mensagem VERBATIM do provedor; em `pendente`, onde conferir.
+    message: str | None = None
+
+
 class OmiePostingLineResult(BaseModel):
     """Desfecho de UMA linha. É o que a tela mostra ao lado dela."""
 
@@ -324,6 +369,9 @@ class OmiePostingLineResult(BaseModel):
     supplier_code: int | None = None
     payable_id: int | None = None
     payment_id: int | None = None
+    #: 86e3qhhtb. As parcelas futuras da compra, quando pedidas ou já existentes;
+    #: `None` quando a linha não tem nenhuma.
+    parcelas: list[OmiePostingInstallmentResult] | None = None
 
 
 class OmiePostingBatchPayload(BaseModel):

@@ -110,6 +110,7 @@ export function SessionDetailScreen({ clientId, sessionId }: SessionDetailScreen
     invoiceDueDate: detailQuery.data?.invoice_due_date,
     departmentRequired: clientQuery.data?.omie_department_required ?? false,
     defaultSupplierCode: clientQuery.data?.omie_default_supplier_code ?? null,
+    installmentPostingEnabled: detailQuery.data?.installment_posting_enabled ?? false,
   };
   // Fonte única do rótulo (86e2u513w): o breadcrumb do ClientShell deriva o
   // mesmo nome do mesmo helper — divergir aqui é mostrar duas contas diferentes

@@ -713,6 +713,19 @@ export type OmiePostingLineReason = NonNullable<Schemas['OmiePostingLineResult']
  * listagem. É ela que pinta o selo persistente e trava a forma do lançamento.
  */
 export type OmiePostingState = Schemas['OmiePostingState'];
+/**
+ * 86e3qhhtb — uma parcela FUTURA provisionada pela linha (a série dela): número,
+ * vencimento, valor, passo (`titulo` | `concluido`) e o id do título.
+ */
+export type OmiePostingInstallmentState = Schemas['OmiePostingInstallmentState'];
+/** 86e3qhhtb — o desfecho de uma parcela futura no resumo do lote. */
+export type OmiePostingInstallmentResult = Schemas['OmiePostingInstallmentResult'];
+/**
+ * 86e3qhhtb — a parcela `N/M` de uma linha, lida pelo SERVIDOR, e as que viriam
+ * depois com as datas da regra única (a mesma função que cria os títulos).
+ */
+export type FileEntryInstallment = Schemas['FileEntryInstallment'];
+export type FutureInstallmentPreview = Schemas['FutureInstallmentPreview'];
 /** Uma parte da compra numa categoria (`{codigo, valor}`), só na provisão. */
 export type CategoriaRateio = Schemas['CategoriaRateio'];
 /** Uma parte do rateio por departamento (`{codigo, percentual}`), só na provisão. */

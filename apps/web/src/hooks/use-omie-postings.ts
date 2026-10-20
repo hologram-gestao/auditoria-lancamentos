@@ -84,7 +84,35 @@ export function postingStateFromResult(line: OmiePostingLineResult): OmiePosting
     omie_lancamento_id: line.omie_lancamento_id ?? null,
     error_code: null,
     error_message: null,
+    ...withSeries(line),
   };
+}
+
+/** A série, só quando existe: linha sem parcelas futuras fica com o estado de sempre. */
+export function withSeries(line: OmiePostingLineResult): Pick<OmiePostingState, 'installments'> {
+  const installments = installmentsFromResult(line);
+  return installments.length > 0 ? { installments } : {};
+}
+
+/**
+ * 86e3qhhtb — a série da linha como o resumo do lote a deixou. Só as parcelas
+ * DESTA linha (`provisionada`, `pendente`, `erro`); `ja_existia` é de outra
+ * série e não entra no estado dela.
+ */
+export function installmentsFromResult(
+  line: OmiePostingLineResult,
+): NonNullable<OmiePostingState['installments']> {
+  return (line.parcelas ?? [])
+    .filter((p) => p.status !== 'ja_existia')
+    .map((p) => ({
+      numero: p.numero,
+      total: p.total,
+      vencimento: p.vencimento,
+      valor: p.valor,
+      step: p.status === 'provisionada' ? 'concluido' : 'titulo',
+      payable_id: p.payable_id ?? null,
+      error_message: p.status === 'provisionada' ? null : (p.message ?? null),
+    }));
 }
 
 /**

@@ -14,6 +14,7 @@ import type { OmiePostingState } from '@/lib/contracts';
 import {
   DIRECT_IN_DUE_DATE_PROCESS_MESSAGE,
   getPostingBlock,
+  hasPendingInstallments,
   isProvisionStalled,
   kindSwitchAllowed,
   lockedPostingMode,
@@ -147,6 +148,31 @@ describe('getPostingBlock com a intenção do servidor', () => {
         { isCard: true },
       ),
     ).toBe('estorno_nao_verificado');
+  });
+
+  it('86e3qhhtb: provisão concluída com parcela futura sem título continua elegível', () => {
+    const parcela = {
+      numero: 9,
+      total: 10,
+      vencimento: '2026-11-10',
+      valor: '100.00',
+      payable_id: null,
+      error_message: 'recusa',
+    };
+    const incompleta = { ...PROVISIONADA, installments: [{ ...parcela, step: 'titulo' }] };
+    expect(hasPendingInstallments(incompleta)).toBe(true);
+    expect(isProvisionStalled(incompleta)).toBe(true);
+    expect(getPostingBlock({ ...SEM_OMIE, omie_posting: incompleta }, { isCard: true })).toBeNull();
+
+    const completa = {
+      ...PROVISIONADA,
+      installments: [{ ...parcela, step: 'concluido', payable_id: 77, error_message: null }],
+    };
+    expect(hasPendingInstallments(completa)).toBe(false);
+    expect(isProvisionStalled(completa)).toBe(false);
+    expect(getPostingBlock({ ...SEM_OMIE, omie_posting: completa }, { isCard: true })).toBe(
+      'ja_lancada',
+    );
   });
 
   it('sem intenção, nada muda em relação à Sprint 7', () => {

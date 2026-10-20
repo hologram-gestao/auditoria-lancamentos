@@ -976,6 +976,8 @@ class UsageEventService:
         titulos_criados: int,
         baixas_criadas: int,
         duracao_ms: int,
+        parcelas_futuras: int = 0,
+        parcelas_encontradas: int = 0,
     ) -> bool:
         """86e3n70q0 (bloco B): um lote com linhas de PROVISÃO. Uma linha por lote."""
         return await self.emit(
@@ -992,6 +994,8 @@ class UsageEventService:
                     "fornecedores_criados": fornecedores_criados,
                     "titulos_criados": titulos_criados,
                     "baixas_criadas": baixas_criadas,
+                    "parcelas_futuras": parcelas_futuras,
+                    "parcelas_encontradas": parcelas_encontradas,
                     "duracao_ms": duracao_ms,
                 }
             ).model_dump(mode="json"),

@@ -115,8 +115,17 @@ export function isProvisionStalled(posting: OmiePostingState | null | undefined)
     posting !== null &&
     posting !== undefined &&
     posting.kind === 'provisao' &&
-    posting.status !== 'confirmed'
+    (posting.status !== 'confirmed' || hasPendingInstallments(posting))
   );
+}
+
+/**
+ * 86e3qhhtb — a provisão terminou, mas alguma parcela FUTURA da série ainda não
+ * tem título: a linha continua lançável, e enviar de novo retoma só as que faltam
+ * (o servidor retoma a série mesmo sem o pedido marcar as parcelas).
+ */
+export function hasPendingInstallments(posting: OmiePostingState | null | undefined): boolean {
+  return (posting?.installments ?? []).some((p) => p.step !== 'concluido');
 }
 
 export type PostingBlockReason =
@@ -170,7 +179,9 @@ export function getPostingBlock(
   if (entry.omie_lancamento_id !== null) return 'ja_lancada';
   if (entry.situation !== 'sem_omie') return 'nao_e_sem_omie';
   if (Number(entry.amount) > 0) return 'estorno_nao_verificado';
-  if (entry.omie_posting?.status === 'confirmed') return 'ja_lancada';
+  if (entry.omie_posting?.status === 'confirmed' && !hasPendingInstallments(entry.omie_posting)) {
+    return 'ja_lancada';
+  }
   return null;
 }
 
