@@ -2695,6 +2695,7 @@ export interface components {
             /** Amount */
             amount: string;
             omie_posting?: components["schemas"]["OmiePostingState"] | null;
+            installment?: components["schemas"]["FileEntryInstallment"] | null;
         };
         /**
          * AnomalyRelatedOmieEntry
@@ -4794,6 +4795,16 @@ export interface components {
              * @default false
              */
             is_payment: boolean;
+            /**
+             * Installment Number
+             * @description Número da parcela (o 7 de 7/10). Só compra parcelada.
+             */
+            installment_number?: number | null;
+            /**
+             * Installment Total
+             * @description Total de parcelas (o 10 de 7/10). Só compra parcelada.
+             */
+            installment_total?: number | null;
         };
         /**
          * ExtractedTransaction
@@ -4831,6 +4842,32 @@ export interface components {
              * @default false
              */
             is_payment: boolean;
+            /**
+             * Installment Number
+             * @description Número da parcela (o 7 de 7/10). Só compra parcelada.
+             */
+            installment_number?: number | null;
+            /**
+             * Installment Total
+             * @description Total de parcelas (o 10 de 7/10). Só compra parcelada.
+             */
+            installment_total?: number | null;
+        };
+        /**
+         * FileEntryInstallment
+         * @description A parcela `N/M` da linha (86e3qhhtb), lida pelo servidor, e as que viriam depois.
+         *
+         *     `futuras` é o que a gaveta mostra para a pessoa conferir antes de pedir as
+         *     parcelas: calculado por `installment_plan.plan_future_installments`, a MESMA
+         *     função que cria os títulos. Vazia em `N == M`, fora do cartão e em estorno.
+         */
+        FileEntryInstallment: {
+            /** Numero */
+            numero: number;
+            /** Total */
+            total: number;
+            /** Futuras */
+            futuras?: components["schemas"]["FutureInstallmentPreview"][];
         };
         /** FileEntryListResponse */
         FileEntryListResponse: {
@@ -4906,6 +4943,28 @@ export interface components {
              * @description Quantos títulos.
              */
             count: number;
+        };
+        /**
+         * FutureInstallmentPreview
+         * @description Uma parcela que a provisão criaria: as datas da regra única e o valor.
+         */
+        FutureInstallmentPreview: {
+            /** Numero */
+            numero: number;
+            /** Total */
+            total: number;
+            /**
+             * Vencimento
+             * Format: date
+             */
+            vencimento: string;
+            /**
+             * Emissao
+             * Format: date
+             */
+            emissao: string;
+            /** Valor */
+            valor: string;
         };
         /**
          * GenerateAccountingFileRequest
@@ -5489,6 +5548,7 @@ export interface components {
             /** Omie Lancamento Id */
             omie_lancamento_id: number | null;
             omie_posting?: components["schemas"]["OmiePostingState"] | null;
+            installment?: components["schemas"]["FileEntryInstallment"] | null;
         };
         /**
          * LoginRequest
@@ -6464,6 +6524,60 @@ export interface components {
             data: components["schemas"]["OmiePostingBatchPayload"];
         };
         /**
+         * OmiePostingInstallmentResult
+         * @description Uma parcela futura de compra parcelada: datas, valor e o que aconteceu com ela.
+         */
+        OmiePostingInstallmentResult: {
+            /** Numero */
+            numero: number;
+            /** Total */
+            total: number;
+            /**
+             * Vencimento
+             * Format: date
+             */
+            vencimento: string;
+            /**
+             * Emissao
+             * Format: date
+             */
+            emissao: string;
+            /** Valor */
+            valor: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "provisionada" | "ja_existia" | "pendente" | "erro";
+            /** Payable Id */
+            payable_id?: number | null;
+            /** Message */
+            message?: string | null;
+        };
+        /**
+         * OmiePostingInstallmentState
+         * @description Uma parcela FUTURA provisionada pela linha (86e3qhhtb): só número, datas, valor e ids.
+         */
+        OmiePostingInstallmentState: {
+            /** Numero */
+            numero: number;
+            /** Total */
+            total: number;
+            /**
+             * Vencimento
+             * Format: date
+             */
+            vencimento: string;
+            /** Valor */
+            valor: string;
+            /** Step */
+            step: string;
+            /** Payable Id */
+            payable_id: number | null;
+            /** Error Message */
+            error_message: string | null;
+        };
+        /**
          * OmiePostingLineRequest
          * @description Uma linha da fatura a lançar, com a forma e a classificação escolhidas.
          *
@@ -6522,6 +6636,11 @@ export interface components {
              * @description Só na provisão: rateio por departamento (`{codigo, percentual}`), percentuais somando 100. Obrigatório se o cliente exige departamento.
              */
             departamentos?: components["schemas"]["DepartamentoRateio"][] | null;
+            /**
+             * Parcelas Futuras
+             * @description Só na provisão (86e3qhhtb): numa compra parcelada `N/M` com `N < M`, provisiona também os títulos das parcelas `N+1` a `M`, com o mesmo fornecedor, categorias e rateio. A parcela é lida pelo SERVIDOR, nunca do pedido.
+             */
+            parcelas_futuras?: boolean | null;
         };
         /**
          * OmiePostingLineResult
@@ -6539,7 +6658,7 @@ export interface components {
              */
             status: "lancada" | "bloqueada" | "erro";
             /** Reason */
-            reason?: ("linha_inexistente" | "nao_e_sem_omie" | "linha_ignorada" | "ja_lancada" | "envio_anterior_sem_confirmacao" | "chave_em_conflito" | "lancamento_ja_vinculado" | "estorno_nao_verificado" | "direto_desligado" | "provisao_desligada" | "direto_indisponivel_no_modo_vencimento" | "fornecedor_pendente" | "departamento_pendente" | "categorias_nao_fecham" | "modo_divergente" | "erro_omie" | "omie_indisponivel" | "competencia_fechada" | "reconciliada") | null;
+            reason?: ("linha_inexistente" | "nao_e_sem_omie" | "linha_ignorada" | "ja_lancada" | "envio_anterior_sem_confirmacao" | "chave_em_conflito" | "lancamento_ja_vinculado" | "estorno_nao_verificado" | "direto_desligado" | "provisao_desligada" | "direto_indisponivel_no_modo_vencimento" | "fornecedor_pendente" | "departamento_pendente" | "categorias_nao_fecham" | "modo_divergente" | "parcelas_futuras_desligadas" | "sem_parcelas_futuras" | "parcela_pendente_na_fatura_anterior" | "erro_omie" | "parcelas_incompletas" | "omie_indisponivel" | "competencia_fechada" | "reconciliada") | null;
             /** Message */
             message?: string | null;
             /** Omie Lancamento Id */
@@ -6554,6 +6673,8 @@ export interface components {
             payable_id?: number | null;
             /** Payment Id */
             payment_id?: number | null;
+            /** Parcelas */
+            parcelas?: components["schemas"]["OmiePostingInstallmentResult"][] | null;
         };
         /**
          * OmiePostingState
@@ -6590,6 +6711,8 @@ export interface components {
             error_code: string | null;
             /** Error Message */
             error_message: string | null;
+            /** Installments */
+            installments?: components["schemas"]["OmiePostingInstallmentState"][];
         };
         /**
          * OmieRegistryCheckPayload
@@ -7466,6 +7589,11 @@ export interface components {
              * @default false
              */
             qualification_used_glossary: boolean;
+            /**
+             * Installment Posting Enabled
+             * @default false
+             */
+            installment_posting_enabled: boolean;
         };
         /**
          * SessionDetailResponse

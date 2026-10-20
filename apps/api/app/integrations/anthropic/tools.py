@@ -113,6 +113,23 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
                                 "(NÃO use null) se o documento não fornecer."
                             ),
                         },
+                        "installment_number": {
+                            "type": "integer",
+                            "description": (
+                                "SÓ compra PARCELADA em fatura de cartão: o número desta "
+                                "parcela, como escrito na linha (o 7 de '7/10', 'PARC 07/10' "
+                                "ou 'Parcela 7 de 10'). Vem junto com installment_total; "
+                                "nas demais linhas, omita."
+                            ),
+                        },
+                        "installment_total": {
+                            "type": "integer",
+                            "description": (
+                                "SÓ compra PARCELADA em fatura de cartão: o total de "
+                                "parcelas, como escrito na linha (o 10 de '7/10'). Vem junto "
+                                "com installment_number; nas demais linhas, omita."
+                            ),
+                        },
                         "is_payment": {
                             "type": "boolean",
                             "description": (

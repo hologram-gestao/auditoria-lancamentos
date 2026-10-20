@@ -134,6 +134,27 @@ describe('lineIssue', () => {
 });
 
 describe('buildPostingLine', () => {
+  it('86e3qhhtb: parcelas futuras só na provisão, e só quando ligadas', () => {
+    const provisao = buildPostingLine(
+      'e1',
+      draft({ categoria: '1.01.01', supplier: { kind: 'default' }, futureInstallments: true }),
+      { supplierSettled: false },
+    );
+    expect(provisao.parcelas_futuras).toBe(true);
+    const desligada = buildPostingLine(
+      'e1',
+      draft({ categoria: '1.01.01', supplier: { kind: 'default' } }),
+      { supplierSettled: false },
+    );
+    expect(desligada).not.toHaveProperty('parcelas_futuras');
+    const direto = buildPostingLine(
+      'e1',
+      draft({ modo: 'direto', categoria: '1.01.01', futureInstallments: true }),
+      { supplierSettled: false },
+    );
+    expect(direto).toEqual({ file_entry_id: 'e1', cod_categoria: '1.01.01', modo: 'direto' });
+  });
+
   it('direto sai SÓ com file_entry_id, cod_categoria e modo, mesmo com resto preenchido', () => {
     const line = buildPostingLine(
       'e1',

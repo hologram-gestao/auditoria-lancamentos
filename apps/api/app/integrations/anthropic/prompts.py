@@ -56,7 +56,10 @@ Particularidades de FATURA DE CARTÃO DE CRÉDITO (quando `account_type` = `cred
 9. **Parcelas são linhas individuais.** Uma compra parcelada em 3x gera 3 \
 transações distintas — cada uma com a SUA data e o VALOR UNITÁRIO da parcela. \
 NUNCA agrupe no valor total da compra. Padrões como `1/3`, `2/3`, `PARC 01/03` \
-na descrição indicam parcela; preserve esse texto na descrição.
+na descrição indicam parcela; preserve esse texto na descrição. Quando a linha \
+trouxer o número da parcela e o total (`7/10`, `PARC 07/10`, `Parcela 7 de 10`), \
+preencha também `installment_number` (7) e `installment_total` (10), como \
+escritos na própria linha; nas demais linhas, omita os dois.
 
 10. **Estornos são crédito (`amount` POSITIVO).** Estornos, devoluções e \
 créditos reduzem o valor da fatura — emita com sinal positivo.

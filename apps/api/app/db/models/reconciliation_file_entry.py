@@ -24,7 +24,17 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import BigInteger, ForeignKey, Index, Numeric, String, Text, text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Numeric,
+    SmallInteger,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy import Date as SQLDate
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -57,6 +67,19 @@ class FileEntryUserAction(StrEnum):
     IGNORE = "ignore"
 
 
+#: Parcela da compra no cartão (86e3qhhtb): as duas colunas vivem e morrem juntas,
+#: e o par é coerente (`1 <= N <= M`, `2 <= M <= 99`). Rótulo (a `NAMING_CONVENTION`
+#: prefixa `ck_<tabela>_`) e predicado copiados na migration `b4e7c2a9d613`;
+#: `tests/unit/test_installment_schema.py` compara as duas fontes.
+INSTALLMENT_PAIR_CK_LABEL = "installment_pair"
+INSTALLMENT_PAIR_CK = (
+    "(installment_number IS NULL AND installment_total IS NULL) "
+    "OR (installment_number IS NOT NULL AND installment_total IS NOT NULL "
+    "AND installment_number >= 1 AND installment_total >= 2 "
+    "AND installment_total <= 99 AND installment_number <= installment_total)"
+)
+
+
 class ReconciliationFileEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "reconciliation_file_entries"
 
@@ -73,6 +96,7 @@ class ReconciliationFileEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             unique=True,
             postgresql_where=text("omie_lancamento_id IS NOT NULL"),
         ),
+        CheckConstraint(text(INSTALLMENT_PAIR_CK), name=INSTALLMENT_PAIR_CK_LABEL),
     )
 
     session_id: Mapped[UUID] = mapped_column(
@@ -122,6 +146,13 @@ class ReconciliationFileEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     omie_lancamento_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     user_action: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    #: Parcela `N` de `M` da compra no cartão, como a extração a leu (regra 9 do
+    #: prompt). NULL nas duas: compra à vista, linha anterior à 86e3qhhtb ou par
+    #: que o modelo não deu; aí a leitura cai na descrição decifrada
+    #: (`reconciliations/installments.py::entry_installment`), nunca num backfill.
+    installment_number: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    installment_total: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
 
     # Nota livre do analista — AES-256-GCM (opcional, mas com IV próprio quando set)
     user_note_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -128,3 +128,25 @@ def derive_cod_int_lanc(file_entry_id: UUID) -> str:
         Chave de até 20 caracteres, `[A-Z2-7]` após o prefixo `ADL`.
     """
     return f"{COD_INT_LANC_PREFIX}{_suffix(file_entry_id.bytes, _DIGEST_PERSON)}"
+
+
+# ----------------------------------------------------------------------
+# Parcela FUTURA de compra parcelada (86e3qhhtb)
+# ----------------------------------------------------------------------
+
+#: Separador legível entre a chave do título da linha e o número da parcela.
+_INSTALLMENT_KEY_MARK = "P"
+
+
+def derive_installment_payable_key(file_entry_id: UUID, installment_number: int) -> str:
+    """`codigo_lancamento_integracao` do título da parcela FUTURA `installment_number`.
+
+    Identidade, nunca conteúdo: a chave é a do título da LINHA que criou a série
+    (`HCP` + o sufixo dela) mais o número da parcela, com dois dígitos —
+    `HCP<sufixo>P08`. A pessoa acha no Omie a compra e todas as parcelas dela pelo
+    mesmo final, e duas séries iguais (mesma loja, mesmo valor, mesmo `N/M`) em
+    linhas diferentes têm chaves diferentes. 23 caracteres, dentro do `string60`.
+    """
+    if not 2 <= installment_number <= 99:
+        raise ValueError("derive_installment_payable_key espera a parcela entre 2 e 99")
+    return f"{derive_payable_key(file_entry_id)}{_INSTALLMENT_KEY_MARK}{installment_number:02d}"

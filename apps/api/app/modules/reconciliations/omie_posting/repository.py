@@ -16,10 +16,12 @@ BACK 07.4.
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.exceptions import (
@@ -29,16 +31,23 @@ from app.core.exceptions import (
 from app.core.logging import get_logger
 from app.db.models import (
     FileEntrySituation,
+    InstallmentStep,
     OmiePostingKind,
     OmiePostingStatus,
     OmiePostingStep,
     ReconciliationFileEntry,
     ReconciliationOmiePosting,
+    ReconciliationOmiePostingInstallment,
 )
-from app.modules.reconciliations.omie_posting.keys import derive_cod_int_lanc
+from app.modules.reconciliations.omie_posting.keys import (
+    derive_cod_int_lanc,
+    derive_installment_payable_key,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.modules.reconciliations.omie_posting.installment_plan import PlannedInstallment
 
 log = get_logger(__name__)
 
@@ -359,3 +368,274 @@ class OmiePostingRepository:
                 "increment_attempts sem intenção registrada — register_intent tem de vir antes"
             )
         return attempts
+
+
+#: Distância máxima, em dias, entre o vencimento de uma parcela registrada e a data
+#: da linha que a procura (86e3qhhtb). A identidade (cliente, cartão, fornecedor,
+#: valor, `N/M`) já é quase única; a janela só separa duas séries IGUAIS que
+#: começaram em meses diferentes, e cobre o dia da compra que o emissor desloca.
+INSTALLMENT_MATCH_WINDOW_DAYS = 45
+#: Tolerância de valor do encontro: a MESMA do cruzamento (§5.1). Parcela de cartão
+#: arredondada põe o centavo numa só (100,00 em 3x = 33,34 + 33,33 + 33,33), e a
+#: parcela futura copia o valor da linha que criou a série: exigir igualdade exata
+#: faria a fatura seguinte não achar o título e criar outro.
+INSTALLMENT_AMOUNT_TOLERANCE = Decimal("0.01")
+#: Dias entre o fechamento da fatura e o vencimento dela (âncora quando a sessão
+#: tem o vencimento): folga de emissor para emissor, conservadora.
+_DUE_TO_CLOSING_DAYS = 10
+
+
+class InstallmentRepository:
+    """As parcelas FUTURAS de compra parcelada (86e3qhhtb). `client_id` em todo WHERE."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def list_for_posting(
+        self, *, client_id: UUID, posting_id: UUID
+    ) -> list[ReconciliationOmiePostingInstallment]:
+        """As parcelas de UMA série, em ordem de número."""
+        stmt = (
+            select(ReconciliationOmiePostingInstallment)
+            .where(
+                ReconciliationOmiePostingInstallment.client_id == client_id,
+                ReconciliationOmiePostingInstallment.posting_id == posting_id,
+            )
+            .order_by(ReconciliationOmiePostingInstallment.installment_number)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_for_postings(
+        self, *, client_id: UUID, posting_ids: list[UUID]
+    ) -> dict[UUID, list[ReconciliationOmiePostingInstallment]]:
+        """As parcelas de várias séries numa query (a página da revisão)."""
+        if not posting_ids:
+            return {}
+        stmt = (
+            select(ReconciliationOmiePostingInstallment)
+            .where(
+                ReconciliationOmiePostingInstallment.client_id == client_id,
+                ReconciliationOmiePostingInstallment.posting_id.in_(posting_ids),
+            )
+            .order_by(ReconciliationOmiePostingInstallment.installment_number)
+        )
+        out: dict[UUID, list[ReconciliationOmiePostingInstallment]] = {}
+        for row in (await self._session.execute(stmt)).scalars().all():
+            out.setdefault(row.posting_id, []).append(row)
+        return out
+
+    async def register(
+        self,
+        *,
+        client_id: UUID,
+        posting_id: UUID,
+        file_entry_id: UUID,
+        omie_conta_id: int,
+        supplier_code: int,
+        planned: PlannedInstallment,
+    ) -> ReconciliationOmiePostingInstallment:
+        """Registra a parcela ANTES do envio. **Idempotente** pelo banco.
+
+        `ON CONFLICT DO NOTHING` sobre as duas UNIQUEs: a 2ª chamada (duplo clique,
+        retomada) devolve a parcela existente, que é a memória do título que talvez
+        já exista no Omie.
+        """
+        stmt = (
+            pg_insert(ReconciliationOmiePostingInstallment)
+            .values(
+                id=uuid4(),
+                posting_id=posting_id,
+                client_id=client_id,
+                omie_conta_id=omie_conta_id,
+                supplier_code=supplier_code,
+                amount=planned.amount,
+                installment_number=planned.number,
+                installment_total=planned.total,
+                due_date=planned.due_date,
+                issue_date=planned.issue_date,
+                payable_key=derive_installment_payable_key(file_entry_id, planned.number),
+                step=InstallmentStep.TITULO.value,
+                attempts=0,
+            )
+            .on_conflict_do_nothing()
+            .returning(ReconciliationOmiePostingInstallment)
+        )
+        inserted = (await self._session.execute(stmt)).scalar_one_or_none()
+        if inserted is not None:
+            return inserted
+        existing = (
+            await self._session.execute(
+                select(ReconciliationOmiePostingInstallment).where(
+                    ReconciliationOmiePostingInstallment.client_id == client_id,
+                    ReconciliationOmiePostingInstallment.posting_id == posting_id,
+                    ReconciliationOmiePostingInstallment.installment_number == planned.number,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            # A chave derivada já é de OUTRA parcela do tenant: só uma colisão de
+            # encoding chega aqui. Falhar alto, nunca seguir sem memória.
+            raise OmiePostingKeyCollisionError(
+                f"chave da parcela {planned.number} da linha {file_entry_id} já em uso",
+            )
+        return existing
+
+    async def find_in_series(
+        self,
+        *,
+        client_id: UUID,
+        omie_conta_id: int,
+        supplier_code: int,
+        amount: Decimal,
+        number: int,
+        total: int,
+        around: date,
+        exclude_posting_id: UUID | None = None,
+        exclude_session_id: UUID | None = None,
+    ) -> ReconciliationOmiePostingInstallment | None:
+        """A parcela registrada com a MESMA identidade, ainda não encontrada.
+
+        Mesmo cliente, cartão, fornecedor, valor e `N/M`, com vencimento a até
+        `INSTALLMENT_MATCH_WINDOW_DAYS` dias de `around` e valor a até 0,01; a mais
+        próxima vence. `exclude_session_id` deixa de fora as séries da MESMA
+        conciliação: duas compras idênticas na mesma fatura são duas séries (§3.16).
+        Inclui as parcelas ainda sem título (quem chama decide o que fazer com
+        elas: criar outra seria o duplicado).
+        """
+        window = timedelta(days=INSTALLMENT_MATCH_WINDOW_DAYS)
+        model = ReconciliationOmiePostingInstallment
+        stmt = select(model).where(
+            model.client_id == client_id,
+            model.omie_conta_id == omie_conta_id,
+            model.supplier_code == supplier_code,
+            model.amount >= amount - INSTALLMENT_AMOUNT_TOLERANCE,
+            model.amount <= amount + INSTALLMENT_AMOUNT_TOLERANCE,
+            model.installment_number == number,
+            model.installment_total == total,
+            model.claimed_by_file_entry_id.is_(None),
+            model.due_date >= around - window,
+            model.due_date <= around + window,
+        )
+        if exclude_posting_id is not None:
+            stmt = stmt.where(model.posting_id != exclude_posting_id)
+        if exclude_session_id is not None:
+            stmt = stmt.where(
+                model.posting_id.not_in(
+                    select(ReconciliationOmiePosting.id).where(
+                        ReconciliationOmiePosting.client_id == client_id,
+                        ReconciliationOmiePosting.session_id == exclude_session_id,
+                    )
+                )
+            )
+        rows = list((await self._session.execute(stmt)).scalars().all())
+        if not rows:
+            return None
+        return min(
+            rows,
+            key=lambda r: (
+                abs((r.due_date - around).days),
+                abs(r.amount - amount),
+                r.created_at,
+                r.id,
+            ),
+        )
+
+    async def claim(
+        self, *, client_id: UUID, installment_id: UUID, file_entry_id: UUID
+    ) -> ReconciliationOmiePostingInstallment | None:
+        """A linha da fatura seguinte ENCONTRA a parcela. Condicional no próprio SQL.
+
+        Só vale para parcela com título (`concluido`) e ainda não encontrada; a
+        corrida entre duas linhas é decidida pelo `WHERE` e pela UNIQUE de
+        `claimed_by_file_entry_id`, nunca por uma leitura anterior. `None` = perdeu.
+        """
+        model = ReconciliationOmiePostingInstallment
+        stmt = (
+            update(model)
+            .where(
+                model.id == installment_id,
+                model.client_id == client_id,
+                model.claimed_by_file_entry_id.is_(None),
+                model.step == InstallmentStep.CONCLUIDO.value,
+            )
+            .values(claimed_by_file_entry_id=file_entry_id)
+            .returning(model)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def claimed_by(
+        self, *, client_id: UUID, file_entry_id: UUID
+    ) -> ReconciliationOmiePostingInstallment | None:
+        """A parcela que esta linha encontrou, ou `None`."""
+        stmt = select(ReconciliationOmiePostingInstallment).where(
+            ReconciliationOmiePostingInstallment.client_id == client_id,
+            ReconciliationOmiePostingInstallment.claimed_by_file_entry_id == file_entry_id,
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def increment_attempts(self, *, client_id: UUID, installment_id: UUID) -> None:
+        """Soma 1 ANTES do envio: se a resposta não vier, o envio está contado."""
+        await self._session.execute(
+            update(ReconciliationOmiePostingInstallment)
+            .where(
+                ReconciliationOmiePostingInstallment.id == installment_id,
+                ReconciliationOmiePostingInstallment.client_id == client_id,
+            )
+            .values(attempts=ReconciliationOmiePostingInstallment.attempts + 1)
+        )
+
+    async def mark_done(self, *, client_id: UUID, installment_id: UUID, payable_id: int) -> None:
+        """Título confirmado: grava o id e conclui. Quem chama COMMITA em seguida."""
+        await self._session.execute(
+            update(ReconciliationOmiePostingInstallment)
+            .where(
+                ReconciliationOmiePostingInstallment.id == installment_id,
+                ReconciliationOmiePostingInstallment.client_id == client_id,
+            )
+            .values(
+                step=InstallmentStep.CONCLUIDO.value,
+                payable_id=payable_id,
+                attempts=0,
+                error_code=None,
+                error_message=None,
+            )
+        )
+
+    async def mark_failed(
+        self,
+        *,
+        client_id: UUID,
+        installment_id: UUID,
+        error_code: str,
+        error_message: str,
+    ) -> None:
+        """`faultstring`: nada foi criado; a contagem de envios recomeça. Nunca loga."""
+        await self._session.execute(
+            update(ReconciliationOmiePostingInstallment)
+            .where(
+                ReconciliationOmiePostingInstallment.id == installment_id,
+                ReconciliationOmiePostingInstallment.client_id == client_id,
+            )
+            .values(attempts=0, error_code=error_code, error_message=error_message)
+        )
+
+
+async def invoice_anchor(
+    session: AsyncSession, session_id: UUID, invoice_due_date: date | None = None
+) -> date | None:
+    """O fim da fatura corrente: a compra mais recente da conciliação (86e3qhhtb).
+
+    É a âncora de `installment_plan.current_installment_date`. As linhas de parcela
+    com a data ORIGINAL da compra são mais antigas e não a puxam para trás, salvo
+    quando a fatura só tem linhas assim; por isso, com o vencimento da fatura
+    gravado, a âncora nunca fica antes de `vencimento - 10 dias` (o fechamento).
+    """
+    anchor: date | None = await session.scalar(
+        select(func.max(ReconciliationFileEntry.transaction_date)).where(
+            ReconciliationFileEntry.session_id == session_id
+        )
+    )
+    if invoice_due_date is not None:
+        closing = invoice_due_date - timedelta(days=_DUE_TO_CLOSING_DAYS)
+        anchor = closing if anchor is None else max(anchor, closing)
+    return anchor
