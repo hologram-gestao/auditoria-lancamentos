@@ -50,6 +50,7 @@ from app.core.exceptions import (
     ErrorCode,
     OmieChartExportRefusedError,
     PartiesReportCompanyMismatchError,
+    PartyDocumentAlreadyLinkedError,
 )
 from app.core.logging import get_logger
 from app.core.search_index import compute_fingerprint
@@ -73,6 +74,7 @@ from app.modules.client_accounting_chart.omie_sheet import (
 from app.modules.client_accounting_chart.parties import (
     PartyLineProblem,
     parse_parties_report,
+    parse_typed_document,
     raise_party_lines,
 )
 from app.modules.client_accounting_chart.repository import (
@@ -111,6 +113,14 @@ type NotPostableReason = Literal["sintetica", "inativa"]
 #: O que a edição manual mudou numa conta (86e3nb816) — vocabulário FECHADO, vai
 #: para o evento `plano_contabil_conta_editada` (nunca o valor, só o campo).
 type AccountChange = Literal["nome", "tipo", "classificacao", "situacao", "natureza"]
+
+#: O que o vínculo manual fez (86e3tttaf) — vocabulário FECHADO do evento
+#: `plano_contabil_vinculo_editado`.
+type PartyLinkOperation = Literal["criado", "trocado", "removido"]
+
+#: Por que o vínculo manual foi recusado no campo (86e3tttaf): `details.reason` do 422
+#: `CONTA_CONTABIL_INVALIDA`. As duas primeiras são da CONTA, a última do DOCUMENTO.
+type PartyLinkInvalidReason = Literal["conta_sintetica", "conta_inativa", "documento_invalido"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -989,6 +999,175 @@ class AccountingChartService:
         )
         return rows, total, names, documents, summary
 
+    async def set_party_link(
+        self,
+        client: Client,
+        account_id: UUID,
+        *,
+        actor: CurrentUser,
+        party_type: AccountingPartyType,
+        document: str,
+    ) -> tuple[ClientAccountingAccount, DecryptedNames, PartyDocuments]:
+        """Vincula UMA conta a um CNPJ/CPF à mão, ou troca o vínculo que ela tem (86e3tttaf).
+
+        Ordem: cliente encerrado (409) → documento digitado conferido pelo dígito
+        verificador (422 `documento_invalido`, antes de qualquer trava) → trava por
+        cliente (a MESMA da importação: as duas portas não se cruzam) → conta pela pk
+        com `client_id` no SELECT (404) → analítica e ativa (422 `conta_sintetica`/
+        `conta_inativa`) → o documento com o MESMO tipo em OUTRA conta do cliente (409
+        `DOCUMENTO_JA_VINCULADO`, com o código dela) → cifrado com a pk no AAD, gravado
+        pelo MESMO `update_party_links` da importação → commit → métrica.
+
+        A impressão digital da empresa dos relatórios (`party_reports_company_fingerprint`)
+        não muda: o vínculo manual não tem cabeçalho de relatório. O mesmo documento e
+        tipo que a conta já tem não regrava nem emite. O documento nunca entra em log.
+        """
+        _require_open(client)
+        parsed = parse_typed_document(document)
+        if parsed is None:
+            raise _party_link_invalid("documento_invalido")
+        digits, kind = parsed
+
+        await self._repo.lock_client_chart(client.id)
+        account = await self._repo.get_for_update(client.id, account_id)
+        if account is None:
+            raise AccountingAccountNotFoundError(
+                f"conta contábil {account_id} não pertence ao cliente {client.id}"
+            )
+        reason = not_postable_reason(account)
+        if reason is not None:
+            raise _party_link_invalid(
+                "conta_sintetica" if reason == "sintetica" else "conta_inativa"
+            )
+
+        cipher = await self._write_cipher(client)
+        linked_accounts = {a.id: a for a in await self._repo.list_linked_all(client.id)}
+        linked = _decrypt_party_documents(client.id, cipher, linked_accounts.values())
+        # Mesma pessoa no MESMO papel em duas contas é o duplicado. A empresa que é
+        # cliente e fornecedor tem duas contas no Domínio (uma em cada relação), e a
+        # importação aceita isso: o vínculo manual também.
+        for other_id, other_digits in linked.plain.items():
+            other = linked_accounts[other_id]
+            if (
+                other_id != account.id
+                and other_digits == digits
+                and other.party_type == party_type.value
+            ):
+                raise PartyDocumentAlreadyLinkedError(
+                    f"documento já vinculado a outra conta do cliente {client.id}",
+                    details={
+                        "accountCode": other.code,
+                        "accountId": str(other_id),
+                    },
+                )
+
+        names = await self.decrypt_names(client, [account])
+        documents = PartyDocuments(
+            masked={account.id: mask_document(digits)},
+            kinds={account.id: kind},
+            failed=frozenset(),
+        )
+        had_link = account.party_document_encrypted is not None
+        if (
+            had_link
+            and account.id not in linked.failed
+            and linked.plain.get(account.id) == digits
+            and account.party_type == party_type.value
+        ):
+            return account, names, documents
+
+        envelope, iv = cipher.encrypt(
+            digits, field_locator(AAD_ACCOUNTING_ACCOUNT_PARTY_DOCUMENT, account.id)
+        )
+        await self._repo.update_party_links(
+            [
+                {
+                    "b_client": client.id,
+                    "b_id": account.id,
+                    "b_ct": envelope,
+                    "b_iv": iv,
+                    "b_type": party_type.value,
+                    "b_author": UUID(actor.id),
+                }
+            ]
+        )
+        await self._db.commit()
+        await self._db.refresh(account)
+
+        operation: PartyLinkOperation = "trocado" if had_link else "criado"
+        log.info(
+            "accounting_party_linked",
+            client_id=str(client.id),
+            account_id=str(account.id),
+            party_type=party_type.value,
+            operacao=operation,
+        )
+        await self._emit_party_link_edited(
+            client, account.id, party_type=party_type, operation=operation
+        )
+        return account, names, documents
+
+    async def remove_party_link(
+        self, client: Client, account_id: UUID, *, actor: CurrentUser
+    ) -> None:
+        """Desfaz o vínculo de UMA conta, importado ou manual (86e3tttaf). Idempotente.
+
+        Conta de outro cliente ou inexistente → 404; conta sem vínculo → nada a fazer
+        (a rota responde 204 do mesmo jeito, sem gravar nem emitir). Documento, IV e
+        tipo saem JUNTOS, no mesmo UPDATE: o CHECK `party_pair` exige os três ou nenhum.
+        """
+        _require_open(client)
+        await self._repo.lock_client_chart(client.id)
+        account = await self._repo.get_for_update(client.id, account_id)
+        if account is None:
+            raise AccountingAccountNotFoundError(
+                f"conta contábil {account_id} não pertence ao cliente {client.id}"
+            )
+        if account.party_document_encrypted is None:
+            return
+        previous = AccountingPartyType(account.party_type or AccountingPartyType.CLIENTE.value)
+        await self._repo.update_party_links(
+            [
+                {
+                    "b_client": client.id,
+                    "b_id": account.id,
+                    "b_ct": None,
+                    "b_iv": None,
+                    "b_type": None,
+                    "b_author": UUID(actor.id),
+                }
+            ]
+        )
+        await self._db.commit()
+        log.info(
+            "accounting_party_unlinked",
+            client_id=str(client.id),
+            account_id=str(account.id),
+            party_type=previous.value,
+        )
+        await self._emit_party_link_edited(
+            client, account.id, party_type=previous, operation="removido"
+        )
+
+    async def _emit_party_link_edited(
+        self,
+        client: Client,
+        account_id: UUID,
+        *,
+        party_type: AccountingPartyType,
+        operation: PartyLinkOperation,
+    ) -> None:
+        """`plano_contabil_vinculo_editado` DEPOIS do commit — nunca derruba a escrita."""
+        try:
+            await self._usage_events.emit_plano_contabil_vinculo_editado(
+                client_id=client.id,
+                account_id=account_id,
+                party_type=party_type.value,
+                operacao=operation,
+            )
+        except Exception:
+            log.warning("plano_contabil_vinculo_editado_emit_failed", client_id=str(client.id))
+
     async def _emit_parties_imported(self, client: Client, result: PartyImportResult) -> None:
         """`plano_contabil_vinculos_importados` DEPOIS do commit — nunca derruba a escrita."""
         try:
@@ -1186,6 +1365,31 @@ _INVALID_MESSAGES: dict[str, str] = {
     "type": "O tipo da conta é analítica ou sintética.",
     "classification": "A classificação tem até 40 caracteres.",
 }
+
+
+_PARTY_LINK_INVALID_MESSAGES: dict[PartyLinkInvalidReason, str] = {
+    "conta_sintetica": (
+        "Esta conta é sintética (só agrupa outras contas). Vincule o cliente ou "
+        "fornecedor a uma conta analítica do plano contábil."
+    ),
+    "conta_inativa": (
+        "Esta conta está inativa. Reative a conta no plano contábil ou escolha uma conta "
+        "ativa para o vínculo."
+    ),
+    "documento_invalido": (
+        "Confira o CNPJ ou CPF: ele precisa ter 14 ou 11 dígitos e o dígito verificador certo."
+    ),
+}
+
+
+def _party_link_invalid(reason: PartyLinkInvalidReason) -> AccountingAccountInvalidError:
+    """O 422 do vínculo manual, com o campo e o motivo (nunca o documento)."""
+    field = "document" if reason == "documento_invalido" else "accountId"
+    return AccountingAccountInvalidError(
+        f"vínculo manual recusado: {reason}",
+        user_message=_PARTY_LINK_INVALID_MESSAGES[reason],
+        details={"field": field, "reason": reason},
+    )
 
 
 def _in_use_message(reason: NotPostableReason, decisions: int, bindings: int) -> str:

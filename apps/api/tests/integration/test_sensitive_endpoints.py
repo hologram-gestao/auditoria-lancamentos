@@ -289,6 +289,12 @@ _BODIES: dict[str, dict[str, Any]] = {
     "PATCH /api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}": {
         "name": "Sequestrada pela bateria"
     },
+    # 86e3tttaf — vínculo manual. Body VÁLIDO (CNPJ com dígito certo, ADR-012): a
+    # negação vem pelo `client_id`, antes de a conta (aleatória) ser consultada.
+    "PUT /api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}/party": {
+        "partyType": "fornecedor",
+        "document": "11.222.333/0001-81",
+    },
     "PUT /api/v1/clients/{client_id}/input-mapping": {
         "fileFormat": "csv",
         "csvDelimiter": ";",

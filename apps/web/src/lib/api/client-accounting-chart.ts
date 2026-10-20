@@ -22,6 +22,8 @@
  *   - `POST /clients/{id}/accounting-chart/parties/import` → multipart `file`; `{ data:
  *                                                     contagens + naoVinculadas }` (86e3qhhrn)
  *   - `GET  /clients/{id}/accounting-chart/parties`  → `{ data: [...], pagination, summary }`
+ *   - `PUT    /clients/{id}/accounting-chart/accounts/{id}/party` → `{ data: vínculo }` (86e3tttaf)
+ *   - `DELETE /clients/{id}/accounting-chart/accounts/{id}/party` → 204 (86e3tttaf)
  *   - `GET  /clients/{id}/accounting-chart/omie-export/preview` → `{ data: prévia }` (86e3qhhrr)
  *   - `GET  /clients/{id}/accounting-chart/omie-export` → XLSX no modelo da Omie (86e3qhhrr)
  *                                                     — TRÊS chaves: o envelope chega inteiro
@@ -41,6 +43,8 @@ import type {
   AccountingChartImportResult,
   AccountingChartListResponse,
   AccountingPartiesImportResult,
+  AccountingPartyLink,
+  AccountingPartyLinkRequest,
   AccountingPartyLinksListResponse,
   ListAccountingChartQuery,
   ListAccountingPartiesQuery,
@@ -52,6 +56,7 @@ import type {
 import type { components } from '@/lib/contracts/schema';
 
 import {
+  apiDelete,
   apiGet,
   apiGetBlob,
   apiPatch,
@@ -227,6 +232,33 @@ export async function listAccountingParties(
   if (params.type) sp.set('type', params.type);
   return apiGet<AccountingPartyLinksListResponse>(
     `${clientBase(clientId)}/accounting-chart/parties?${sp.toString()}`,
+  );
+}
+
+/**
+ * Vincula UMA conta a um CNPJ/CPF à mão, ou troca o vínculo dela (86e3tttaf). Recusas:
+ * 422 `CONTA_CONTABIL_INVALIDA` (`reason` `conta_sintetica`/`conta_inativa`/
+ * `documento_invalido`), 409 `DOCUMENTO_JA_VINCULADO` (o código da outra conta), 404 da
+ * conta de outro cliente, 409 do cliente encerrado.
+ */
+export async function setAccountingPartyLink(
+  clientId: string,
+  accountId: string,
+  payload: AccountingPartyLinkRequest,
+): Promise<AccountingPartyLink> {
+  return apiPutJson<AccountingPartyLink>(
+    `${clientBase(clientId)}/accounting-chart/accounts/${encodeURIComponent(accountId)}/party`,
+    payload,
+  );
+}
+
+/** Desfaz o vínculo de UMA conta, importado ou manual (86e3tttaf). Idempotente: 204. */
+export async function removeAccountingPartyLink(
+  clientId: string,
+  accountId: string,
+): Promise<void> {
+  await apiDelete<void>(
+    `${clientBase(clientId)}/accounting-chart/accounts/${encodeURIComponent(accountId)}/party`,
   );
 }
 

@@ -8,6 +8,8 @@
     - PATCH /api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}  (86e3nb816)
     - POST /api/v1/clients/{client_id}/accounting-chart/parties/import  (multipart, 86e3qhhrn)
     - GET  /api/v1/clients/{client_id}/accounting-chart/parties          (86e3qhhrn)
+    - PUT    /api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}/party  (86e3tttaf)
+    - DELETE /api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}/party  (86e3tttaf)
     - GET  /api/v1/clients/{client_id}/accounting-chart/omie-export          (XLSX, 86e3qhhrr)
     - GET  /api/v1/clients/{client_id}/accounting-chart/omie-export/preview  (86e3qhhrr)
 
@@ -87,6 +89,8 @@ from app.modules.client_accounting_chart.schemas import (
     OmieExportPreviewPayload,
     PartiesImportEnvelope,
     PartiesImportPayload,
+    PartyLinkEnvelope,
+    PartyLinkRequest,
     PartyLinkResponse,
     PartyLinksListResponse,
     PartyLinksSummaryPayload,
@@ -462,6 +466,59 @@ async def list_accounting_parties(
         ),
         summary=PartyLinksSummaryPayload.from_summary(summary),
     )
+
+
+@router.put(
+    "/accounts/{account_id}/party",
+    summary=(
+        "Vincula UMA conta do plano contábil do cliente a um cliente ou fornecedor pelo "
+        "CNPJ ou CPF, à mão (sem a relação do Domínio), ou troca o vínculo que ela já "
+        "tem. Body `{partyType, document}`: `partyType` `cliente`/`fornecedor`, "
+        "`document` com 14 (CNPJ) ou 11 (CPF) dígitos, com ou sem máscara, conferido pelo "
+        "dígito verificador e cifrado com a chave do cliente. A resposta é a linha como a "
+        "lista a mostra, com o documento MASCARADO. Conta de outro cliente ou inexistente: "
+        "404. Recusas: 422 `CONTA_CONTABIL_INVALIDA` com `details.field` e "
+        "`details.reason` (`conta_sintetica`, `conta_inativa`, `documento_invalido`); 409 "
+        "`DOCUMENTO_JA_VINCULADO` quando OUTRA conta do cliente já tem o documento com o "
+        "MESMO tipo (`details.accountCode` e `details.accountId` dela, nunca o documento). Não altera "
+        "a empresa conferida nas importações da relação. Requer "
+        "`manage_client_accounting_chart`; cliente encerrado 409."
+    ),
+)
+async def set_accounting_party_link(
+    client: OpenClientDep,
+    actor: ManageClientAccountingChartDep,
+    service: ServiceDep,
+    account_id: UUID,
+    body: PartyLinkRequest,
+) -> PartyLinkEnvelope:
+    account, names, documents = await service.set_party_link(
+        client, account_id, actor=actor, party_type=body.party_type, document=body.document
+    )
+    return PartyLinkEnvelope(
+        data=PartyLinkResponse.from_row(account, names=names, documents=documents)
+    )
+
+
+@router.delete(
+    "/accounts/{account_id}/party",
+    status_code=204,
+    summary=(
+        "Desfaz o vínculo de UMA conta do plano contábil do cliente com um cliente ou "
+        "fornecedor, importado ou manual: documento e tipo saem juntos, e a planilha da "
+        "Omie deixa de levar o documento dessa conta. Idempotente: conta sem vínculo "
+        "responde 204. Conta de outro cliente ou inexistente: 404. Requer "
+        "`manage_client_accounting_chart`; cliente encerrado 409."
+    ),
+)
+async def remove_accounting_party_link(
+    client: OpenClientDep,
+    actor: ManageClientAccountingChartDep,
+    service: ServiceDep,
+    account_id: UUID,
+) -> Response:
+    await service.remove_party_link(client, account_id, actor=actor)
+    return Response(status_code=204)
 
 
 @router.get(

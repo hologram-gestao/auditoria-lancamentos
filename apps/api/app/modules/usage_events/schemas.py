@@ -251,6 +251,16 @@ class UsageEventName(StrEnum):
     # Leitura (quantos clientes têm vínculo e quanto cada importação muda):
     #     count(DISTINCT props->>'client_id') WHERE event = 'plano_contabil_vinculos_importados'
     PLANO_CONTABIL_VINCULOS_IMPORTADOS = "plano_contabil_vinculos_importados"
+    # 86e3tttaf — vínculo conta contábil ↔ cliente/fornecedor criado, trocado ou
+    # removido À MÃO (sem a relação do Domínio). De BACKEND, sem `session_id`, fora da
+    # dedup: cada gravação bem-sucedida é uma linha, depois do commit (recusa, PUT sem
+    # mudança e DELETE de conta sem vínculo não emitem). Só IDs, o tipo do vínculo e a
+    # operação, em vocabulário fechado: NUNCA documento, código nem nome.
+    #
+    # Leitura (quanto o escritório mantém os vínculos sem reimportar a relação):
+    #     count(*) WHERE event = 'plano_contabil_vinculo_editado'
+    #       GROUP BY props->>'operacao'
+    PLANO_CONTABIL_VINCULO_EDITADO = "plano_contabil_vinculo_editado"
     # 86e3qhhrr — a planilha de importação do plano de contas da Omie foi gerada e
     # baixada. De BACKEND, sem `session_id`, fora da dedup: cada download é uma linha
     # (a recusa 409 não emite). Só o id do cliente e contagens: NUNCA código, nome nem
@@ -709,6 +719,21 @@ class PlanoContabilContaEditadaProps(_StrictProps):
 #: De que relatório veio o vínculo (86e3qhhrn). Espelho de
 #: `db.models.client_accounting_account.AccountingPartyType` (o teste da métrica compara).
 PartyReportKind = Literal["cliente", "fornecedor"]
+
+
+class PlanoContabilVinculoEditadoProps(_StrictProps):
+    """`plano_contabil_vinculo_editado` (86e3tttaf) — só IDs, o tipo e a operação.
+
+    `operacao` é `criado` (a conta não tinha vínculo), `trocado` (tinha, e o documento
+    ou o tipo mudou) ou `removido`; `party_type` é o tipo do vínculo gravado (no
+    `removido`, o que a conta tinha). Nenhum `str` livre: documento e código de conta
+    não têm onde caber.
+    """
+
+    client_id: UUID
+    account_id: UUID
+    party_type: PartyReportKind
+    operacao: Literal["criado", "trocado", "removido"]
 
 
 class PlanilhaOmieGeradaProps(_StrictProps):

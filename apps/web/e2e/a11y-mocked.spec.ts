@@ -2733,6 +2733,45 @@ async function fulfillApi(route: Route): Promise<void> {
       body: JSON.stringify({ data: accountingAccount({ id: 'acc-nova', ...body }) }),
     });
   }
+  // 86e3tttaf — vínculo manual. O CNPJ da 5101 (já vinculado) é o 409 do documento em
+  // outra conta, para a gaveta mostrar o erro NO CAMPO; o resto vincula. DELETE é 204.
+  if (
+    path.startsWith(`/api/v1/clients/${CLIENT_ID}/accounting-chart/accounts/`) &&
+    path.endsWith('/party')
+  ) {
+    if (route.request().method() === 'DELETE') return route.fulfill({ status: 204 });
+    const body = route.request().postDataJSON() as { partyType: string; document: string };
+    const digits = body.document.replace(/\D/g, '');
+    if (digits === '45723174000110') {
+      return route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 'DOCUMENTO_JA_VINCULADO',
+            message: 'documento já vinculado',
+            userMessage:
+              'Este CNPJ/CPF já está vinculado a outra conta do plano contábil deste cliente.',
+            details: { accountCode: '5101', accountId: 'acc-5101' },
+          },
+        }),
+      });
+    }
+    const accountId = path.split('/').at(-2) ?? '';
+    const account = ACCOUNTING_ACCOUNTS.find((a) => a.id === accountId);
+    return json({
+      accountId,
+      code: String(account?.code ?? '649'),
+      name: String(account?.name ?? 'Conta'),
+      nameResolved: true,
+      active: true,
+      partyType: body.partyType,
+      documentKind: digits.length === 14 ? 'cnpj' : 'cpf',
+      documentMasked: digits.length === 14 ? '**.***.***/0001-36' : '***.***.*47-25',
+      documentResolved: true,
+      updatedAt: '2026-10-20T12:00:00Z',
+    });
+  }
   if (path.startsWith(`/api/v1/clients/${CLIENT_ID}/accounting-chart/accounts/`)) {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     if (body.active === false) {
@@ -9699,10 +9738,15 @@ for (const vp of VIEWPORTS) {
         'aria-selected',
         'true',
       );
-      const regiao = page.getByRole('region', {
-        name: 'Contas com vínculo a cliente ou fornecedor (rolável)',
-      });
-      await expect(regiao.getByRole('row')).toHaveCount(PARTY_LINKS.length + 1);
+      // 86e3tttaf — duas sub-abas, cada uma com a contagem do resumo do servidor.
+      const subAbas = page.getByRole('tablist', { name: 'Tipo do vínculo' });
+      const clientes = PARTY_LINKS.filter((v) => v.partyType === 'cliente').length;
+      const fornecedores = PARTY_LINKS.length - clientes;
+      await expect(
+        subAbas.getByRole('tab', { name: `Clientes (${clientes})`, exact: true }),
+      ).toHaveAttribute('aria-selected', 'true');
+      const regiao = page.getByRole('region', { name: 'Contas vinculadas a clientes (rolável)' });
+      await expect(regiao.getByRole('row')).toHaveCount(clientes + 1);
       // O documento chega MASCARADO do servidor; nenhum CNPJ/CPF inteiro na página.
       await expect(regiao.getByText('**.***.***/0001-81')).toBeVisible();
       await expect(regiao.getByText('***.***.*47-25')).toBeVisible();
@@ -9711,13 +9755,76 @@ for (const vp of VIEWPORTS) {
       await expect(resumo).toContainText('Contas vinculadas');
       const importar = page.getByRole('button', { name: 'Importar relação' });
       await exigirDentroDaViewport(page, importar, `${vp.label}: "Importar relação"`);
+      // "Vincular conta" à direita da faixa no desktop; em 390px desce, sem transbordo.
+      const vincular = page.getByRole('button', { name: 'Vincular conta' });
+      await exigirDentroDaViewport(page, vincular, `${vp.label}: "Vincular conta"`);
+      const caixaAbas = await subAbas.boundingBox();
+      const caixaVincular = await vincular.boundingBox();
+      expect(caixaAbas && caixaVincular).toBeTruthy();
+      if (vp.label === 'desktop') {
+        expect(caixaVincular!.x, 'o botão fica à direita das sub-abas').toBeGreaterThan(
+          caixaAbas!.x + caixaAbas!.width,
+        );
+      } else {
+        expect(
+          caixaVincular!.y,
+          'em 390px o botão desce para baixo das sub-abas',
+        ).toBeGreaterThanOrEqual(caixaAbas!.y + caixaAbas!.height);
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        `${vp.label}: sem rolagem horizontal na página`,
+      ).toBe(true);
       await shot(page, `plano-contabil-vinculos-${slugPC16}`);
       await analyze(page, `plano contábil — aba clientes e fornecedores (${vp.label})`);
 
-      // O filtro recorta pela URL (o mock filtra como o servidor).
-      await page.getByRole('button', { name: 'Fornecedores' }).click();
-      await expect(regiao.getByRole('row')).toHaveCount(2);
-      await page.getByRole('button', { name: 'Todas' }).click();
+      // A sub-aba recorta pela URL (o mock filtra como o servidor).
+      await subAbas
+        .getByRole('tab', { name: `Fornecedores (${fornecedores})`, exact: true })
+        .click();
+      await expect(page).toHaveURL(/vinculo=fornecedor/);
+      await expect(
+        page
+          .getByRole('region', { name: 'Contas vinculadas a fornecedores (rolável)' })
+          .getByRole('row'),
+      ).toHaveCount(fornecedores + 1);
+
+      // Vincular à mão: o tipo vem da sub-aba; o CNPJ que outra conta já tem cai no campo.
+      await vincular.click();
+      const gaveta = page.getByRole('dialog', { name: 'Vincular conta' });
+      await aguardarAnimacao(gaveta);
+      await expect(gaveta.getByRole('radio', { name: 'Fornecedor' })).toBeChecked();
+      await gaveta.getByRole('button', { name: 'Conta do plano contábil' }).click();
+      const lista = page.getByRole('listbox', { name: 'Conta do plano contábil' });
+      await lista.getByRole('option', { name: '649 — Banco conta movimento' }).click();
+      await expect(lista).toHaveCount(0);
+      const documento = gaveta.getByLabel('CNPJ ou CPF');
+      await documento.fill('45.723.174/0001-10');
+      const salvarVinculo = gaveta.getByRole('button', { name: 'Vincular', exact: true });
+      await exigirDentroDaViewport(page, salvarVinculo, `${vp.label}: "Vincular" da gaveta`);
+      await salvarVinculo.click();
+      await expect(gaveta.getByText(/já está vinculado à conta 5101/)).toBeVisible();
+      await expect(documento).toHaveAttribute('aria-invalid', 'true');
+      await shot(page, `plano-contabil-vincular-conta-${slugPC16}`);
+      await analyze(page, `plano contábil — gaveta vincular conta com recusa (${vp.label})`);
+      await documento.fill('529.982.247-25');
+      await salvarVinculo.click();
+      await expect(page.getByRole('dialog', { name: 'Vincular conta' })).toHaveCount(0);
+      await expect(page.locator(TOAST_TITLE)).toContainText('Conta 649 vinculada a um fornecedor.');
+
+      // Remover vínculo: o diálogo diz a consequência antes de confirmar.
+      await page.getByRole('button', { name: 'Remover vínculo da conta 5101' }).click();
+      const remover = page.getByRole('alertdialog', { name: 'Remover vínculo' });
+      await aguardarAnimacao(remover);
+      await expect(remover).toContainText('a planilha da Omie deixa de levar o CNPJ/CPF dela');
+      const confirmar = remover.getByRole('button', { name: 'Remover vínculo' });
+      await exigirDentroDaViewport(page, confirmar, `${vp.label}: "Remover vínculo"`);
+      await confirmar.hover();
+      await shot(page, `plano-contabil-remover-vinculo-${slugPC16}`);
+      await analyze(page, `plano contábil — remover vínculo (${vp.label})`);
+      await remover.getByRole('button', { name: 'Cancelar' }).click();
+      await expect(remover).toHaveCount(0);
+      await subAbas.getByRole('tab', { name: `Clientes (${clientes})`, exact: true }).click();
 
       // Importar: sucesso com as linhas que ficaram SEM vínculo (conta e motivo).
       const campo = page.getByLabel('Relação exportada do Domínio (.xls ou .xlsx)');

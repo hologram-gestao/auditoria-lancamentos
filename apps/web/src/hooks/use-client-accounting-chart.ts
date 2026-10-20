@@ -16,6 +16,8 @@
  *     prévia lista as contas de origem pendentes);
  *   - importar uma relação de clientes/fornecedores (86e3qhhrn) invalida a árvore
  *     do plano (os vínculos são colunas da conta); listar vínculos é leitura;
+ *   - vincular ou desfazer o vínculo de UMA conta à mão (86e3tttaf) invalida o mesmo
+ *     que importar a relação: a árvore do plano (lista dos vínculos e o resumo);
  *   - a prévia e o download da planilha da Omie (86e3qhhrr) são leitura: a prévia
  *     mora na árvore do plano (importar ou editar a refaz) e nunca fica em cache
  *     entre aberturas do diálogo (`staleTime: 0`).
@@ -34,6 +36,8 @@ import {
   listSourceAccounts,
   previewAccountingChartImport,
   previewOmieChartExport,
+  removeAccountingPartyLink,
+  setAccountingPartyLink,
   setSourceAccountBinding,
   updateAccountingAccount,
   type ListAccountingChartParams,
@@ -47,6 +51,8 @@ import type {
   AccountingChartImportResult,
   AccountingChartListResponse,
   AccountingPartiesImportResult,
+  AccountingPartyLink,
+  AccountingPartyLinkRequest,
   AccountingPartyLinksListResponse,
   OmieExportPreview,
   SourceAccountBindingPayload,
@@ -170,6 +176,32 @@ export function useImportAccountingParties(clientId: string) {
   const qc = useQueryClient();
   return useMutation<AccountingPartiesImportResult, Error, File>({
     mutationFn: (file) => importAccountingParties(clientId, file),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: accountingChartKeys.all(clientId) });
+    },
+  });
+}
+
+/** Vincula (ou troca o vínculo de) UMA conta à mão (86e3tttaf). */
+export function useSetAccountingPartyLink(clientId: string) {
+  const qc = useQueryClient();
+  return useMutation<
+    AccountingPartyLink,
+    Error,
+    { accountId: string; payload: AccountingPartyLinkRequest }
+  >({
+    mutationFn: ({ accountId, payload }) => setAccountingPartyLink(clientId, accountId, payload),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: accountingChartKeys.all(clientId) });
+    },
+  });
+}
+
+/** Desfaz o vínculo de UMA conta (86e3tttaf). */
+export function useRemoveAccountingPartyLink(clientId: string) {
+  const qc = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (accountId) => removeAccountingPartyLink(clientId, accountId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: accountingChartKeys.all(clientId) });
     },

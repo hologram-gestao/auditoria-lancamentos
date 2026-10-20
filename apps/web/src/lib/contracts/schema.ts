@@ -713,6 +713,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}/party": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Vincula UMA conta do plano contábil do cliente a um cliente ou fornecedor pelo CNPJ ou CPF, à mão (sem a relação do Domínio), ou troca o vínculo que ela já tem. Body `{partyType, document}`: `partyType` `cliente`/`fornecedor`, `document` com 14 (CNPJ) ou 11 (CPF) dígitos, com ou sem máscara, conferido pelo dígito verificador e cifrado com a chave do cliente. A resposta é a linha como a lista a mostra, com o documento MASCARADO. Conta de outro cliente ou inexistente: 404. Recusas: 422 `CONTA_CONTABIL_INVALIDA` com `details.field` e `details.reason` (`conta_sintetica`, `conta_inativa`, `documento_invalido`); 409 `DOCUMENTO_JA_VINCULADO` quando OUTRA conta do cliente já tem o documento com o MESMO tipo (`details.accountCode` e `details.accountId` dela, nunca o documento). Não altera a empresa conferida nas importações da relação. Requer `manage_client_accounting_chart`; cliente encerrado 409. */
+        put: operations["set_accounting_party_link_api_v1_clients__client_id__accounting_chart_accounts__account_id__party_put"];
+        post?: never;
+        /** Desfaz o vínculo de UMA conta do plano contábil do cliente com um cliente ou fornecedor, importado ou manual: documento e tipo saem juntos, e a planilha da Omie deixa de levar o documento dessa conta. Idempotente: conta sem vínculo responde 204. Conta de outro cliente ou inexistente: 404. Requer `manage_client_accounting_chart`; cliente encerrado 409. */
+        delete: operations["remove_accounting_party_link_api_v1_clients__client_id__accounting_chart_accounts__account_id__party_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/accounting-chart/omie-export/preview": {
         parameters: {
             query?: never;
@@ -6990,6 +7008,26 @@ export interface components {
             listLimit: number;
         };
         /**
+         * PartyLinkEnvelope
+         * @description Body da resposta do vínculo manual: a linha como a lista a mostra.
+         */
+        PartyLinkEnvelope: {
+            data: components["schemas"]["PartyLinkResponse"];
+        };
+        /**
+         * PartyLinkRequest
+         * @description Body de `PUT /clients/{client_id}/accounting-chart/accounts/{account_id}/party`.
+         */
+        PartyLinkRequest: {
+            /** @description `cliente` ou `fornecedor`. */
+            partyType: components["schemas"]["AccountingPartyType"];
+            /**
+             * Document
+             * @description CNPJ (14 dígitos) ou CPF (11), com ou sem máscara. Cifrado com a chave do cliente; nunca sai inteiro da API.
+             */
+            document: string;
+        };
+        /**
          * PartyLinkResponse
          * @description Uma conta do plano COM vínculo: a conta, o tipo e o documento MASCARADO.
          */
@@ -10156,6 +10194,76 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PartyLinksListResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_accounting_party_link_api_v1_clients__client_id__accounting_chart_accounts__account_id__party_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartyLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartyLinkEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_accounting_party_link_api_v1_clients__client_id__accounting_chart_accounts__account_id__party_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19, as sprints do agents-hub (tabela da §8) e os épicos de fora do hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **134/134** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **136/136** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -197,7 +197,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**134** hoje — o arquivo é a fonte, confira com
+      (**136** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -205,7 +205,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **134/134**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **136/136**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
@@ -230,7 +230,9 @@
       próprio SELECT), e as 2 do vínculo conta contábil ↔ cliente/fornecedor (86e3qhhrn:
       `POST …/accounting-chart/parties/import` e `GET …/accounting-chart/parties`,
       coleção, as duas sob `manage_client_accounting_chart`, o documento só sai
-      MASCARADO), e as 2 da planilha do plano de contas da Omie (86e3qhhrr:
+      MASCARADO), e as 2 do vínculo À MÃO (86e3tttaf: `PUT` e `DELETE` em
+      `…/accounting-chart/accounts/{account_id}/party`, `DETAIL_PK`, mesma permissão e
+      `OpenClientDep`, a conta sai do SELECT com `client_id`), e as 2 da planilha do plano de contas da Omie (86e3qhhrr:
       `GET …/accounting-chart/omie-export` e `…/omie-export/preview`, coleção, sob
       `generate_accounting_file` e `OpenClientDep`, como o arquivo contábil da S13: nome
       e documento só decifrados em memória para montar o arquivo, 1 linha `export` no
@@ -638,6 +640,18 @@
      nunca sai da API: a lista (`GET …/parties`) devolve só a máscara (raiz do CNPJ
      escondida, quatro últimos do CPF). Texto de documento nunca passa por `int`: um CNPJ
      que começa com zeros perderia os zeros (caso real da relação da Hologram).
+     **O vínculo também nasce e morre À MÃO, por conta** (86e3tttaf, pedido do Landim de
+     20/10): `PUT …/accounts/{account_id}/party` (`{partyType, document}`) cria ou troca,
+     `DELETE` desfaz (204 idempotente; documento, IV e tipo saem juntos pelo CHECK
+     `party_pair`), os dois pelo MESMO `update_party_links` e sob a MESMA trava por cliente
+     da importação. Conta analítica e ativa (422 `CONTA_CONTABIL_INVALIDA` com
+     `conta_sintetica`/`conta_inativa`/`documento_invalido`); o documento digitado é
+     conferido por `parse_typed_document` (só a máscara usual, dígito verificador); o
+     MESMO documento com o MESMO tipo em outra conta do cliente é 409
+     `DOCUMENTO_JA_VINCULADO` com o CÓDIGO dela (a empresa que é cliente E fornecedor tem
+     uma conta em cada relação do Domínio, e isso a importação e o manual aceitam; sem
+     blind index, os vínculos do cliente são decifrados em memória para a comparação). O vínculo manual não toca a impressão digital da empresa, e o relatório
+     não é fonte de verdade depois de importado: o DELETE vale para o vínculo importado.
    - **O plano contábil vai para a Omie pela PLANILHA do Painel do Contador, nunca pela
      API** (86e3qhhrr; a API pública da Omie não tem plano de contas). O gerador
      (`client_accounting_chart/omie_sheet.py`) COPIA o modelo vazio versionado
@@ -1862,6 +1876,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.105, 20/10/2026. **Clientes e fornecedores do plano contábil viraram duas listas, e o vínculo conta ↔ CNPJ/CPF passou a nascer e morrer à mão (86e3tttaf, subtask 9 do épico 86e3qhhr0; pedido do Lucas Landim na reunião de 20/10).** Duas rotas `DETAIL_PK` (lista canônica 134 → **136**, bateria dos três atacantes): `PUT …/accounting-chart/accounts/{account_id}/party` cria ou troca o vínculo (resposta é a linha da lista, documento mascarado) e `DELETE` o desfaz, idempotente. Regra nova na §4.8. Código novo `DOCUMENTO_JA_VINCULADO` (409 para o mesmo documento com o MESMO tipo em outra conta, só o código dela; cliente numa conta e fornecedor noutra é aceito, como na importação) e evento `plano_contabil_vinculo_editado` (IDs, `party_type` e `operacao` ∈ `criado`/`trocado`/`removido`, sem dedup; PUT sem mudança e DELETE de conta sem vínculo não emitem). O par de AAD do documento é o da 86e3qhhrn: **nenhum par novo** (**18**), nenhuma migration, matriz (**29**) igual. Na tela, a aba "Clientes e fornecedores" ganhou as sub-abas "Clientes (N)" e "Fornecedores (N)" (o `vinculo` da URL, `cliente` por padrão; o filtro "Vínculo" e a coluna de tipo saíram, redundantes), "Vincular conta" à direita da faixa (gaveta RHF + zod com o MESMO seletor de conta do de-para, tipo pré-marcado pela sub-aba, documento conferido por `lib/cpf.ts` e `lib/cnpj.ts`, recusa do servidor no campo) e "Remover vínculo" por linha num `AlertDialog`, as duas ações com o gate do "Importar relação"._
 
 _Versão 1.104, 20/10/2026. **As linhas de encargo do RESUMO da fatura de cartão deixaram de virar compra (86e3tpu7r, subtask 8 do épico 86e3qhhr0).** A fatura da Cora (13/10) saía com uma linha a mais de IOF e o vencimento em 2024: era o "IOF de compras internacionais" do RESUMO da página 2, um totalizador (o rodapé da v1.103 foi corrigido para dizer isso). A regra 11 do `SYSTEM_PROMPT` mandava emitir todo IOF como linha própria; agora o encargo só vira linha na LISTA de transações (com a data que o documento dá a ele, na linha ou no agrupamento por dia), e as linhas do resumo são totalizadores (regra 4). A descrição de `transactions` na tool traz a MESMA lista de linhas do resumo (o teste confere nome a nome), e a nota de bloco não mudou (o teste trava). Medido contra a fatura real na mesma sessão: linha extra em 8 de 10 rodadas com o prompt antigo e em 0 de 30 com o novo (20 numa primeira redação e 10 no texto final), com a conferência fechando e o vencimento 2026-10-13 em todas e a parcela 3/6 reconhecida nas 40; o extrato da conta Cora saiu igual antes e depois (3 + 3). A revisão tirou da primeira redação a frase "o IOF mostrado como detalhe de uma compra internacional já está no valor da compra": vale para a Cora, mas no Nubank o IOF internacional é linha própria da lista. Risco aceito, do pedido: encargo que um emissor só imprime no resumo (rotativo sem linha na lista) deixa de ser extraído, e a conferência de saldos acusa. A proteção determinística do ano do vencimento não entrou: o prompt bastou. Regra nova na §4.8. Sem rota, permissão nem campo cifrado: endpoints sensíveis (**134**), matriz (**29**) e pares de AAD (**18**) iguais._
 

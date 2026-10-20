@@ -386,6 +386,18 @@ class AccountingChartRepository:
         rows = list((await self._session.execute(page_stmt)).scalars().all())
         return rows, total
 
+    async def list_linked_all(self, client_id: UUID) -> list[ClientAccountingAccount]:
+        """Todas as contas COM vínculo do cliente (o vínculo manual confere o documento).
+
+        Sem blind index do documento, "esta pessoa já está em outra conta?" só se
+        responde decifrando os vínculos do próprio cliente em memória: são centenas,
+        não milhões (um por cliente/fornecedor do escritório).
+        """
+        stmt = self._base_query(client_id).where(
+            ClientAccountingAccount.party_document_encrypted.is_not(None)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
     async def count_links_by_type(self, client_id: UUID) -> dict[str, int]:
         """Quantas contas vinculadas por tipo (`cliente`/`fornecedor`), do cliente."""
         stmt = (
