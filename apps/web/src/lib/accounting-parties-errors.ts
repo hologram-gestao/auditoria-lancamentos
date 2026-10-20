@@ -116,3 +116,42 @@ export function readAccountingPartiesRefusal(error: unknown): AccountingPartiesR
     }
   }
 }
+
+/** Os campos da gaveta "Vincular conta" (86e3tttaf) que uma recusa do servidor aponta. */
+export type PartyLinkFormField = 'accountId' | 'document';
+
+export interface PartyLinkFormRefusal {
+  field: PartyLinkFormField;
+  message: string;
+}
+
+/**
+ * As recusas do vínculo manual (86e3tttaf), no CAMPO certo da gaveta:
+ *   - 409 `DOCUMENTO_JA_VINCULADO` → `document`, com o CÓDIGO da conta que já tem o
+ *     documento com o MESMO tipo (`details.accountCode`), que é o que a pessoa procura
+ *     na lista (o mesmo documento como cliente numa conta e fornecedor noutra é aceito);
+ *   - 422 `CONTA_CONTABIL_INVALIDA` → o `details.field` do servidor (`document` no
+ *     dígito errado; `accountId` na conta sintética ou inativa, corrida com a busca).
+ *
+ * A mensagem é a `userMessage` do servidor. Qualquer outro erro → `null`: toast.
+ */
+export function readPartyLinkRefusal(error: unknown): PartyLinkFormRefusal | null {
+  if (!(error instanceof ApiError)) return null;
+  if (error.code === 'DOCUMENTO_JA_VINCULADO') {
+    const code = error.details.accountCode;
+    return {
+      field: 'document',
+      message:
+        typeof code === 'string' && code.length > 0
+          ? `Este CNPJ/CPF já está vinculado à conta ${code}, com o mesmo tipo. Remova o vínculo dela antes, ou escolha outro documento.`
+          : error.userMessage,
+    };
+  }
+  if (error.code === 'CONTA_CONTABIL_INVALIDA') {
+    const field = error.details.field;
+    if (field === 'document' || field === 'accountId') {
+      return { field, message: error.userMessage };
+    }
+  }
+  return null;
+}

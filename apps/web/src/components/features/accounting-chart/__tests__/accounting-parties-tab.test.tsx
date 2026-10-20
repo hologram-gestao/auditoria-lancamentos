@@ -1,18 +1,23 @@
 /**
- * Testes da aba "Clientes e fornecedores" do plano contábil (86e3qhhrn).
+ * Testes da aba "Clientes e fornecedores" do plano contábil (86e3qhhrn; sub-abas, vínculo
+ * manual e remover vínculo desde 86e3tttaf).
  *
  * **Executor:** job `Web (lint · type · test)` do `.github/workflows/ci.yml`
  * (`pnpm test:web` → vitest). No worktree do agent: `--cache=false`.
  *
  * Cobre o que dá para provar em jsdom:
- *   - a lista mostra código, nome, o vínculo como badge e o documento MASCARADO como o
- *     servidor mandou (a tela nunca tem o inteiro); documento que não decifrou sai como
- *     texto neutro; o resumo vem do servidor;
+ *   - duas sub-abas, "Clientes (N)" e "Fornecedores (N)", com a contagem do resumo do
+ *     servidor e o tipo na URL (`vinculo`, `cliente` por padrão); a lista mostra código,
+ *     nome e o documento MASCARADO como o servidor mandou (a tela nunca tem o inteiro);
+ *     documento que não decifrou sai como texto neutro;
+ *   - "Vincular conta": a gaveta pré-marca o tipo da sub-aba, o zod recusa o documento com
+ *     dígito errado antes de enviar, e o 409 do documento já vinculado cai no CAMPO com o
+ *     código da outra conta; "Remover vínculo" confirma num `AlertDialog`;
  *   - importar: sucesso mostra as contagens DA RESPOSTA e as linhas que ficaram sem
  *     vínculo (linha, conta, motivo em português); 422 `LINHAS_INVALIDAS` vira a tabela
  *     com o código da conta, nunca toast; `RELATORIO_DE_OUTRA_EMPRESA` é a mensagem do
  *     servidor; só código desconhecido cai no toast;
- *   - cliente encerrado e cliente sem plano não oferecem importar, com o motivo;
+ *   - cliente encerrado e cliente sem plano não oferecem importar, vincular nem remover;
  *   - axe sem `critical`/`serious`.
  */
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -56,9 +61,31 @@ const listState = {
   refetch: vi.fn(),
 };
 const importState = { mutateAsync: vi.fn(), isPending: false };
+const linkState = { mutateAsync: vi.fn(), isPending: false };
+const unlinkState = { mutateAsync: vi.fn(), isPending: false };
 vi.mock('@/hooks/use-client-accounting-chart', () => ({
   useAccountingPartiesList: () => listState,
   useImportAccountingParties: () => importState,
+  useSetAccountingPartyLink: () => linkState,
+  useRemoveAccountingPartyLink: () => unlinkState,
+}));
+// O seletor de conta real busca no servidor (Combobox com Popover): aqui ele vira um
+// `select` nativo com o MESMO nome acessível, para o teste escolher a conta.
+vi.mock('@/components/features/accounting-chart/accounting-account-combobox', () => ({
+  AccountingAccountCombobox: (props: {
+    label: string;
+    value: string | null;
+    onValueChange: (id: string, account: null) => void;
+  }) => (
+    <select
+      aria-label={props.label}
+      value={props.value ?? ''}
+      onChange={(event) => props.onValueChange(event.target.value, null)}
+    >
+      <option value="">Escolher</option>
+      <option value="acc-686">686 — Conta nova</option>
+    </select>
+  ),
 }));
 
 import { AccountingPartiesTab } from '@/components/features/accounting-chart/accounting-parties-tab';
@@ -142,6 +169,8 @@ beforeEach(() => {
   toastError.mockReset();
   importState.mutateAsync.mockReset();
   importState.isPending = false;
+  linkState.mutateAsync.mockReset();
+  unlinkState.mutateAsync.mockReset();
   listState.isLoading = false;
   listState.isError = false;
   listState.error = null;
@@ -169,47 +198,78 @@ beforeEach(() => {
 });
 
 describe('lista de vínculos', () => {
-  it('mostra código, nome, badge do vínculo, documento mascarado e o resumo do servidor', async () => {
+  it('sub-abas com a contagem do servidor, documento mascarado e o resumo', async () => {
+    withLinks([
+      link(),
+      link({
+        accountId: 'acc-918',
+        code: '918',
+        name: 'Pessoa Física Beta',
+        documentKind: 'cpf',
+        documentMasked: '***.***.*47-25',
+      }),
+      link({
+        accountId: 'acc-700',
+        code: '700',
+        name: 'Fornecedor Gama',
+        documentKind: null,
+        documentMasked: null,
+        documentResolved: false,
+        nameResolved: false,
+      }),
+    ]);
+    listState.data!.summary = { contasVinculadas: 4, clientes: 3, fornecedores: 1 };
     const { container } = render(<AccountingPartiesTab clientId="c1" isClosed={false} hasPlan />);
 
-    const region = screen.getByRole('region', {
-      name: 'Contas com vínculo a cliente ou fornecedor (rolável)',
-    });
+    const tabs = screen.getByRole('tablist', { name: 'Tipo do vínculo' });
+    expect(within(tabs).getByRole('tab', { name: 'Clientes (3)' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(within(tabs).getByRole('tab', { name: 'Fornecedores (1)' })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    );
+    // O filtro "Vínculo" saiu: as sub-abas são o recorte.
+    expect(screen.queryByRole('group', { name: 'Vínculo' })).not.toBeInTheDocument();
+
+    const region = screen.getByRole('region', { name: 'Contas vinculadas a clientes (rolável)' });
     expect(within(region).getAllByRole('row')).toHaveLength(4);
     expect(within(region).getByText('**.***.***/0001-81')).toBeInTheDocument();
     expect(within(region).getByText('***.***.*47-25')).toBeInTheDocument();
     // Nenhum documento inteiro em lugar nenhum: a tela só recebe o mascarado.
     expect(container.textContent).not.toMatch(/\d{14}|\d{11}/);
-    expect(within(region).getAllByText('Cliente')).toHaveLength(2);
-    expect(within(region).getByText('Fornecedor')).toBeInTheDocument();
     // Documento e nome que não decifraram: texto NEUTRO, sem cara de dado.
     expect(within(region).getByText('Documento indisponível')).toBeInTheDocument();
     expect(within(region).getByText('Nome indisponível (indecifrável)')).toBeInTheDocument();
     const summary = screen.getByTestId('accounting-parties-summary');
     expect(within(summary).getByText('Contas vinculadas').nextElementSibling).toHaveTextContent(
-      '3',
+      '4',
     );
-    expect(within(summary).getByText('Clientes').nextElementSibling).toHaveTextContent('2');
-    expect(within(summary).getByText('Fornecedores').nextElementSibling).toHaveTextContent('1');
     await assertNoA11yViolations(container);
   });
 
-  it('o filtro de vínculo vai para a URL e o vazio filtrado tem texto próprio', async () => {
+  it('a sub-aba vai para a URL (`vinculo`), volta à página 1 e o vazio é do tipo', async () => {
     render(<AccountingPartiesTab clientId="c1" isClosed={false} hasPlan />);
-    await userEvent.click(screen.getByRole('button', { name: 'Fornecedores' }));
+    await userEvent.click(screen.getByRole('tab', { name: /Fornecedores/ }));
     expect(setManySpy).toHaveBeenCalledWith({ vinculo: 'fornecedor', vpage: null });
 
     currentSearch = 'vinculo=fornecedor';
     withLinks([]);
     render(<AccountingPartiesTab clientId="c1" isClosed={false} hasPlan />);
-    expect(screen.getByText('Nenhuma conta com este tipo de vínculo.')).toBeInTheDocument();
+    expect(
+      screen.getByRole('region', { name: 'Contas vinculadas a fornecedores (rolável)' }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('accounting-parties-empty')).toHaveTextContent(
+      /Nenhuma conta vinculada a fornecedor ainda/,
+    );
   });
 
-  it('sem vínculo nenhum, o vazio orienta a importar as relações', () => {
+  it('sem vínculo nenhum, o vazio orienta a importar a relação ou vincular à mão', () => {
     withLinks([]);
     render(<AccountingPartiesTab clientId="c1" isClosed={false} hasPlan />);
     expect(screen.getByTestId('accounting-parties-empty')).toHaveTextContent(
-      /Importe as relações de clientes e de fornecedores/,
+      /Importe a Relação de clientes do Domínio ou vincule uma conta à mão/,
     );
   });
 
@@ -220,6 +280,137 @@ describe('lista de vínculos', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Mensagem do servidor para INTERNAL_ERROR');
     await userEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
     expect(listState.refetch).toHaveBeenCalled();
+  });
+});
+
+describe('vincular conta à mão (86e3tttaf)', () => {
+  async function openSheet() {
+    await userEvent.click(screen.getByRole('button', { name: 'Vincular conta' }));
+    return screen.findByRole('dialog', { name: 'Vincular conta' });
+  }
+
+  it('o tipo vem pré-marcado com a sub-aba ativa', async () => {
+    currentSearch = 'vinculo=fornecedor';
+    render(<AccountingPartiesTab clientId="c1" isClosed={false} hasPlan />);
+    const sheet = await openSheet();
+    expect(within(sheet).getByRole('radio', { name: 'Fornecedor' })).toBeChecked();
+    expect(within(sheet).getByRole('radio', { name: 'Cliente' })).not.toBeChecked();
+  });
+
+  it('documento com dígito errado é recusado no campo e nada é enviado', async () => {
+    render(<AccountingPartiesTab clientId="c1" isClosed={false} hasPlan />);
+    const sheet = await openSheet();
+    await userEvent.selectOptions(
+      within(sheet).getByRole('combobox', { name: 'Conta do plano contábil' }),
+      'acc-686',
+    );
+    await userEvent.type(within(sheet).getByLabelText('CNPJ ou CPF'), '45.723.174/0001-19');
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Vincular' }));
+    expect(
+      await within(sheet).findByText(/CNPJ ou CPF inválido: confira os dígitos/),
+    ).toBeInTheDocument();
+    expect(linkState.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('sem conta escolhida, o zod pede a conta', async () => {
+    render(<AccountingPartiesTab clientId="c1" isClosed={false} hasPlan />);
+    const sheet = await openSheet();
+    await userEvent.type(within(sheet).getByLabelText('CNPJ ou CPF'), '52998224725');
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Vincular' }));
+    expect(
+      await within(sheet).findByText('Escolha a conta do plano contábil.'),
+    ).toBeInTheDocument();
+    expect(linkState.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('envia conta, tipo e documento; o sucesso fecha a gaveta e leva à sub-aba gravada', async () => {
+    linkState.mutateAsync.mockResolvedValue(
+      link({ accountId: 'acc-686', code: '686', partyType: 'fornecedor' }),
+    );
+    const { container } = render(<AccountingPartiesTab clientId="c1" isClosed={false} hasPlan />);
+    const sheet = await openSheet();
+    await assertNoA11yViolations(container.ownerDocument.body);
+    await userEvent.selectOptions(
+      within(sheet).getByRole('combobox', { name: 'Conta do plano contábil' }),
+      'acc-686',
+    );
+    await userEvent.click(within(sheet).getByRole('radio', { name: 'Fornecedor' }));
+    await userEvent.type(within(sheet).getByLabelText('CNPJ ou CPF'), '45.723.174/0001-10');
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Vincular' }));
+
+    await waitFor(() =>
+      expect(linkState.mutateAsync).toHaveBeenCalledWith({
+        accountId: 'acc-686',
+        payload: { partyType: 'fornecedor', document: '45.723.174/0001-10' },
+      }),
+    );
+    expect(toastSuccess).toHaveBeenCalledWith('Conta 686 vinculada a um fornecedor.');
+    expect(setManySpy).toHaveBeenCalledWith({ vinculo: 'fornecedor', vpage: null });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Vincular conta' })).not.toBeInTheDocument(),
+    );
+  });
+
+  it('409 DOCUMENTO_JA_VINCULADO cai no campo do documento com o código da outra conta', async () => {
+    linkState.mutateAsync.mockRejectedValue(
+      apiError(409, 'DOCUMENTO_JA_VINCULADO', { accountCode: '685', accountId: 'acc-685' }),
+    );
+    render(<AccountingPartiesTab clientId="c1" isClosed={false} hasPlan />);
+    const sheet = await openSheet();
+    await userEvent.selectOptions(
+      within(sheet).getByRole('combobox', { name: 'Conta do plano contábil' }),
+      'acc-686',
+    );
+    const input = within(sheet).getByLabelText('CNPJ ou CPF');
+    await userEvent.type(input, '52998224725');
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Vincular' }));
+
+    expect(await within(sheet).findByText(/já está vinculado à conta 685/)).toBeInTheDocument();
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(toastError).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'Vincular conta' })).toBeInTheDocument();
+  });
+
+  it('422 da conta (corrida: virou sintética) cai no campo da conta', async () => {
+    linkState.mutateAsync.mockRejectedValue(
+      apiError(422, 'CONTA_CONTABIL_INVALIDA', { field: 'accountId', reason: 'conta_sintetica' }),
+    );
+    render(<AccountingPartiesTab clientId="c1" isClosed={false} hasPlan />);
+    const sheet = await openSheet();
+    await userEvent.selectOptions(
+      within(sheet).getByRole('combobox', { name: 'Conta do plano contábil' }),
+      'acc-686',
+    );
+    await userEvent.type(within(sheet).getByLabelText('CNPJ ou CPF'), '52998224725');
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Vincular' }));
+    expect(
+      await within(sheet).findByText('Mensagem do servidor para CONTA_CONTABIL_INVALIDA'),
+    ).toBeInTheDocument();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+});
+
+describe('remover vínculo (86e3tttaf)', () => {
+  it('confirma num AlertDialog que diz a consequência e chama a rota com a conta', async () => {
+    unlinkState.mutateAsync.mockResolvedValue(undefined);
+    render(<AccountingPartiesTab clientId="c1" isClosed={false} hasPlan />);
+    await userEvent.click(screen.getByRole('button', { name: 'Remover vínculo da conta 685' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Remover vínculo' });
+    expect(dialog).toHaveTextContent(/a planilha da Omie deixa de levar o CNPJ\/CPF dela/);
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remover vínculo' }));
+    await waitFor(() => expect(unlinkState.mutateAsync).toHaveBeenCalledWith('acc-685'));
+    expect(toastSuccess).toHaveBeenCalledWith('Vínculo da conta 685 removido.');
+  });
+
+  it('a única linha de uma página acima da 1 saiu: a aba volta uma página', async () => {
+    unlinkState.mutateAsync.mockResolvedValue(undefined);
+    currentSearch = 'vpage=2';
+    withLinks([link()]);
+    render(<AccountingPartiesTab clientId="c1" isClosed={false} hasPlan />);
+    await userEvent.click(screen.getByRole('button', { name: 'Remover vínculo da conta 685' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Remover vínculo' });
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remover vínculo' }));
+    await waitFor(() => expect(setManySpy).toHaveBeenCalledWith({ vpage: '1' }));
   });
 });
 
@@ -301,9 +492,11 @@ describe('importar a relação', () => {
 });
 
 describe('estado que decide a ação', () => {
-  it('cliente encerrado: sem formulário, com o motivo, e a lista continua', () => {
+  it('cliente encerrado: sem formulário, sem vincular nem remover, e a lista continua', () => {
     render(<AccountingPartiesTab clientId="c1" isClosed hasPlan />);
     expect(screen.queryByRole('button', { name: 'Importar relação' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Vincular conta' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Remover vínculo/ })).not.toBeInTheDocument();
     expect(screen.getByTestId('accounting-parties-blocked-note')).toHaveTextContent(
       /Cliente encerrado/,
     );
@@ -314,6 +507,7 @@ describe('estado que decide a ação', () => {
     withLinks([]);
     render(<AccountingPartiesTab clientId="c1" isClosed={false} hasPlan={false} />);
     expect(screen.queryByRole('button', { name: 'Importar relação' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Vincular conta' })).not.toBeInTheDocument();
     expect(screen.getByTestId('accounting-parties-blocked-note')).toHaveTextContent(
       /Importe o plano contábil do cliente antes/,
     );

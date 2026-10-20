@@ -641,6 +641,12 @@ export type AccountingPartyLink = Schemas['PartyLinkResponse'];
 export type AccountingPartyLinksListResponse = Schemas['PartyLinksListResponse'];
 export type AccountingPartyLinksSummary = Schemas['PartyLinksSummaryPayload'];
 /**
+ * Body do vínculo MANUAL de uma conta (86e3tttaf): `partyType` + `document` (CNPJ ou CPF,
+ * com ou sem máscara). A resposta é a linha como a lista a mostra (`PartyLinkEnvelope`,
+ * chave única `data`: chega desempacotada como `AccountingPartyLink`).
+ */
+export type AccountingPartyLinkRequest = Schemas['PartyLinkRequest'];
+/**
  * A natureza da conta (86e3qhhrr): `devedora` ou `credora`, a coluna obrigatória da
  * planilha de importação do plano de contas da Omie. Enum FECHADO.
  */

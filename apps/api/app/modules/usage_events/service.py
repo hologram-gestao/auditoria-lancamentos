@@ -53,6 +53,7 @@ from app.modules.usage_events.schemas import (
     PlanilhaOmieGeradaProps,
     PlanoContabilContaEditadaProps,
     PlanoContabilImportadoProps,
+    PlanoContabilVinculoEditadoProps,
     PlanoContabilVinculosImportadosProps,
     PlanoContasSincronizadoProps,
     QualificacaoEmitidaProps,
@@ -712,6 +713,33 @@ class UsageEventService:
                 account_id=account_id,
                 operacao=operacao,
                 campos=list(campos),
+            ),
+        )
+        if props is None:
+            return False
+        return await self.emit(event, props=props)
+
+    async def emit_plano_contabil_vinculo_editado(
+        self,
+        *,
+        client_id: UUID,
+        account_id: UUID,
+        party_type: PartyReportKind,
+        operacao: Literal["criado", "trocado", "removido"],
+    ) -> bool:
+        """86e3tttaf — um vínculo conta ↔ cliente/fornecedor gravado ou removido à mão.
+
+        O ponto de chamada é `AccountingChartService.set_party_link`/`remove_party_link`,
+        DEPOIS do commit. Props no caminho fail-soft, sem `session_id`, sem dedup.
+        """
+        event = UsageEventName.PLANO_CONTABIL_VINCULO_EDITADO
+        props = self._props_or_none(
+            event,
+            lambda: PlanoContabilVinculoEditadoProps(
+                client_id=client_id,
+                account_id=account_id,
+                party_type=party_type,
+                operacao=operacao,
             ),
         )
         if props is None:

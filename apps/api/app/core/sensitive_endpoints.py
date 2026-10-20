@@ -1078,6 +1078,26 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "vinculadas lidas por client_id no próprio SELECT; documento decifrado com a DEK "
         "do cliente do path e devolvido só mascarado",
     ),
+    # 86e3tttaf — o vínculo também nasce e morre à mão, por conta.
+    SensitiveEndpoint(
+        "PUT",
+        "/api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}/party",
+        ScopeKind.DETAIL_PK,
+        "app/modules/client_accounting_chart/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + ManageClientAccountingChartDep (guard "
+        "auditado); a conta é lida com client_id no próprio SELECT (FOR UPDATE): conta de "
+        "outro cliente = 404; o documento repetido é procurado só nos vínculos do mesmo "
+        "cliente e a recusa leva o código da conta, nunca o documento",
+    ),
+    SensitiveEndpoint(
+        "DELETE",
+        "/api/v1/clients/{client_id}/accounting-chart/accounts/{account_id}/party",
+        ScopeKind.DETAIL_PK,
+        "app/modules/client_accounting_chart/routes.py",
+        f"{_VIA_CLIENT_PATH} + OpenClientDep + ManageClientAccountingChartDep (guard "
+        "auditado); a conta é lida com client_id no próprio SELECT (FOR UPDATE): conta de "
+        "outro cliente = 404; UPDATE por pk com client_id no WHERE",
+    ),
     # ------------- planilha do plano de contas da Omie (86e3qhhrr)
     # O plano inteiro, com nome e CNPJ/CPF decifrados em memória: artefato do escritório.
     SensitiveEndpoint(

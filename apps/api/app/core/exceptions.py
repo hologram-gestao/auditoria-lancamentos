@@ -105,6 +105,10 @@ class ErrorCode(StrEnum):
     #: 86e3qhhrn: a relação de clientes/fornecedores do Domínio enviada é de OUTRA
     #: empresa (o CNPJ do cabeçalho não bate com o dos relatórios já importados).
     RELATORIO_DE_OUTRA_EMPRESA = "RELATORIO_DE_OUTRA_EMPRESA"
+    #: 86e3tttaf: o vínculo manual levaria a uma conta o CNPJ/CPF que OUTRA conta do
+    #: plano do mesmo cliente já tem com o MESMO tipo (409, com o CÓDIGO da outra conta, nunca o
+    #: documento nem o nome).
+    DOCUMENTO_JA_VINCULADO = "DOCUMENTO_JA_VINCULADO"
     #: 86e3qhhrr: a planilha de importação do plano de contas da Omie não pode ser
     #: gerada (plano vazio, conta sem classificação ou natureza, texto que não cabe).
     PLANILHA_OMIE_RECUSADA = "PLANILHA_OMIE_RECUSADA"
@@ -1015,6 +1019,25 @@ class AccountingAccountCodeExistsError(ConflictError):
     default_user_message = (
         "Já existe uma conta com este código no plano contábil do cliente. Edite a conta "
         "existente em vez de criar outra."
+    )
+
+
+class PartyDocumentAlreadyLinkedError(ConflictError):
+    """409 — o CNPJ/CPF do vínculo manual já está em OUTRA conta deste cliente, com o
+    MESMO tipo (86e3tttaf).
+
+    Uma pessoa, uma conta por papel (a empresa que é cliente e fornecedor tem uma conta
+    em cada relação do Domínio): o vínculo é o que a planilha da Omie usa para ligar a conta
+    ao cadastro. `details.accountCode` e `details.accountId` da conta que já tem o
+    documento (código é estrutura em claro, §4.5), para a tela apontar onde ele está.
+    Nunca o documento nem o nome.
+    """
+
+    code = ErrorCode.DOCUMENTO_JA_VINCULADO
+    default_user_message = (
+        "Este CNPJ/CPF já está vinculado, com o mesmo tipo, a outra conta do plano "
+        "contábil deste cliente. "
+        "Remova o vínculo da outra conta antes, ou escolha outro documento."
     )
 
 
