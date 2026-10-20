@@ -50,7 +50,9 @@ async def load_installment_context(
         is_card=is_card,
         process=session.card_posting_date_mode or CardPostingDateMode.PURCHASE_DATE.value,
         invoice_due_date=session.invoice_due_date,
-        anchor=await invoice_anchor(db, session.id) if is_card else None,
+        anchor=(
+            await invoice_anchor(db, session.id, session.invoice_due_date) if is_card else None
+        ),
     )
 
 

@@ -375,6 +375,14 @@ class OmiePostingRepository:
 #: valor, `N/M`) já é quase única; a janela só separa duas séries IGUAIS que
 #: começaram em meses diferentes, e cobre o dia da compra que o emissor desloca.
 INSTALLMENT_MATCH_WINDOW_DAYS = 45
+#: Tolerância de valor do encontro: a MESMA do cruzamento (§5.1). Parcela de cartão
+#: arredondada põe o centavo numa só (100,00 em 3x = 33,34 + 33,33 + 33,33), e a
+#: parcela futura copia o valor da linha que criou a série: exigir igualdade exata
+#: faria a fatura seguinte não achar o título e criar outro.
+INSTALLMENT_AMOUNT_TOLERANCE = Decimal("0.01")
+#: Dias entre o fechamento da fatura e o vencimento dela (âncora quando a sessão
+#: tem o vencimento): folga de emissor para emissor, conservadora.
+_DUE_TO_CLOSING_DAYS = 10
 
 
 class InstallmentRepository:
@@ -483,11 +491,14 @@ class InstallmentRepository:
         total: int,
         around: date,
         exclude_posting_id: UUID | None = None,
+        exclude_session_id: UUID | None = None,
     ) -> ReconciliationOmiePostingInstallment | None:
         """A parcela registrada com a MESMA identidade, ainda não encontrada.
 
         Mesmo cliente, cartão, fornecedor, valor e `N/M`, com vencimento a até
-        `INSTALLMENT_MATCH_WINDOW_DAYS` dias de `around`; a mais próxima vence.
+        `INSTALLMENT_MATCH_WINDOW_DAYS` dias de `around` e valor a até 0,01; a mais
+        próxima vence. `exclude_session_id` deixa de fora as séries da MESMA
+        conciliação: duas compras idênticas na mesma fatura são duas séries (§3.16).
         Inclui as parcelas ainda sem título (quem chama decide o que fazer com
         elas: criar outra seria o duplicado).
         """
@@ -497,7 +508,8 @@ class InstallmentRepository:
             model.client_id == client_id,
             model.omie_conta_id == omie_conta_id,
             model.supplier_code == supplier_code,
-            model.amount == amount,
+            model.amount >= amount - INSTALLMENT_AMOUNT_TOLERANCE,
+            model.amount <= amount + INSTALLMENT_AMOUNT_TOLERANCE,
             model.installment_number == number,
             model.installment_total == total,
             model.claimed_by_file_entry_id.is_(None),
@@ -506,10 +518,27 @@ class InstallmentRepository:
         )
         if exclude_posting_id is not None:
             stmt = stmt.where(model.posting_id != exclude_posting_id)
+        if exclude_session_id is not None:
+            stmt = stmt.where(
+                model.posting_id.not_in(
+                    select(ReconciliationOmiePosting.id).where(
+                        ReconciliationOmiePosting.client_id == client_id,
+                        ReconciliationOmiePosting.session_id == exclude_session_id,
+                    )
+                )
+            )
         rows = list((await self._session.execute(stmt)).scalars().all())
         if not rows:
             return None
-        return min(rows, key=lambda r: (abs((r.due_date - around).days), r.created_at, r.id))
+        return min(
+            rows,
+            key=lambda r: (
+                abs((r.due_date - around).days),
+                abs(r.amount - amount),
+                r.created_at,
+                r.id,
+            ),
+        )
 
     async def claim(
         self, *, client_id: UUID, installment_id: UUID, file_entry_id: UUID
@@ -591,15 +620,22 @@ class InstallmentRepository:
         )
 
 
-async def invoice_anchor(session: AsyncSession, session_id: UUID) -> date | None:
-    """A compra mais recente da conciliação: marca o fim da fatura corrente (86e3qhhtb).
+async def invoice_anchor(
+    session: AsyncSession, session_id: UUID, invoice_due_date: date | None = None
+) -> date | None:
+    """O fim da fatura corrente: a compra mais recente da conciliação (86e3qhhtb).
 
-    É a âncora de `installment_plan.current_installment_date`. As linhas de
-    parcela com a data ORIGINAL da compra são mais antigas e não a puxam para trás.
+    É a âncora de `installment_plan.current_installment_date`. As linhas de parcela
+    com a data ORIGINAL da compra são mais antigas e não a puxam para trás, salvo
+    quando a fatura só tem linhas assim; por isso, com o vencimento da fatura
+    gravado, a âncora nunca fica antes de `vencimento - 10 dias` (o fechamento).
     """
     anchor: date | None = await session.scalar(
         select(func.max(ReconciliationFileEntry.transaction_date)).where(
             ReconciliationFileEntry.session_id == session_id
         )
     )
+    if invoice_due_date is not None:
+        closing = invoice_due_date - timedelta(days=_DUE_TO_CLOSING_DAYS)
+        anchor = closing if anchor is None else max(anchor, closing)
     return anchor

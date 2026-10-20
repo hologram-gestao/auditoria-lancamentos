@@ -609,3 +609,109 @@ class TestFlagDesligada:
 
         assert {ln["reason"] for ln in lines} == {"sem_parcelas_futuras"}
         assert omie.n("incluir_conta_pagar") == 0
+
+
+# ----------------------------------------------------------------------
+# Revisão do PR #349: os casos que criariam duplicado ou escreveriam com a flag off
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("flags")
+class TestRevisaoDoEncontro:
+    async def test_centavo_do_arredondamento_ainda_encontra(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, omie: Recorder
+    ) -> None:
+        """100,00 em 3x = 33,34 + 33,33 + 33,33: a 2/3 (33,33) acha o título de 33,34."""
+        admin, client = await _actors(db_session)
+        sep = await _session(
+            db_session, client=client, creator=admin, month=9, due=date(2026, 10, 5)
+        )
+        line1 = await _entry(
+            db_session, sess=sep, day=date(2026, 9, 10), amount="-33.34", pair=(1, 3)
+        )
+        await _login(client_with_db, admin.email)
+        sep_lines = await _post(client_with_db, sep, _line(line1.id, parcelas_futuras=True))
+        title_2 = sep_lines[0]["parcelas"][0]["payable_id"]
+        oct_ = await _session(db_session, client=client, creator=admin, month=10)
+        line2 = await _entry(
+            db_session, sess=oct_, day=date(2026, 10, 10), amount="-33.33", pair=(2, 3)
+        )
+        titles_before = omie.n("incluir_conta_pagar")
+
+        lines = await _post(client_with_db, oct_, _line(line2.id))
+
+        assert lines[0]["reason"] == "ja_lancada"
+        assert lines[0]["payable_id"] == title_2
+        assert omie.n("incluir_conta_pagar") == titles_before
+
+    async def test_duas_compras_identicas_na_mesma_fatura_sao_duas_series(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, omie: Recorder
+    ) -> None:
+        admin, client = await _actors(db_session)
+        sep = await _session(
+            db_session, client=client, creator=admin, month=9, due=date(2026, 10, 5)
+        )
+        a = await _entry(db_session, sess=sep, day=date(2026, 9, 10), pair=(7, 10))
+        b = await _entry(db_session, sess=sep, day=date(2026, 9, 10), pair=(7, 10))
+        await _login(client_with_db, admin.email)
+
+        lines = await _post(
+            client_with_db,
+            sep,
+            _line(a.id, parcelas_futuras=True),
+            _line(b.id, parcelas_futuras=True),
+        )
+
+        for line in lines:
+            assert {p["status"] for p in line["parcelas"]} == {"provisionada"}
+        assert len(await _installments(db_session, client.id)) == 6
+        assert omie.n("incluir_conta_pagar") == 8  # 2 compras + 2 x 3 parcelas
+
+    async def test_reenviar_a_linha_que_encontrou_nao_e_lancamento_novo(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, omie: Recorder
+    ) -> None:
+        admin, client = await _actors(db_session)
+        await _september(client_with_db, db_session, admin=admin, client=client)
+        oct_ = await _session(db_session, client=client, creator=admin, month=10)
+        line8 = await _entry(db_session, sess=oct_, day=date(2026, 10, 10), pair=(8, 10))
+        first = await _post(client_with_db, oct_, _line(line8.id))
+        assert first[0]["status"] == "lancada"
+        payments = omie.n("lancar_pagamento")
+
+        again = await _post(client_with_db, oct_, _line(line8.id))
+
+        assert again[0]["status"] == "bloqueada"
+        assert again[0]["reason"] == "ja_lancada"
+        assert omie.n("lancar_pagamento") == payments
+
+
+class TestFlagDesligadaNaRetomada:
+    async def test_desligar_a_flag_para_tambem_a_retomada(
+        self,
+        client_with_db: AsyncClient,
+        db_session: AsyncSession,
+        omie: Recorder,
+        flags: Any,
+    ) -> None:
+        flags(parcelas=True)
+        admin, client = await _actors(db_session)
+        sep = await _session(db_session, client=client, creator=admin, month=9)
+        line7 = await _entry(db_session, sess=sep, day=date(2026, 9, 10), pair=(7, 10))
+        await _login(client_with_db, admin.email)
+        omie.fail_keys[derive_installment_payable_key(line7.id, 9)] = 1
+        first = await _post(client_with_db, sep, _line(line7.id, parcelas_futuras=True))
+        assert first[0]["reason"] == "parcelas_incompletas"
+        flags(parcelas=False)
+        titles_before = omie.n("incluir_conta_pagar")
+
+        # A tela não manda `parcelas_futuras` numa linha que já tem série.
+        lines = await _post(client_with_db, sep, _line(line7.id))
+
+        assert lines[0]["status"] == "bloqueada"
+        assert lines[0]["reason"] == "parcelas_futuras_desligadas"
+        assert [(p["numero"], p["status"]) for p in lines[0]["parcelas"]] == [
+            (8, "provisionada"),
+            (9, "pendente"),
+            (10, "provisionada"),
+        ]
+        assert omie.n("incluir_conta_pagar") == titles_before

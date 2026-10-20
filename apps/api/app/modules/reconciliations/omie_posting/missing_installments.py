@@ -14,6 +14,7 @@ título, e nunca exclui nada.
     mais recente de S (`invoice_anchor`). Cada parcela é julgada só pela fatura que
     devia trazê-la; uma fatura posterior não avisa de parcela de um mês que não foi
     importado (o sistema só olha para frente, e o aviso não vira ruído mensal);
+    a janela tem 45 dias e o valor casa a até 0,01 (o centavo da parcela arredondada);
   - nenhuma linha com o mesmo valor e o mesmo `N/M` existe no cartão (as colunas da
     extração, em qualquer conciliação ativa do cartão; e, só em S, também a
     descrição decifrada, para linha sem as colunas);
@@ -51,7 +52,10 @@ from app.db.models import (
     ReconciliationSession,
 )
 from app.modules.reconciliations.installments import parse_installment
-from app.modules.reconciliations.omie_posting.repository import invoice_anchor
+from app.modules.reconciliations.omie_posting.repository import (
+    INSTALLMENT_AMOUNT_TOLERANCE,
+    invoice_anchor,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,8 +67,11 @@ log = get_logger(__name__)
 #: Código do tipo no catálogo (semeado pela migration `c8d1f4e6a2b9`).
 ANOMALY_CODE_INSTALLMENT_MISSING = "parcela_nao_veio"
 
-#: A janela de UMA fatura: as compras de um mês até a mais recente da conciliação.
-_INVOICE_WINDOW_DAYS = 31
+#: A janela de uma fatura, até o fim dela (`invoice_anchor`): um mês e meio. Mais
+#: que um mês de propósito: com 31 dias, a parcela que vence entre a última compra
+#: de uma fatura e o fechamento dela ficava fora das janelas das duas faturas.
+#: A sobreposição não avisa duas vezes (`missing_anomaly_id`).
+_INVOICE_WINDOW_DAYS = 45
 
 
 def _brl(value: Decimal) -> str:
@@ -93,7 +100,7 @@ async def flag_missing_installments(
     Quem chama decide a transação (o job commita no fim do bloco; o lote de
     lançamento commita logo depois).
     """
-    anchor = await invoice_anchor(db, session.id)
+    anchor = await invoice_anchor(db, session.id, session.invoice_due_date)
     if anchor is None:
         return 0
     inst = ReconciliationOmiePostingInstallment
@@ -173,7 +180,11 @@ async def _line_came(
 ) -> bool:
     """Alguma fatura do cartão trouxe a linha desta parcela (mesmo valor e `N/M`)?"""
     amount = -row.amount
-    if (amount, row.installment_number, row.installment_total) in fallback:
+    tol = INSTALLMENT_AMOUNT_TOLERANCE
+    if any(
+        abs(value - amount) <= tol and (n, m) == (row.installment_number, row.installment_total)
+        for value, n, m in fallback
+    ):
         return True
     entry = ReconciliationFileEntry
     sessions_of_card = select(ReconciliationSession.id).where(
@@ -185,7 +196,8 @@ async def _line_came(
         select(
             exists().where(
                 entry.session_id.in_(sessions_of_card),
-                entry.amount == amount,
+                entry.amount >= amount - tol,
+                entry.amount <= amount + tol,
                 entry.installment_number == row.installment_number,
                 entry.installment_total == row.installment_total,
             )

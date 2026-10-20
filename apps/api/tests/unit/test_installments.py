@@ -121,6 +121,32 @@ class TestExtracao:
         )
         assert (tx.installment_number, tx.installment_total) == (None, None)
 
+    @pytest.mark.parametrize(
+        ("number", "total", "expected"),
+        [
+            ("07", "10", (7, 10)),
+            (7.0, 10.0, (7, 10)),
+            ("7/10", 10, (None, None)),
+            (7.5, 10, (None, None)),
+            ("", 10, (None, None)),
+            (True, 10, (None, None)),
+        ],
+    )
+    def test_valor_fora_do_formato_vira_ausente_sem_recusar(
+        self, number: object, total: object, expected: tuple[int | None, int | None]
+    ) -> None:
+        """Revisão do PR #349: um `"7/10"` do modelo não pode derrubar a extração."""
+        tx = ExtractedTransaction.model_validate(
+            {
+                "date": "2026-07-22",
+                "description": "x",
+                "amount": "-1",
+                "installment_number": number,
+                "installment_total": total,
+            }
+        )
+        assert (tx.installment_number, tx.installment_total) == expected
+
     def test_compra_a_vista_omite(self) -> None:
         tx = ExtractedTransaction.model_validate(
             {"date": "2026-07-22", "description": "x", "amount": "-1"}

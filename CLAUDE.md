@@ -359,13 +359,16 @@
       entre a data da linha e ela mais `N-1` meses, a mais perto da compra mais recente da
       conciliação. **O encontro:** antes de criar o título de uma linha `N/M` com `N >= 2`, o
       serviço procura a parcela registrada com a MESMA identidade (cliente, cartão,
-      fornecedor, valor, `N/M`, vencimento a até 45 dias); achou com título, a linha vira
+      fornecedor, `N/M`, valor a até 0,01 porque o emissor põe o centavo do arredondamento
+      numa parcela só, vencimento a até 45 dias, e nunca uma série da MESMA conciliação:
+      duas compras idênticas na mesma fatura são duas séries); achou com título, a linha vira
       `ja_lancada` com esse `payable_id` e, no processo "na data da compra", só a BAIXA vai ao
       Omie; achou SEM título, a linha bloqueia (`parcela_pendente_na_fatura_anterior`); a
       série tem UM dono e a linha que encontrou nunca cria as seguintes (`ja_existia`). O
-      encontro não depende da flag (é ele que impede duplicar). **A parcela que não veio** é
-      a anomalia `parcela_nao_veio` (com o id do título, contexto cifrado), na conciliação
-      cuja janela de um mês cobre o vencimento dela, no processamento (e reprocessamento) e
+      encontro não depende da flag (é ele que impede duplicar); a flag desligada para
+      também a RETOMADA de uma série pela metade. **A parcela que não veio** é a anomalia
+      `parcela_nao_veio` (com o id do título, contexto cifrado), na conciliação cuja janela
+      de 45 dias até o fim da fatura cobre o vencimento dela, no processamento (e reprocessamento) e
       no fim do lote; a plataforma NUNCA exclui título. O critério de rollback (um
       duplicado) vale por parcela.
     - **Timeout: o `direto` nunca reenvia às cegas; a provisão reenvia com a MESMA

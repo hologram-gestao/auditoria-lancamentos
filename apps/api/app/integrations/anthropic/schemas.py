@@ -94,6 +94,24 @@ class ExtractedTransaction(BaseModel):
     def _coerce_amount(cls, v: Any) -> Decimal:
         return _to_decimal(v)
 
+    @field_validator("installment_number", "installment_total", mode="before")
+    @classmethod
+    def _coerce_installment(cls, v: Any) -> int | None:
+        """Inteiro ou nada: `"07"` vira 7; `"7/10"`, `7.5`, `""` e booleano viram ausente.
+
+        O campo é opcional e a parcela continua na descrição: um valor que o modelo
+        devolva fora do formato nunca pode recusar a extração inteira.
+        """
+        if v is None or isinstance(v, bool):
+            return None
+        if isinstance(v, int):
+            return v
+        if isinstance(v, float):
+            return int(v) if v.is_integer() else None
+        if isinstance(v, str) and v.strip().isdigit():
+            return int(v.strip())
+        return None
+
     @model_validator(mode="after")
     def _installment_pair_or_nothing(self) -> ExtractedTransaction:
         """Par incoerente vira AUSENTE, nunca recusa o arquivo.

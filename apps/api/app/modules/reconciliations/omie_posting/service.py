@@ -1149,7 +1149,10 @@ class OmiePostingService:
         """
         if posting.supplier_code is None:  # pragma: no cover  -- CHECK do banco
             return None
-        anchor = await invoice_anchor(self._db, session.id) or entry.transaction_date
+        anchor = (
+            await invoice_anchor(self._db, session.id, session.invoice_due_date)
+            or entry.transaction_date
+        )
         around = current_installment_date(installment, entry.transaction_date, anchor)
         for _ in range(_CLAIM_RETRIES):
             found = await self._installments.find_in_series(
@@ -1160,6 +1163,9 @@ class OmiePostingService:
                 number=installment.number,
                 total=installment.total,
                 around=around,
+                # Uma fatura não traz a parcela 7 e a 8 da MESMA compra: a série
+                # criada nesta conciliação nunca é a desta linha.
+                exclude_session_id=session.id,
             )
             if found is None:
                 return None
@@ -1231,7 +1237,8 @@ class OmiePostingService:
             ]
             return _provision_result(
                 posting,
-                status="lancada",
+                # Reenviar a linha que já encontrou a parcela não é lançamento novo.
+                status="bloqueada" if already_done else "lancada",
                 reason="ja_lancada",
                 message=_CLAIMED_MSG.format(
                     n=claimed.installment_number,
@@ -1251,6 +1258,28 @@ class OmiePostingService:
             if already_done:
                 return _provision_already_done(posting)
             return _provision_result(posting, status="lancada")
+        pending = [r for r in own if r.step != InstallmentStep.CONCLUIDO.value]
+        if pending and not self._settings.OMIE_INSTALLMENT_POSTING_ENABLED:
+            # O kill-switch vale também para RETOMAR a série: desligar a flag (o
+            # rollback da §3.16) tem de parar toda escrita de parcela.
+            return _provision_result(
+                posting,
+                status="bloqueada",
+                reason="parcelas_futuras_desligadas",
+                message=_INSTALLMENTS_DISABLED_MSG,
+            ).model_copy(
+                update={
+                    "parcelas": [
+                        _installment_result(
+                            r,
+                            "provisionada"
+                            if r.step == InstallmentStep.CONCLUIDO.value
+                            else "pendente",
+                        )
+                        for r in own
+                    ]
+                }
+            )
 
         before = tally.parcelas_futuras
         parcelas = await self._run_future_installments(
@@ -1303,7 +1332,10 @@ class OmiePostingService:
         by_number = {row.installment_number: row for row in own}
         elsewhere: dict[int, OmiePostingInstallmentResult] = {}
         if installment is not None and installment.has_future:
-            anchor = await invoice_anchor(self._db, session.id) or entry.transaction_date
+            anchor = (
+                await invoice_anchor(self._db, session.id, session.invoice_due_date)
+                or entry.transaction_date
+            )
             plan = plan_future_installments(
                 installment=installment,
                 line_date=entry.transaction_date,
@@ -1324,6 +1356,8 @@ class OmiePostingService:
                     total=planned.total,
                     around=planned.due_date,
                     exclude_posting_id=posting.id,
+                    # Duas compras idênticas na MESMA fatura são duas séries (§3.16).
+                    exclude_session_id=session.id,
                 )
                 if other is not None:
                     elsewhere[planned.number] = _installment_result(other, "ja_existia")
