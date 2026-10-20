@@ -72,9 +72,7 @@ documento e `amount` negativo (são cobranças). **As linhas do bloco de RESUMO 
 da fatura** (ao lado de "Fatura anterior" e "Total a pagar"), como "Total de \
 compras", "Juros", "Juros de rotativo", "IOF", "IOF de compras \
 internacionais", "Multa", "Multa por atraso" e "Parcelamentos de fatura", são \
-totalizadores (regra 4), não transações: não as extraia. O IOF mostrado como \
-detalhe de uma compra internacional já está no valor da compra: não vira \
-linha própria.
+totalizadores (regra 4), não transações: não as extraia.
 
 12. **Pagamento da fatura anterior: EXTRAIA e MARQUE com `is_payment: true`.** \
 Linhas de "PAGAMENTO FATURA", "PGTO EFETUADO", "pagamento recebido", "pgto \

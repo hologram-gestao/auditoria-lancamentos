@@ -87,9 +87,10 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
                     "parcela, sem agrupar); estornos com amount positivo; encargos "
                     "(juros/IOF/multa) da LISTA de transações como linhas separadas, "
                     "mas as linhas do RESUMO da fatura ('Total de compras', 'Juros', "
-                    "'IOF', 'IOF de compras internacionais', 'Multa') são totalizadores "
-                    "e não são extraídas; o pagamento da fatura anterior TAMBÉM é "
-                    "extraído, marcado com is_payment=true."
+                    "'Juros de rotativo', 'IOF', 'IOF de compras internacionais', "
+                    "'Multa', 'Multa por atraso', 'Parcelamentos de fatura') são "
+                    "totalizadores e não são extraídas; o pagamento da fatura anterior "
+                    "TAMBÉM é extraído, marcado com is_payment=true."
                 ),
                 "items": {
                     "type": "object",

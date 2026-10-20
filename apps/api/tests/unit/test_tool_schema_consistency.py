@@ -8,6 +8,7 @@ proibia — a IA ficava entre uma instrução e um schema que a contradizia.
 
 from __future__ import annotations
 
+import re
 import typing
 from typing import Any, cast
 
@@ -99,6 +100,14 @@ def test_encargos_do_resumo_da_fatura_nao_sao_transacao_no_prompt_e_na_tool() ->
     assert "LISTA de transações" in description
     assert "RESUMO da fatura" in description
     assert "não são extraídas" in description
+    # As duas listas de linhas do resumo são a MESMA: uma mais curta na tool deixaria
+    # o modelo entre uma proibição do prompt e um silêncio do schema.
+    resumo = regra_11.split("bloco de RESUMO")[1]
+    nomes = re.findall(r'"([^"]+)"', resumo)
+    for nome in nomes:
+        if nome in {"Fatura anterior", "Total a pagar"}:
+            continue
+        assert f"'{nome}'" in description, f"{nome!r} está na regra 11 mas não na tool"
 
 
 def test_parcela_esta_na_tool_no_prompt_e_no_schema() -> None:
