@@ -322,27 +322,22 @@ def normalize_document(raw: Any) -> tuple[str, DocumentKind] | None:
 def parse_typed_document(raw: str) -> tuple[str, DocumentKind] | None:
     """O documento DIGITADO na tela (vínculo manual, 86e3tttaf), ou `None`.
 
-    Mais estrito que a célula do relatório: só dígitos e a máscara usual (`.`, `/`,
-    `-`, espaço), conferidos por `normalize_cnpj`/`normalize_cpf`; 14 dígitos é CNPJ,
-    11 é CPF, outro tamanho é inválido. Nunca passa por `int` (os zeros à esquerda).
+    Mais estrito que a célula do relatório: o texto vai inteiro para
+    `normalize_cnpj`/`normalize_cpf`, que só aceitam dígitos e a máscara usual (`.`,
+    `/`, `-`, espaço). O despacho por tamanho é o MESMO da importação
+    (`_validated_document`). Nunca passa por `int` (os zeros à esquerda).
     """
-    digits = re.sub(r"\D", "", raw or "")
-    try:
-        if len(digits) == 14:
-            return normalize_cnpj(raw), "cnpj"
-        if len(digits) == 11:
-            return normalize_cpf(raw), "cpf"
-    except ValueError:
-        return None
-    return None
+    return _validated_document(raw or "")
 
 
-def _validated_document(digits: str) -> tuple[str, DocumentKind] | None:
+def _validated_document(value: str) -> tuple[str, DocumentKind] | None:
+    """14 dígitos é CNPJ, 11 é CPF, pelo verificador; `value` pode vir com a máscara."""
+    digits = re.sub(r"\D", "", value)
     try:
         if len(digits) == 14:
-            return normalize_cnpj(digits), "cnpj"
+            return normalize_cnpj(value), "cnpj"
         if len(digits) == 11:
-            return normalize_cpf(digits), "cpf"
+            return normalize_cpf(value), "cpf"
     except ValueError:
         return None
     return None

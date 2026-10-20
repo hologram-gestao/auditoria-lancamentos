@@ -13,7 +13,7 @@
  */
 
 import { Loader2 } from 'lucide-react';
-import type { MouseEvent } from 'react';
+import { useRef, type MouseEvent } from 'react';
 import { toast } from 'sonner';
 
 import {
@@ -35,16 +35,24 @@ interface AccountingPartyUnlinkDialogProps {
   /** A linha cujo vínculo sai; `null` = diálogo fechado. */
   link: AccountingPartyLink | null;
   onOpenChange: (open: boolean) => void;
+  /** Depois de remover: a aba volta uma página quando a linha era a única da página. */
+  onRemoved?: () => void;
 }
 
 export function AccountingPartyUnlinkDialog({
   clientId,
   link,
   onOpenChange,
+  onRemoved,
 }: AccountingPartyUnlinkDialogProps) {
   const mutation = useRemoveAccountingPartyLink(clientId);
   const isPending = mutation.isPending;
-  const who = link?.partyType === 'fornecedor' ? 'fornecedor' : 'cliente';
+  // A última linha aberta continua no corpo durante a animação de fechar: com o `link`
+  // já nulo, o texto sumiria no meio do fade.
+  const lastLink = useRef<AccountingPartyLink | null>(link);
+  if (link !== null) lastLink.current = link;
+  const shown = link ?? lastLink.current;
+  const who = shown?.partyType === 'fornecedor' ? 'fornecedor' : 'cliente';
 
   async function handleConfirm(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
@@ -53,6 +61,7 @@ export function AccountingPartyUnlinkDialog({
       await mutation.mutateAsync(link.accountId);
       toast.success(`Vínculo da conta ${link.code} removido.`);
       onOpenChange(false);
+      onRemoved?.();
     } catch (err) {
       toast.error(
         err instanceof ApiError ? err.userMessage : 'Não foi possível remover o vínculo.',
@@ -66,9 +75,9 @@ export function AccountingPartyUnlinkDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Remover vínculo</AlertDialogTitle>
           <AlertDialogDescription>
-            {link !== null ? (
+            {shown !== null ? (
               <>
-                A conta <span className="text-foreground font-medium">{link.code}</span> volta a
+                A conta <span className="text-foreground font-medium">{shown.code}</span> volta a
                 ficar sem {who} vinculado, e a planilha da Omie deixa de levar o CNPJ/CPF dela. Para
                 vincular de novo, use &quot;Vincular conta&quot; ou importe a relação do Domínio.
               </>

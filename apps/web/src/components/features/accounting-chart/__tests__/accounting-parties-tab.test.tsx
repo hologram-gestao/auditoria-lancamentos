@@ -401,6 +401,17 @@ describe('remover vínculo (86e3tttaf)', () => {
     await waitFor(() => expect(unlinkState.mutateAsync).toHaveBeenCalledWith('acc-685'));
     expect(toastSuccess).toHaveBeenCalledWith('Vínculo da conta 685 removido.');
   });
+
+  it('a única linha de uma página acima da 1 saiu: a aba volta uma página', async () => {
+    unlinkState.mutateAsync.mockResolvedValue(undefined);
+    currentSearch = 'vpage=2';
+    withLinks([link()]);
+    render(<AccountingPartiesTab clientId="c1" isClosed={false} hasPlan />);
+    await userEvent.click(screen.getByRole('button', { name: 'Remover vínculo da conta 685' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Remover vínculo' });
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remover vínculo' }));
+    await waitFor(() => expect(setManySpy).toHaveBeenCalledWith({ vpage: '1' }));
+  });
 });
 
 describe('importar a relação', () => {

@@ -479,8 +479,8 @@ async def list_accounting_parties(
         "lista a mostra, com o documento MASCARADO. Conta de outro cliente ou inexistente: "
         "404. Recusas: 422 `CONTA_CONTABIL_INVALIDA` com `details.field` e "
         "`details.reason` (`conta_sintetica`, `conta_inativa`, `documento_invalido`); 409 "
-        "`DOCUMENTO_JA_VINCULADO` quando OUTRA conta do cliente já tem o documento "
-        "(`details.accountCode` e `details.accountId` dela, nunca o documento). Não altera "
+        "`DOCUMENTO_JA_VINCULADO` quando OUTRA conta do cliente já tem o documento com o "
+        "MESMO tipo (`details.accountCode` e `details.accountId` dela, nunca o documento). Não altera "
         "a empresa conferida nas importações da relação. Requer "
         "`manage_client_accounting_chart`; cliente encerrado 409."
     ),

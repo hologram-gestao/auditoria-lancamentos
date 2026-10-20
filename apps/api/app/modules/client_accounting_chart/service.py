@@ -1014,7 +1014,7 @@ class AccountingChartService:
         verificador (422 `documento_invalido`, antes de qualquer trava) → trava por
         cliente (a MESMA da importação: as duas portas não se cruzam) → conta pela pk
         com `client_id` no SELECT (404) → analítica e ativa (422 `conta_sintetica`/
-        `conta_inativa`) → o documento em OUTRA conta do cliente (409
+        `conta_inativa`) → o documento com o MESMO tipo em OUTRA conta do cliente (409
         `DOCUMENTO_JA_VINCULADO`, com o código dela) → cifrado com a pk no AAD, gravado
         pelo MESMO `update_party_links` da importação → commit → métrica.
 
@@ -1043,12 +1043,20 @@ class AccountingChartService:
         cipher = await self._write_cipher(client)
         linked_accounts = {a.id: a for a in await self._repo.list_linked_all(client.id)}
         linked = _decrypt_party_documents(client.id, cipher, linked_accounts.values())
+        # Mesma pessoa no MESMO papel em duas contas é o duplicado. A empresa que é
+        # cliente e fornecedor tem duas contas no Domínio (uma em cada relação), e a
+        # importação aceita isso: o vínculo manual também.
         for other_id, other_digits in linked.plain.items():
-            if other_id != account.id and other_digits == digits:
+            other = linked_accounts[other_id]
+            if (
+                other_id != account.id
+                and other_digits == digits
+                and other.party_type == party_type.value
+            ):
                 raise PartyDocumentAlreadyLinkedError(
                     f"documento já vinculado a outra conta do cliente {client.id}",
                     details={
-                        "accountCode": linked_accounts[other_id].code,
+                        "accountCode": other.code,
                         "accountId": str(other_id),
                     },
                 )

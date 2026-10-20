@@ -416,6 +416,11 @@ export function AccountingPartiesTab({ clientId, isClosed, hasPlan }: Accounting
         onOpenChange={(open) => {
           if (!open) setUnlinking(null);
         }}
+        onRemoved={() => {
+          // A única linha de uma página acima da 1 saiu: a página ficaria vazia e o vazio
+          // diria "nenhuma conta vinculada ainda" com vínculos nas páginas anteriores.
+          if (rows.length === 1 && page > 1) setMany({ [PARAM.page]: String(page - 1) });
+        }}
       />
     </div>
   );

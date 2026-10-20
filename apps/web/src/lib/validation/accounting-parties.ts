@@ -68,7 +68,10 @@ export const partyLinkSchema = z.object({
     .string()
     .trim()
     .min(1, 'Informe o CNPJ ou o CPF.')
-    .max(PARTY_DOCUMENT_MAX_CHARS, 'O CNPJ ou CPF tem no máximo 18 caracteres com a máscara.')
+    .max(
+      PARTY_DOCUMENT_MAX_CHARS,
+      `O CNPJ ou CPF tem no máximo ${PARTY_DOCUMENT_MAX_CHARS} caracteres.`,
+    )
     .refine(isValidPartyDocument, {
       message: 'CNPJ ou CPF inválido: confira os dígitos (14 para CNPJ, 11 para CPF).',
     }),

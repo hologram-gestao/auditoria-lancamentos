@@ -128,7 +128,8 @@ export interface PartyLinkFormRefusal {
 /**
  * As recusas do vínculo manual (86e3tttaf), no CAMPO certo da gaveta:
  *   - 409 `DOCUMENTO_JA_VINCULADO` → `document`, com o CÓDIGO da conta que já tem o
- *     documento (`details.accountCode`), que é o que a pessoa procura na lista;
+ *     documento com o MESMO tipo (`details.accountCode`), que é o que a pessoa procura
+ *     na lista (o mesmo documento como cliente numa conta e fornecedor noutra é aceito);
  *   - 422 `CONTA_CONTABIL_INVALIDA` → o `details.field` do servidor (`document` no
  *     dígito errado; `accountId` na conta sintética ou inativa, corrida com a busca).
  *
@@ -142,7 +143,7 @@ export function readPartyLinkRefusal(error: unknown): PartyLinkFormRefusal | nul
       field: 'document',
       message:
         typeof code === 'string' && code.length > 0
-          ? `Este CNPJ/CPF já está vinculado à conta ${code}. Remova o vínculo dela antes, ou escolha outro documento.`
+          ? `Este CNPJ/CPF já está vinculado à conta ${code}, com o mesmo tipo. Remova o vínculo dela antes, ou escolha outro documento.`
           : error.userMessage,
     };
   }

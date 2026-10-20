@@ -283,7 +283,7 @@ class TestRecusas:
             client_with_db,
             world.client,
             ids["686"],
-            party_type="cliente",
+            party_type="fornecedor",
             document=_CNPJ_MASKED_INPUT,
         )
         assert resp.status_code == 409, resp.text
@@ -294,6 +294,22 @@ class TestRecusas:
         assert "0001-10" not in resp.text
         assert "Conta de exemplo" not in resp.text
         assert (await _account(db_session, ids["686"])).party_document_encrypted is None
+
+    async def test_a_mesma_empresa_como_cliente_e_fornecedor_em_duas_contas_e_aceita(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        """A empresa que é cliente E fornecedor tem uma conta em cada relação do Domínio."""
+        await _login(client_with_db, world.admin)
+        ids = await _seed_plan(client_with_db, world.client)
+        supplier = await _put(
+            client_with_db, world.client, ids["685"], party_type="fornecedor", document=_CNPJ
+        )
+        assert supplier.status_code == 200, supplier.text
+        customer = await _put(
+            client_with_db, world.client, ids["686"], party_type="cliente", document=_CNPJ
+        )
+        assert customer.status_code == 200, customer.text
+        assert customer.json()["data"]["partyType"] == "cliente"
 
     async def test_o_mesmo_documento_em_outro_cliente_nao_conflita(
         self, client_with_db: AsyncClient, world: World
