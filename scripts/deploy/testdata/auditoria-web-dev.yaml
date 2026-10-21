@@ -1,0 +1,41 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  annotations:
+    run.googleapis.com/client-name: gcloud
+    run.googleapis.com/ingress: all
+    run.googleapis.com/operation-id: 99999999-8888-7777-6666-555555555555
+    run.googleapis.com/urls: '["https://auditoria-web-dev-625547925581.southamerica-east1.run.app","https://auditoria-web-dev-i7oep34hva-rj.a.run.app"]'
+    serving.knative.dev/creator: operador@example.com
+  generation: 98
+  labels:
+    cloud.googleapis.com/location: southamerica-east1
+  name: auditoria-web-dev
+  namespace: '625547925581'
+  uid: 66666666-7777-8888-9999-000000000000
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/maxScale: '3'
+        client.knative.dev/user-image: southamerica-east1-docker.pkg.dev/liberdade-assessoria/auditoria/auditoria-web:dev
+      labels:
+        client.knative.dev/nonce: klmnopqrst
+      name: auditoria-web-dev-00098-abc
+    spec:
+      containers:
+      - env:
+        - name: INTERNAL_API_URL
+          value: https://auditoria-api-dev-625547925581.southamerica-east1.run.app
+        - name: DEPLOYED_AT
+          value: '2026-10-20T12:00:00Z'
+        image: southamerica-east1-docker.pkg.dev/liberdade-assessoria/auditoria/auditoria-web:dev
+        ports:
+        - containerPort: 3000
+          name: http1
+      serviceAccountName: auditoria-web-sa@liberdade-assessoria.iam.gserviceaccount.com
+  traffic:
+  - latestRevision: true
+    percent: 100
+status:
+  url: https://auditoria-web-dev-i7oep34hva-rj.a.run.app
