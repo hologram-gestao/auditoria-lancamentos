@@ -25,11 +25,20 @@ OUT.mkdir(parents=True, exist_ok=True)
 # tela real com os dados de `capturas/dados_demo.py` (roteiro no README). `base`, quando há, é
 # a última linha da figura; `direita`, a última coluna (gaveta e diálogo recortados sozinhos).
 # Na 1.3 (86e3ndj0p) sete figuras saíram do e2e de novo (`NOVO`), quatro delas novas; as
-# demais continuam as da 1.2.
+# demais continuam as da 1.2. Na 1.4 (86e3qhhtj) entraram seis figuras dos prints das
+# subtasks do épico 86e3qhhr0 e do selo "No Omie" (86e3t4vpq): são do mesmo e2e, mas em DPR
+# 2,75 (3960 px de largura), então ali a barra superior tem 176 px e o menu lateral 614. O
+# `plano-contabil` foi recapturado em DPR 2 pelo mesmo cenário de antes, com as abas novas.
 PASTA = "pr-shots-86e3mz74x"
 MOCK = f"{PASTA}/mock"
 APP = f"{PASTA}/app"
 NOVO = "pr-shots-86e3ndj0p/mock"
+FORNECEDOR = "pr-shots-86e3qhhrd"
+VINCULOS = "pr-shots-86e3tttaf"
+PLANILHA_OMIE = "pr-shots-86e3qhhrr"
+GUIA_OMIE = "pr-shots-86e3qhht4"
+PARCELAS = "pr-shots-86e3qhhtb"
+SITUACAO_OMIE = "pr-shots-86e3t4vpq"
 Job = (
     tuple[str, int, int, bool]
     | tuple[str, int, int, bool, int | None]
@@ -49,6 +58,18 @@ JOBS: dict[str, Job] = {
     "selos": (f"{NOVO}/pr-revisao-selo-servidor-desktop.png", 700, 446, True),
     # A gaveta "Lançar no Omie" sozinha: provisão com duas categorias, fornecedor e rateio.
     "lancamento": (f"{NOVO}/pr-gaveta-provisao-completa-desktop.png", 0, 1536, False),
+    # Daqui até "guia-omie", DPR 2,75. A gaveta sozinha, até a lista de cadastros achados.
+    "fornecedor-nome": (f"{FORNECEDOR}/pr-gaveta-fornecedor-por-nome-desktop.png", 0, 2112, False, 1795),
+    # A gaveta sozinha, até a lista das parcelas futuras (o rodapé fica fora).
+    "parcelas": (f"{PARCELAS}/pr-gaveta-parcelas-futuras-desktop.png", 0, 2112, False, 1735),
+    # Sem o menu: do bloco explicativo até a linha com o selo e o tooltip.
+    "situacao-omie": (f"{SITUACAO_OMIE}/revisao-situacao-no-omie-desktop.png", 1285, 614, False, 2295),
+    # As duas listas da aba "Clientes e fornecedores", com o menu, até a paginação.
+    "vinculos": (f"{VINCULOS}/plano-contabil-vinculos-desktop.png", 176, 0, False, 2310),
+    # O diálogo da planilha da Omie sozinho.
+    "planilha-omie": (f"{PLANILHA_OMIE}/plano-contabil-planilha-omie-pronta-desktop.png", 605, 1185, False, 1870, 2775),
+    # O diálogo do guia das categorias sozinho.
+    "guia-omie": (f"{GUIA_OMIE}/de-para-conta-contabil-guia-omie-desktop.png", 440, 1270, False, 2035, 2690),
     "plano-de-contas": (f"{MOCK}/plano-de-contas-filtro-ativo-desktop.png", 128, 0, True),
     "plano-contabil": (f"{NOVO}/plano-contabil-conta-manual-lista-desktop.png", 128, 0, True),
     "de-para": (f"{NOVO}/de-para-filtro-ativo-desktop.png", 128, 0, True),

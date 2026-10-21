@@ -238,10 +238,12 @@ CARTÃO na própria conta do cartão. Desde a 86e3n70q0 (bloco B, 13/10/2026) h�
 SEGUNDA forma, escolhida por linha (`modo`): a **provisão no Contas a Pagar**
 (`IncluirCliente` quando o CNPJ não tem cadastro, `IncluirContaPagar` e, só no processo
 "na data da compra", `LancarPagamento`), com kill-switch próprio
-(`OMIE_PAYABLE_POSTING_ENABLED`). Os 13 métodos que o ADL chama, quatro deles escritas:
+(`OMIE_PAYABLE_POSTING_ENABLED`). Os 12 métodos que o ADL chama (14 chamadas, `ListarClientes`
+em três, `client.py:656,776,808`: a validação da credencial, a busca por CNPJ e o diretório
+da busca pelo nome), quatro deles escritas:
 
 ```bash
-grep -rn 'call_name="' apps/api/app --include=*.py | grep -v "call_name=call_name"   # 13 linhas; escrevem IncluirLancCC, IncluirCliente, IncluirContaPagar, LancarPagamento
+grep -rn 'call_name="' apps/api/app --include=*.py | grep -v "call_name=call_name"   # 14 linhas; escrevem IncluirLancCC, IncluirCliente, IncluirContaPagar, LancarPagamento
 ```
 
 O que protege essa escrita (CLAUDE.md §3.16; tudo em
@@ -262,12 +264,38 @@ O que protege essa escrita (CLAUDE.md §3.16; tudo em
   deste passo); destravar é task própria, não código de passagem.
 - **Dedup é do ADL**: intenção em `reconciliation_omie_postings` ANTES do POST, chave
   derivada da IDENTIDADE da linha (`omie_posting/keys.py`: `ADL` lançamento, `HCP`
-  título, `HBX` baixa, mesmo sufixo; `HFN` fornecedor, do CNPJ normalizado), nunca do
-  conteúdo. A Omie provou idempotência nas quatro escritas (2º envio devolve o mesmo
+  título, `HBX` baixa, mesmo sufixo; `HFN` fornecedor, do CNPJ normalizado; a quinta,
+  da parcela futura, logo abaixo), nunca do conteúdo. A Omie provou idempotência nas quatro escritas (2º envio devolve o mesmo
   id) — é defesa secundária. A provisão é máquina de estados (`kind`, `step` e ids na
   intenção, CHECKs no banco): cada passo grava o id e commita antes do próximo, e a
   retomada pula o que já tem id. Timeout de passo da provisão REENVIA com a mesma chave
   (até `MAX_STEP_SENDS = 3`); o `direto` não (abaixo).
+- **Parcela FUTURA de compra parcelada (86e3qhhtb): a fatura seguinte ENCONTRA o título,
+  nunca cria outro.** Chave `derive_installment_payable_key` (`keys.py:141`):
+  `HCP<sufixo da linha que criou a série>P<nn>`, parcela de 2 a 99 (fora disso
+  `ValueError`); o MESMO `IncluirContaPagar`, sem baixa, sob a flag própria
+  `OMIE_INSTALLMENT_POSTING_ENABLED` (desligada: `parcelas_futuras_desligadas`,
+  `service.py:711-713`). Antes de criar o título de uma linha `N/M` com `N >= 2`,
+  `find_in_series` (`repository.py:483`) procura a parcela registrada com a MESMA
+  identidade: cliente, cartão (`omie_conta_id`), fornecedor, `N/M`, valor a até
+  `INSTALLMENT_AMOUNT_TOLERANCE` (0,01: o emissor põe o centavo do arredondamento numa
+  parcela só) e vencimento a até `INSTALLMENT_MATCH_WINDOW_DAYS` (45 dias,
+  `repository.py:377-382`), ainda não encontrada e nunca da MESMA conciliação (duas
+  compras idênticas na mesma fatura são duas séries). Achou com título: a linha vira
+  `ja_lancada` com esse `payable_id` (`service.py:1242`) e, no processo "na data da
+  compra", só a BAIXA vai à Omie. Achou sem título: bloqueia
+  `parcela_pendente_na_fatura_anterior` (`service.py:1176`). O encontro não depende da
+  flag: é ele que impede o duplicado.
+- **A parcela que não veio é AVISO, nunca exclusão**: anomalia `parcela_nao_veio`
+  (`missing_installments.py:68`, janela de 45 dias até o fim da fatura) com o id do
+  título. A plataforma não exclui título na Omie (nenhum `call_name="Excluir…"` no
+  código); quem decide é a pessoa, lá dentro.
+- **A data que a linha da parcela traz depende do EMISSOR, e foi medida**: a fatura real
+  da Cora (13/10/2026) imprime a `3/6` com a data ORIGINAL da compra (22/07), não a da
+  parcela. `_months_to_current` (`installment_plan.py:59`) escolhe, entre a data da linha
+  e ela mais `N-1` meses, a mais perto da âncora da fatura; empate fica com a data da
+  linha (o emissor que imprime a da parcela). Uma amostra só: fatura de outro emissor é
+  a próxima prova, não analogia.
 - **`faultstring` = falha definitiva**, nada marcado como lançado; a mensagem do
   provedor é persistida e **nunca logada**. **O `direto` nunca reenvia às cegas após
   timeout**: `_reconcile` é sempre inconclusivo porque o extrato NÃO devolve
