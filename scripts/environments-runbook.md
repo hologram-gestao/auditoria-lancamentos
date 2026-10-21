@@ -7,6 +7,80 @@
 
 ## Ordem (por ambiente `<env>` ∈ {dev, prod})
 
+### 0. Projeto novo (86e3r2egh, épico 86e3r2egb)
+
+Só quando o ambiente sobe num projeto do GCP que ainda não tem nada (a mudança do
+`liberdade-assessoria` para o `hologramos`). Num projeto que já roda, pule para o passo 1.
+O pool do Workload Identity e os serviços e jobs do Cloud Run foram criados à mão no
+projeto antigo; os dois scripts abaixo versionam isso. Nenhum dos dois tem default de
+projeto: todo comando nomeia o destino.
+
+Ordem, com `<novo>` = id do projeto novo e `<número>` = o número dele:
+
+1. **WIF e SAs** (idempotente, guard por `describe` em cada passo):
+
+   ```bash
+   PROJECT_ID=<novo> PROJECT_NUMBER=<número> \
+   API_SA_DISPLAY_NAME='<o do antigo>' WEB_SA_DISPLAY_NAME='<o do antigo>' \
+     bash scripts/deploy/setup_wif.sh
+   ```
+
+   Cria `auditoria-api-sa`, `auditoria-web-sa`, o pool `auditoria-github-pool`, o provider
+   `auditoria-github-provider` (issuer, mapeamento e condição do repositório iguais aos do
+   antigo) e o `workloadIdentityUser` das duas SAs. Nunca cria chave de SA. Os display
+   names saem de `gcloud iam service-accounts list --project=<antigo>`; sem eles, a SA
+   nasce com o próprio id como nome. No fim imprime os três valores dos secrets do GitHub.
+
+2. **Artifact Registry** (operação, uma vez):
+   `gcloud artifacts repositories create auditoria --repository-format=docker --location=southamerica-east1 --project=<novo>`.
+3. **IAM do CI/CD**: `PROJECT_ID=<novo> PROJECT_NUMBER=<número> bash scripts/deploy/grant_cicd_iam.sh`
+   (os defaults dele ainda são do projeto antigo: as duas variáveis são obrigatórias aqui).
+4. **Fumaça do WIF**: grave os valores impressos no item 1 como
+   `GCP_WORKLOAD_IDENTITY_PROVIDER_NEW` e `GCP_API_SERVICE_ACCOUNT_NEW` no Environment
+   `development` e dispare o `wif-smoke.yml` (Actions → WIF smoke → Run workflow). Ele só
+   autentica e lista; os secrets do deploy atual não mudam.
+5. **`setup-gcp.sh`** (passo 1 abaixo) com `PROJECT_ID=<novo>`: KEK, secrets de alerta e de
+   leads. Num projeto vazio a parte da carteira **avisa e segue** (não há job de
+   referência ainda); ela é reexecutada no item 8.
+6. **Build das imagens no destino**:
+   `gcloud builds submit --config=docker/cloudbuild/cloudbuild-api.yaml --substitutions=_TAG=dev --project=<novo> .`
+   e o mesmo para a web com `_API_URL=<URL nova da API>` (a URL da API é build-arg da web:
+   a imagem do antigo não serve).
+7. **Replay dos serviços e jobs**, primeiro em dry-run (lê a origem, grava os manifestos
+   fora do repositório, mostra o `diff -u` e a prova de cada um):
+
+   ```bash
+   bash scripts/deploy/replay_cloud_run_manifests.sh \
+     --source-project liberdade-assessoria \
+     --target-project <novo> --target-project-number <número> \
+     --target-sql-connection <novo>:southamerica-east1:<instância> \
+     --target-kek projects/<novo>/locations/southamerica-east1/keyRings/auditoria-dev/cryptoKeys/omie-encryption-kek \
+     --api-url https://auditoria-api-dev-<número>.southamerica-east1.run.app \
+     --web-url https://auditoria-web-dev-<número>.southamerica-east1.run.app \
+     --out-dir /tmp/replay-<novo>
+   ```
+
+   Prova verde nos 7 recursos → o mesmo comando com `--apply` (`services replace` /
+   `jobs replace`, um por vez, para no primeiro erro). Prova vermelha = nada é aplicado:
+   o manifesto tem uma referência ao projeto antigo que a reescrita não conhece, e o
+   trecho aparece na saída.
+
+8. **`setup-gcp.sh` de novo**: agora o job `cleanup` existe e a carteira ganha contrato e
+   Cloud Scheduler.
+
+> ⚠️ **O `replace` exige a imagem já existente no Artifact Registry do destino** (item 6):
+> o manifesto aponta para `<AR>/<novo>/auditoria/<imagem>:dev`, e um digest do antigo
+> vira essa tag porque o build no destino gera outro digest. Além da imagem, a revisão da
+> API só fica pronta com os secrets montados existindo no destino (subtask dos secrets) e
+> a instância do Cloud SQL de pé: sem eles o `replace` da API falha e o script para ali.
+>
+> ⚠️ **A API nova nasce com o ingresso do antigo (`all`).** Até o `--verify` do
+> reembrulho zerar (passo 7), ela fica `--ingress=internal` e os schedulers do projeto
+> novo pausados; ajuste logo depois do `--apply`.
+
+O dry-run tem teste sem gcloud, sobre a fixture inventada de `scripts/deploy/testdata/`:
+`bash scripts/deploy/test_replay_cloud_run_manifests.sh` (saída 0 = passou).
+
 ### 1. Provisionar a infra versionada — `setup-gcp.sh` (idempotente)
 
 ```bash
@@ -237,5 +311,8 @@ nomes de chave.
       `::warning::` (se emitiu, o script do passo 1 ainda não rodou neste
       ambiente e a carteira não está agendada).
 - [ ] `auditoria-sync-titles-<env>` agendado às `04:12` `America/Sao_Paulo`.
+- [ ] Só na mudança de projeto: `setup_wif.sh` imprimiu o provider, o `wif-smoke.yml`
+      ficou verde e o `replay_cloud_run_manifests.sh` deu prova OK nos 7 recursos antes do
+      `--apply` (passo 0).
 - [ ] Só na mudança de projeto: `rewrap_client_deks --verify` com `verify_failed=0` na
       instância nova, e o binding na KEK antiga revogado depois do corte (passo 7).
