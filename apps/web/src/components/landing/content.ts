@@ -25,7 +25,7 @@ export const CONTACT_ANCHOR = 'contato';
 export const manual = {
   href: '/manual-hologram-os.pdf',
   label: 'Baixar o manual (PDF)',
-  size: 'PDF, 5 MB',
+  size: 'PDF, 6 MB',
   successLead: 'Enquanto respondemos, leia o manual',
 } as const;
 

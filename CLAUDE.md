@@ -1766,6 +1766,49 @@ roteiro em [Docs/landing/DOMINIO_E_NOME.md](Docs/landing/DOMINIO_E_NOME.md)): o
 mapeamento de domínio do Cloud Run não atende `southamerica-east1`, então o caminho é Load
 Balancer HTTPS.
 
+**A ponte Domínio → Omie do escritório contábil também NÃO foi sprint do hub.** Veio do
+épico ClickUp `86e3qhhr0` (reunião do Pedro com o Gabriel, contador externo, em 14/10/2026;
+bate-bola em 19/10 com o modelo da planilha da Omie; respostas finais em 20/10, quando a
+reunião com o Landim acrescentou a subtask 9), oito subtasks de código entregues de 16 a
+21/10 (PRs #338 a #356) e a de documentação no #357, regras como lei atual nas §3.15, §3.16, §4.1, §4.8, §4.11 e §4.12 e o detalhe
+de cada uma nos rodapés v1.98 a v1.106. O pedido de fundo era o do Gabriel: três dias de
+trabalho manual por cliente para ligar o Domínio à Omie. O ciclo que o épico fechou, ponta a
+ponta:
+
+- **as relações do Domínio viram vínculo conta ↔ pessoa**: a "RELAÇÃO DE CLIENTES" e a
+  "RELAÇÃO DE FORNECEDORES" gravam, em cada conta do plano contábil, o CNPJ ou CPF cifrado
+  (`parties.py`, coluna `party_document_encrypted`, o 18º par de AAD), com a empresa do
+  relatório conferida por impressão digital; o vínculo também nasce e morre à mão, por conta,
+  na aba "Clientes e fornecedores", em duas listas (86e3qhhrn, 86e3tttaf);
+- **o plano contábil vai para a Omie pela planilha do Painel do Contador**, com o documento
+  do vínculo e a natureza Devedora/Credora derivada da classificação (`omie_sheet.py`,
+  `nature.py`, modelo vazio em `app/resources/omie/`), porque a API pública da Omie não tem
+  plano de contas (86e3qhhrr);
+- **as categorias se configuram na TELA da Omie a partir do guia** que o de-para no destino
+  `conta_contabil` gera (`omie_guide.py`): a aba de categorias da planilha de configuração
+  contábil foi descartada porque o Gabriel não a usa (86e3qhht4);
+- **a reimportação do plano só adiciona e atualiza**, com prévia antes de gravar, o selo
+  "não veio na última importação" (`absent_since`) e a exportação no próprio modelo
+  (`diff.py`, 86e3qhhrm);
+- **o fornecedor do título se acha pelo nome ou pela sugestão da compra**, sobre um
+  diretório em memória por cliente, nunca uma chamada à Omie por tecla
+  (`fornecedores_directory_cache.py`, 86e3qhhrd);
+- **a compra parcelada provisiona as parcelas futuras, e a dedup é o critério**: a fatura
+  seguinte ENCONTRA o título pela identidade da parcela, nunca cria outro, e a parcela que
+  não veio vira o aviso `parcela_nao_veio` (`installment_plan.py`, `installments.py`,
+  `missing_installments.py`, chave `keys.derive_installment_payable_key`, 86e3qhhtb);
+- **o encargo do RESUMO da fatura não vira compra** (regra 11 do prompt, 86e3tpu7r).
+
+Deixou no código: cinco migrations (`a94a539e1d34` selo, `7c3e9a1d5f28` vínculo e impressão
+digital, `5d8e2b7c4a91` natureza, `b4e7c2a9d613` parcela na linha, `c8d1f4e6a2b9` tabela
+filha das parcelas), a flag `OMIE_INSTALLMENT_POSTING_ENABLED` (desligada, a terceira escrita
+no Omie), `core/cpf.py` e 11 rotas na lista canônica (126 antes do épico). Números ao fechar
+o épico, conferidos em 21/10/2026: **137** endpoints sensíveis
+(`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`), **29** permissões
+(nenhuma nova; contar os membros de `class Permission` em `core/authz.py`) e **18** pares de
+AAD (`grep -c "^AAD_.* = (" apps/api/app/core/crypto_service.py`). O comportamento da
+categoria na Omie não é guardado, por decisão: o guia repete um padrão escolhido ao gerar.
+
 **Reprocessar uma conciliação CONCLUÍDA (86e3n70q9, épico 86e3n70nv)** é o mesmo
 `POST /reconciliations/{id}/reprocess` do "tentar de novo": aceita `error`, `reviewing` e
 `done`; `processing` é 409 decidido no UPDATE condicional (dois cliques nunca agendam dois
@@ -1895,6 +1938,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.107, 21/10/2026. **O épico da ponte Domínio → Omie (86e3qhhr0, reunião com o Gabriel) ganhou o parágrafo dele na §8, e a documentação fechou (86e3qhhtj, subtask 7, no molde da 86e3ndj0p).** O parágrafo conta o ciclo inteiro (relações do Domínio → vínculo conta ↔ CNPJ/CPF, à mão também → planilha do Painel do Contador com documento e natureza → guia das categorias para a tela da Omie; fornecedor pelo nome; reimportação que só adiciona; parcelas futuras com a dedup como critério; encargo do resumo fora da extração), o que ficou no código (cinco migrations, a flag `OMIE_INSTALLMENT_POSTING_ENABLED`, `core/cpf.py`, 11 rotas sobre as 126 de antes) e os números ao fechar, cada um com o comando que o confere: **137** endpoints sensíveis, **29** permissões e **18** pares de AAD. A varredura não achou contagem velha fora dos rodapés e dos "Números deste primer" de cada sprint, que são registro da sprint. Skills: `crypto-field` com 18 constantes e 18 colunas (dizia 11), o par `party_document_encrypted` como exemplo de campo novo nas três pontas e a regra "texto de documento nunca passa por `int`"; `omie` com 12 métodos em 14 chamadas (dizia 13), a chave da parcela futura (`derive_installment_payable_key`), o encontro da fatura seguinte, o aviso `parcela_nao_veio` e a data ORIGINAL que a Cora imprime na parcela, todas as âncoras conferidas por grep. Manual 1.4 (54 páginas, 24 figuras, 6,4 MB; o botão da landing diz "PDF, 6 MB"), com o selo "No Omie" (86e3t4vpq) e o cartão em tipo desconhecido (86e3qyu04) de carona. PRD consolidado v1.31 (34.1, 34.2 e 34.7). Nenhum código de produto mudou._
 
 _Versão 1.106, 21/10/2026. **O de-para no destino conta contábil passou a gerar o guia para configurar as categorias na tela da Omie (86e3qhht4, subtask 5 do épico 86e3qhhr0; resposta do Gabriel de 20/10: ele configura pela tela, não há planilha).** `GET /clients/{id}/mapping/omie-categories-guide?comportamento=` (lista canônica 136 → **137**, coleção, bateria dos três atacantes; `AccessibleClientDep`, 1 linha `export`), num router próprio incluído ANTES do de-para por destino, porque `/mapping/omie-categories-guide` casaria com `/mapping/{destination_type}`. O gerador (`client_mapping/omie_guide.py`) lê a MESMA `universe` + `with_names` da lista e o `active_chart` do plano do Omie; XLSX com "Leia-me", "Configurar", "Não gerar lançamento" e "Sem decisão" (esta com o motivo: sem decisão, decisão antiga sem conta do plano ou conta que ficou sintética ou inativa), nome não resolvido vazio, texto em `@`, fórmula neutralizada, nome do arquivo `guia-omie-<hex8>.xlsx`. Os quatro comportamentos e os rótulos moram no backend (`BEHAVIOR_LABELS`) e na tela (`lib/validation/omie-categories-guide.ts`), com um teste do backend que lê o arquivo do front e reprova se um rótulo divergir. Conexão Omie com erro NÃO barra (o guia não chama a Omie, como `hasOmieConnection`); o cliente encerrado perde as conexões no encerramento, então não tem o guia. Evento `guia_categorias_omie_gerado` (o comportamento e as contagens por bloco, sem dedup). Na tela, "Guia para configurar no Omie" ao lado de Exportar só no `conta_contabil` e para cliente com Omie, diálogo com o comportamento padrão (pré-marcado "Gerar provisão e baixa"); o diálogo "Gerar planilha da Omie" passou a ficar aberto depois do download com o próximo passo e, para cliente com Omie (a mesma `hasOmieConnection` do botão), o link para o de-para na conta contábil (`accountingMappingPath`). Um unitário trava a ordem dos routers no app. O inventário de consumidores de origem ganhou o arquivo. Matriz (**29**) e pares de AAD (**18**) iguais, sem migration._
 
