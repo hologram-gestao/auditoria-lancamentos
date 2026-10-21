@@ -11,9 +11,9 @@ description: >
 
 # /crypto-field — campo cifrado novo, sem pisar nas landmines
 
-Área onde "o agent achou que sabia" sai mais caro. Números conferidos em 14/09/2026
-contra o código: 11 campos cifrados, `CURRENT_ENVELOPE_VERSION = 1`, 3 suítes com
-49 testes. Se um grep não bater, o código andou: releia o arquivo. Caminhos relativos
+Área onde "o agent achou que sabia" sai mais caro. Números conferidos contra o código:
+18 campos cifrados e `CURRENT_ENVELOPE_VERSION = 1` (21/10/2026), 3 suítes com 49 testes
+(14/09/2026). Se um grep não bater, o código andou: releia o arquivo. Caminhos relativos
 a `apps/api/`.
 
 ## Passo 1 — A pergunta que vem ANTES de cifrar: isso precisa persistir?
@@ -101,7 +101,7 @@ grep -rn "KEK_KEY_ID\|KEK_KMS_KEY_NAME" .github/workflows/deploy-dev.yml | head 
 
 1. **Coluna par**: `<campo>_encrypted` (`Text`) + `<campo>_iv` (`String(IV_HEX_LENGTH)`).
    Nullable se o dado é opcional. Migration pela skill `migration`.
-2. **Constante AAD nova** em `crypto_service.py`, no bloco das outras 11:
+2. **Constante AAD nova** em `crypto_service.py`, no bloco das outras 18:
    `AAD_<ALGO> = ("<tabela>", "<coluna>_encrypted")`. ⚠️ **Esses pares são CONGELADOS**
    (`crypto_service.py:9-11`): renomear tabela ou coluna depois invalida a decifragem
    de tudo que já foi gravado. Escolha o nome uma vez.
@@ -111,15 +111,26 @@ grep -rn "KEK_KEY_ID\|KEK_KMS_KEY_NAME" .github/workflows/deploy-dev.yml | head 
 4. **A pk do AAD é a da PRÓPRIA linha.** Numa criação, gere o UUID ANTES do INSERT para
    compor o AAD (padrão em `clients/service.py:191-196`) — deixar o default do ORM
    resolver no flush daria AAD com pk errada.
-5. **Entrar na lista canônica** da §4.1 do CLAUDE.md **na mesma entrega** (§13).
+5. **Entrar na lista canônica** da §4.1 do CLAUDE.md **na mesma entrega** (§13). O
+   exemplo mais recente é o documento do vínculo conta ↔ cliente/fornecedor (86e3qhhrn):
+   a constante `AAD_ACCOUNTING_ACCOUNT_PARTY_DOCUMENT`
+   (`("client_accounting_accounts", "party_document_encrypted")`, `crypto_service.py:66-69`),
+   a coluna no modelo (`db/models/client_accounting_account.py:316`) com o CHECK que amarra
+   documento, IV e tipo (`:157-158`) e o item da §4.1, os três no mesmo PR. Campo que é
+   DOCUMENTO tem uma regra a mais: **o texto nunca passa por `int`**. Um CNPJ que começa com
+   zeros perde os zeros e vira "documento inválido" (caso real da relação de clientes da
+   Hologram). O leitor do relatório só converte quando a CÉLULA já veio numérica, e então
+   repõe os zeros pelo tamanho que sobrou (`client_accounting_chart/parties.py:290-317`,
+   `normalize_document`); o digitado na tela não passa por número nenhum
+   (`parse_typed_document`, `parties.py:322`).
 6. **Não precisa entrar no `scripts/rotate_encryption_key.py`.** Ele converte linhas
-   **bare legadas** (pré-Sprint 3) e importa 7 das 11 constantes; campo criado depois
+   **bare legadas** (pré-Sprint 3) e importa 7 das 18 constantes; campo criado depois
    da Sprint 3 nasce já no envelope `v1` e nunca tem linha bare. Se um dia existir
    re-embrulho de KEK (hoje não existe — landmine 1), aí sim todos entram.
 
 ```bash
-grep -c "^AAD_" apps/api/app/core/crypto_service.py            # hoje 11
-grep -n "_encrypted\b" apps/api/app/db/models/*.py | grep Mapped | wc -l   # hoje 11 colunas
+grep -c "^AAD_" apps/api/app/core/crypto_service.py            # hoje 18
+grep -n "_encrypted\b" apps/api/app/db/models/*.py | grep Mapped | wc -l   # hoje 18 colunas
 ```
 
 ## Passo 5 — Falha de decifragem tem DOIS regimes, e nenhum é silêncio

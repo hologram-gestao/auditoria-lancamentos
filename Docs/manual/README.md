@@ -1,11 +1,48 @@
 # Manual do Hologram OS (PDF)
 
-**[Manual-Hologram-OS.pdf](Manual-Hologram-OS.pdf)**: versão 1.3, 45 páginas, A4, com 18
+**[Manual-Hologram-OS.pdf](Manual-Hologram-OS.pdf)**: versão 1.4, 54 páginas, A4, com 24
 capturas de tela do produto, todas no tema Hologram. Material de apoio para apresentação a
 escritórios contábeis e BPOs, e manual de operação para quem usa o sistema. Produto:
 **Hologram OS**; empresa: Hologram Gestão. A landing serve uma cópia idêntica byte a byte em
 `apps/web/public/manual-hologram-os.pdf`, com o tamanho ao lado do botão (`content.ts`, travado
 por teste): ao regerar, copie o PDF e confira o tamanho.
+
+## O que mudou na 1.4 (21/10/2026, task 86e3qhhtj)
+
+Os capítulos que o épico da reunião com o Gabriel (86e3qhhr0, PRs #338 a #356) mudou ou não
+cobria, mais duas entregas de fora do épico, posteriores à 1.3, que entraram de carona: o selo
+"No Omie" na linha conciliada (86e3t4vpq) e o cartão cadastrado no Omie num tipo que a
+plataforma não reconhece (86e3qyu04). O que estava certo ficou como estava.
+
+- **Cap. 2:** o caminho de volta para a Omie (a planilha do Painel do Contador e o guia das
+  categorias).
+- **5.5:** a reimportação que só adiciona e atualiza, com "Revisar mudanças" antes de gravar, o
+  selo "Não veio na última importação" e "Baixar planilha"; a natureza devedora/credora; a aba
+  "Clientes e fornecedores" em duas listas (importar as relações do Domínio, o que recusa o
+  arquivo e o que só fica sem vínculo, vincular e remover à mão, o documento cifrado); "Gerar
+  planilha da Omie" (documento sem cadastro, contas a corrigir, a importação no Painel do
+  Contador como passo do escritório).
+- **6.1:** o cartão cadastrado em outro tipo no Omie, em que o arquivo decide.
+- **6.2:** o pagamento e os encargos do RESUMO da fatura não viram compra.
+- **6.4:** o selo "No Omie" e o que ele não decide.
+- **6.6:** o fornecedor pelo nome ou pela sugestão da compra e o diretório guardado por algumas
+  horas; a compra parcelada (vencimentos, a fatura seguinte que encontra o título, o aviso da
+  parcela que não veio e que a plataforma não exclui título, a data impressa pela Cora).
+- **7.3:** o guia para configurar as categorias na tela da Omie (três blocos e o comportamento
+  padrão).
+- **Cap. 11 e apêndices:** dois limites (plano e categorias chegam na Omie pela mão do
+  escritório; comportamento por categoria não guardado), quatro recusas, quatro passos no
+  checklist do cliente novo e dois no mensal, quatro termos no glossário (guia das categorias,
+  natureza, parcela futura, vínculo). O checklist é o Apêndice B, não o cap. 11 como a
+  descrição da task dizia.
+- **Figuras:** seis novas, recortadas dos prints das subtasks pelo `recortar-imagens.py`
+  (`vinculos`, `planilha-omie`, `guia-omie`, `parcelas`, `fornecedor-nome`, `situacao-omie`).
+  Esses prints são do mesmo e2e mockado, mas em DPR 2,75, e os cortes estão nessa escala. O
+  `plano-contabil` foi recapturado pelo mesmo cenário de antes ("nova conta: gaveta, código
+  repetido…", DPR 2), agora com as abas, "Baixar planilha", "Gerar planilha da Omie" e o selo; o
+  print novo substituiu o antigo em `screenshots/pr-shots-86e3ndj0p/mock/` com o mesmo nome.
+- O PDF passou de 4,9 para 6,4 MB (nove páginas e seis figuras a mais); o botão da landing
+  diz "PDF, 6 MB".
 
 ## O que mudou na 1.3 (13/10/2026, task 86e3ndj0p)
 
@@ -91,15 +128,15 @@ exclusão de layout (#323) mudaram. O que estava certo ficou como estava.
   `apps/api/tests/fixtures/accounting_sample/`.
 - **Público:** equipe do escritório (sócio, gerente, analista), com um capítulo sobre o
   acesso concedido ao cliente final.
-- O conteúdo reflete o produto na `origin/develop` em 13/10/2026 (texto revisto na 1.1, em
+- O conteúdo reflete o produto na `origin/develop` em 21/10/2026 (texto revisto na 1.1, em
   30/09; na 1.2, só o que as telas novas desmentiam; na 1.3, os capítulos tocados pelo épico
-  86e3n70nv).
+  86e3n70nv; na 1.4, os tocados pelo épico 86e3qhhr0).
 
 ## Como regerar
 
 ```bash
-# 1. figuras (recorta e reduz os prints de screenshots/pr-shots-86e3mz74x/ e
-#    screenshots/pr-shots-86e3ndj0p/; fonte ausente = figura mantida). Num worktree, SHOTS_DIR
+# 1. figuras (recorta e reduz os prints de screenshots/pr-shots-86e3mz74x/, …86e3ndj0p/ e das
+#    pastas das subtasks do épico 86e3qhhr0 listadas no JOBS; fonte ausente = figura mantida). Num worktree, SHOTS_DIR
 #    aponta a pasta screenshots/ do checkout principal.
 SHOTS_DIR=<checkout>/screenshots uv run --with pillow python Docs/manual/fonte/recortar-imagens.py
 
@@ -125,7 +162,10 @@ d = pdfium.PdfDocument('Docs/manual/Manual-Hologram-OS.pdf')
 
 ### Recapturar as figuras
 
-Duas fontes, as duas em 1440x900 com DPR 2 e tema Hologram:
+Duas fontes, as duas em 1440x900 com DPR 2 e tema Hologram, mais os prints das subtasks do
+épico 86e3qhhr0 e da 86e3t4vpq (pastas `pr-shots-<id>/` no `JOBS`), tirados pelo próprio gate de
+a11y de cada entrega em DPR 2,75: para refazer uma dessas, rode o cenário citado no README da
+pasta com a config abaixo e ajuste o corte do `JOBS` para DPR 2.
 
 **Treze do e2e com a API interceptada** ("Cliente Exemplo Ltda"): em
 `pr-shots-86e3mz74x/mock/`, clientes, anomalias, plano de contas e carteira; em
@@ -167,12 +207,12 @@ docker run --rm --ipc=host --add-host=host.docker.internal:host-gateway -u $(id 
 
 ## Arquivos
 
-| Caminho                     | O que é                                                                         |
-| --------------------------- | ------------------------------------------------------------------------------- |
-| `Manual-Hologram-OS.pdf`    | O documento final                                                               |
-| `fonte/manual.html`         | Todo o texto do manual                                                          |
-| `fonte/manual.css`          | Folha de estilo de impressão (capa, cabeçalhos, sumário com páginas, figuras)   |
-| `fonte/img/`                | As 18 figuras já recortadas                                                     |
-| `fonte/fonts/`              | IBM Plex Serif/Mono e Fira Sans (licença OFL), embutidas no PDF                 |
-| `fonte/recortar-imagens.py` | Gera `fonte/img/` a partir de `screenshots/pr-shots-86e3mz74x/` e `…86e3ndj0p/` |
-| `fonte/capturas/`           | Roteiro das capturas da tela real: dados de demonstração pela API e Playwright  |
+| Caminho                     | O que é                                                                        |
+| --------------------------- | ------------------------------------------------------------------------------ |
+| `Manual-Hologram-OS.pdf`    | O documento final                                                              |
+| `fonte/manual.html`         | Todo o texto do manual                                                         |
+| `fonte/manual.css`          | Folha de estilo de impressão (capa, cabeçalhos, sumário com páginas, figuras)  |
+| `fonte/img/`                | As 24 figuras já recortadas                                                    |
+| `fonte/fonts/`              | IBM Plex Serif/Mono e Fira Sans (licença OFL), embutidas no PDF                |
+| `fonte/recortar-imagens.py` | Gera `fonte/img/` a partir das pastas de `screenshots/` listadas no `JOBS`     |
+| `fonte/capturas/`           | Roteiro das capturas da tela real: dados de demonstração pela API e Playwright |
