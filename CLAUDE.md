@@ -1769,8 +1769,8 @@ Balancer HTTPS.
 **A ponte Domínio → Omie do escritório contábil também NÃO foi sprint do hub.** Veio do
 épico ClickUp `86e3qhhr0` (reunião do Pedro com o Gabriel, contador externo, em 14/10/2026;
 bate-bola em 19/10 com o modelo da planilha da Omie; respostas finais em 20/10, quando a
-reunião com o Landim acrescentou a subtask 9), nove subtasks entregues de 16 a 21/10 (PRs
-#338 a #356), regras como lei atual nas §3.15, §3.16, §4.1, §4.8, §4.11 e §4.12 e o detalhe
+reunião com o Landim acrescentou a subtask 9), oito subtasks de código entregues de 16 a
+21/10 (PRs #338 a #356) e a de documentação no #357, regras como lei atual nas §3.15, §3.16, §4.1, §4.8, §4.11 e §4.12 e o detalhe
 de cada uma nos rodapés v1.98 a v1.106. O pedido de fundo era o do Gabriel: três dias de
 trabalho manual por cliente para ligar o Domínio à Omie. O ciclo que o épico fechou, ponta a
 ponta:
@@ -1806,11 +1806,8 @@ no Omie), `core/cpf.py` e 11 rotas na lista canônica (126 antes do épico). Nú
 o épico, conferidos em 21/10/2026: **137** endpoints sensíveis
 (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`), **29** permissões
 (nenhuma nova; contar os membros de `class Permission` em `core/authz.py`) e **18** pares de
-AAD (`grep -c "^AAD_.* = (" apps/api/app/core/crypto_service.py`). Fica como prova humana:
-importar no Painel do Contador a planilha gerada e conferir a primeira série de parcelas com
-a flag ligada. Fica como decisão aberta: o comportamento por categoria não é guardado (o guia
-repete um padrão) e a linha da provisão parada em `envio_anterior_sem_confirmacao` segue sem
-saída pela tela (§10).
+AAD (`grep -c "^AAD_.* = (" apps/api/app/core/crypto_service.py`). O comportamento da
+categoria na Omie não é guardado, por decisão: o guia repete um padrão escolhido ao gerar.
 
 **Reprocessar uma conciliação CONCLUÍDA (86e3n70q9, épico 86e3n70nv)** é o mesmo
 `POST /reconciliations/{id}/reprocess` do "tentar de novo": aceita `error`, `reviewing` e

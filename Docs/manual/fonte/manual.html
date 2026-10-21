@@ -123,7 +123,7 @@
   <li>Não substitui o ERP nem o sistema contábil. Ela conversa com os dois.</li>
   <li>Não decide classificação sozinha. Sugere, aponta divergência e espera alguém confirmar.</li>
   <li>Não envia nada para a contabilidade sem comando. O arquivo é gerado, conferido e baixado por uma pessoa.</li>
-  <li>Não altera títulos, cadastros ou saldos no ERP. A única escrita que ela faz está descrita na seção 6.6, e é explícita.</li>
+  <li>Não altera nem exclui títulos, cadastros ou saldos que já existem no ERP. O que ela escreve, nas compras do cartão (lançamentos, títulos no Contas a Pagar, baixas e o cadastro de fornecedor novo), está descrito na seção 6.6, e cada escrita é um comando explícito de quem lança.</li>
 </ul>
 
 <!-- ============================ CAP 2 ============================ -->
@@ -355,7 +355,7 @@
 
 <figure>
   <img src="img/plano-contabil.png" alt="Plano contábil do cliente">
-  <figcaption>O plano contábil na ordem da classificação, com a sintética em cima das analíticas dela. No topo, <span class="ui">Baixar planilha</span>, <span class="ui">Gerar planilha da Omie</span>, <span class="ui">Nova conta</span> e <span class="ui">Reimportar planilha</span>; abaixo deles, as abas <span class="ui">Contas</span> e <span class="ui">Clientes e fornecedores</span>. A conta que não veio na última importação continua ativa, com o selo. Só contas analíticas e ativas podem receber lançamento.</figcaption>
+  <figcaption>O plano contábil na ordem da classificação, com a sintética em cima das analíticas dela. No topo, na aba <span class="ui">Contas</span>, <span class="ui">Baixar planilha</span>, <span class="ui">Gerar planilha da Omie</span>, <span class="ui">Nova conta</span> e <span class="ui">Reimportar planilha</span>; abaixo deles, as abas <span class="ui">Contas</span> e <span class="ui">Clientes e fornecedores</span>. A conta que não veio na última importação continua ativa, com o selo. Só contas analíticas e ativas podem receber lançamento.</figcaption>
 </figure>
 
 <h3>Como a importação se comporta</h3>
@@ -385,7 +385,7 @@
 
 <p>O caminho principal é importar a <span class="ui">Relação de clientes</span> e a <span class="ui">Relação de fornecedores</span> exportadas do Domínio (.xls ou .xlsx), uma de cada vez, em <span class="ui">Importar relação</span>. A coluna “Conta” do relatório é o código reduzido; o tipo do vínculo vem do título do relatório. Reimportar não duplica, e a conta vinculada que não vem no relatório fica como está.</p>
 <ul class="tight">
-  <li><strong>O que recusa o arquivo inteiro</strong>: uma conta do relatório que não existe no plano contábil ou é sintética, com o código da conta e o motivo, e um relatório de outra empresa (o CNPJ do cabeçalho é conferido contra o das relações já importadas para o cliente). Nada é gravado.</li>
+  <li><strong>O que recusa o arquivo inteiro</strong>: uma conta do relatório que não existe no plano contábil ou é sintética, com o código da conta e o motivo; uma linha com cara de pessoa depois da linha de total do relatório (sinal de arquivo editado); e um relatório de outra empresa (o CNPJ do cabeçalho é conferido contra o das relações já importadas para o cliente). Nada é gravado.</li>
   <li><strong>O que só fica sem vínculo</strong>, e volta listado depois da importação com a linha, a conta e o motivo: a pessoa sem conta no Domínio (conta 0), sem CNPJ ou CPF, com documento de dígito verificador errado, e a conta compartilhada por mais de uma pessoa (o vínculo é um para um).</li>
 </ul>
 <p>O vínculo também se faz à mão, conta a conta, em <span class="ui">Vincular conta</span>: escolhe-se uma conta analítica e ativa, o tipo (cliente ou fornecedor) e o CNPJ ou CPF, conferido pelo dígito verificador. O mesmo documento, com o mesmo tipo, já ligado a outra conta do cliente é recusado com o código dessa outra conta; a mesma empresa como cliente numa conta e fornecedor noutra é aceita. <span class="ui">Remover vínculo</span> desfaz, inclusive um vínculo que veio da relação.</p>
@@ -396,7 +396,7 @@
 </div>
 
 <h3>Levar o plano para a Omie</h3>
-<p>A Omie não recebe plano de contas pela integração; recebe pela planilha de importação do Painel do Contador. <span class="ui">Gerar planilha da Omie</span> monta essa planilha a partir do plano contábil do cliente, uma linha por conta, na ordem do plano, com a classificação, o código reduzido, o nome, o tipo, a natureza e, nas contas vinculadas, o CNPJ ou CPF, que é por onde a Omie liga a conta ao cadastro.</p>
+<p>A Omie não recebe plano de contas pela integração; recebe pela planilha de importação do Painel do Contador. <span class="ui">Gerar planilha da Omie</span>, no topo da aba <span class="ui">Contas</span>, monta essa planilha a partir do plano contábil do cliente, uma linha por conta, na ordem do plano, com a classificação, o código reduzido, o nome, o tipo, a natureza e, nas contas vinculadas, o CNPJ ou CPF, que é por onde a Omie liga a conta ao cadastro.</p>
 
 <figure class="slim">
   <img src="img/planilha-omie.png" alt="Diálogo Gerar planilha da Omie com as contagens e o aviso de documento sem cadastro">
@@ -405,7 +405,7 @@
 
 <ul class="tight">
   <li><strong>Documento sem cadastro no Omie</strong>: a Omie não cria o cadastro na importação, e a conta fica como “diversos”. O diálogo avisa quantas são; cadastre o cliente ou fornecedor no Omie antes e use <span class="ui">Conferir de novo no Omie</span>.</li>
-  <li><strong>Conta sem classificação ou sem natureza</strong>: a planilha não sai, e o diálogo lista os códigos das contas a corrigir. A plataforma nunca altera um texto para fazer caber.</li>
+  <li><strong>Conta que a Omie não aceitaria</strong>: sem classificação, sem natureza, com nome que começa com sinal de fórmula (= + - @), que não cabe na coluna ou com quebra de linha. A planilha não sai, e o diálogo lista os códigos das contas a corrigir, por motivo. A plataforma nunca altera um texto para fazer caber.</li>
   <li><strong>Importar na Omie</strong> é um passo do escritório, no Painel do Contador; a plataforma não envia a planilha. Depois do download, o diálogo indica o passo seguinte: configurar as categorias pelo guia do de-para (seção 7.3).</li>
 </ul>
 
@@ -758,7 +758,7 @@
   <li><strong>Não gerar lançamento</strong>: as categorias marcadas como “Não mapear”.</li>
   <li><strong>Sem decisão</strong>: as que ainda precisam de uma conta no de-para, com o motivo (inclusive a decisão antiga cuja conta ficou sintética ou inativa).</li>
 </ul>
-<p>Só entram as categorias ativas no Omie. O comportamento é um padrão escolhido na hora (<span class="ui">Gerar provisão e baixa</span>, <span class="ui">Gerar só a baixa, pela conta de resultado</span>, <span class="ui">Gerar só a baixa, pela conta do cliente ou fornecedor</span> ou <span class="ui">Não gerar lançamento</span>); a plataforma não guarda um comportamento por categoria, e a exceção se ajusta na própria Omie. O guia é de mão única: nada confere depois o que ficou configurado lá.</p>
+<p>Só entram as categorias ativas no Omie. O comportamento é um padrão escolhido na hora, que o diálogo já traz marcado em <span class="ui">Gerar provisão e baixa</span> (a figura mostra outra escolha) (<span class="ui">Gerar provisão e baixa</span>, <span class="ui">Gerar só a baixa, pela conta de resultado</span>, <span class="ui">Gerar só a baixa, pela conta do cliente ou fornecedor</span> ou <span class="ui">Não gerar lançamento</span>); a plataforma não guarda um comportamento por categoria, e a exceção se ajusta na própria Omie. O guia é de mão única: nada confere depois o que ficou configurado lá.</p>
 
 <h3>Os estados de uma categoria</h3>
 <table>
@@ -1000,7 +1000,7 @@
     <tr><td>Competência fechada no Omie</td><td>O Omie recusou o título ou o lançamento porque o mês está fechado no ERP.</td><td>Conferir o fechamento com quem administra o Omie do cliente antes de lançar de novo.</td></tr>
     <tr><td>Relatório de outra empresa</td><td>A relação de clientes ou fornecedores importada é de uma empresa diferente da que já foi importada para este cliente.</td><td>Exportar do Domínio a relação da empresa certa.</td></tr>
     <tr><td>Documento já vinculado a outra conta</td><td>O mesmo CNPJ ou CPF, com o mesmo tipo, já está ligado a outra conta do cliente (a mensagem diz qual).</td><td>Remover o vínculo da outra conta, se ele estiver errado, ou conferir o documento.</td></tr>
-    <tr><td>Planilha da Omie com contas a corrigir</td><td>Há conta sem classificação ou sem natureza no plano contábil.</td><td>Corrigir as contas listadas pelo código, pela edição ou reimportando o plano.</td></tr>
+    <tr><td>Planilha da Omie com contas a corrigir</td><td>Há conta que a Omie não aceitaria: sem classificação ou natureza, ou com nome que começa com sinal de fórmula, que não cabe na coluna ou com quebra de linha.</td><td>Corrigir as contas listadas pelo código, pela edição ou reimportando o plano.</td></tr>
     <tr><td>Parcela pendente na fatura anterior</td><td>A parcela desta fatura pertence a uma série cujo título ainda não foi criado na conciliação anterior.</td><td>Resolver o lançamento da parcela na fatura anterior e voltar a esta.</td></tr>
     <tr><td>Layout já gerou arquivos</td><td>Tentativa de excluir um layout que já produziu arquivo contábil.</td><td>Nada a fazer: o layout fica, porque o download refaz cada arquivo pela versão que o gerou.</td></tr>
     <tr><td>Cliente encerrado</td><td>Toda escrita em cliente encerrado é bloqueada.</td><td>Apenas leitura. Um cliente que retorna entra como cadastro novo.</td></tr>
