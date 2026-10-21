@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Literal
 from openpyxl import Workbook
 from starlette.concurrency import run_in_threadpool
 
-from app.core.exceptions import NoOriginConnectionError
+from app.core.exceptions import ClientClosedError, NoOriginConnectionError
 from app.core.logging import get_logger
 from app.db.models import ACCOUNTING_DESTINATION_TYPE
 from app.integrations.providers.registry import offers_origin_client
@@ -48,7 +48,7 @@ if TYPE_CHECKING:
 
     from app.core.config import Settings
     from app.db.models import Client
-    from app.modules.client_mapping.listing import ClientMappingListService, NamedRow
+    from app.modules.client_mapping.listing import ClientMappingListService, MappingRow, NamedRow
     from app.modules.client_mapping.repository import ClientMappingRepository
     from app.modules.client_mapping.service import ClientMappingDecisionService
     from app.modules.usage_events.service import UsageEventService
@@ -93,10 +93,13 @@ NOT_MAPPED_COLUMNS = ("codigo_categoria", "nome_categoria")
 UNDECIDED_COLUMNS = ("codigo_categoria", "nome_categoria", "motivo")
 
 #: Por que a categoria está em "Sem decisão" — vocabulário fechado.
-type UndecidedReason = Literal["sem_decisao", "decisao_sem_conta"]
+type UndecidedReason = Literal["sem_decisao", "decisao_sem_conta", "conta_nao_lancavel"]
 UNDECIDED_REASON_LABELS: dict[UndecidedReason, str] = {
     "sem_decisao": "Sem decisão no de-para",
     "decisao_sem_conta": "Decisão antiga sem conta do plano contábil: refaça no de-para",
+    "conta_nao_lancavel": (
+        "A conta decidida ficou sintética ou inativa no plano contábil: refaça no de-para"
+    ),
 }
 
 
@@ -129,19 +132,32 @@ class OmieGuidePlan:
         )
 
 
-def plan_omie_guide(rows: Sequence[NamedRow], active_omie_codes: Collection[str]) -> OmieGuidePlan:
+def in_guide_scope(row: MappingRow, active_omie_codes: Collection[str]) -> bool:
+    """O recorte do guia: categoria de origem `omie` ATIVA no plano de contas do cliente.
+
+    É o que a tela de categorias da Omie lista. O resto (inativa, só na base de
+    movimentos, de outra origem) só é contado no "Leia-me".
+    """
+    return row.source_type == CHART_SOURCE_TYPE and row.category_code in active_omie_codes
+
+
+def plan_omie_guide(
+    rows: Sequence[NamedRow],
+    active_omie_codes: Collection[str],
+    *,
+    already_out_of_scope: int = 0,
+) -> OmieGuidePlan:
     """Classifica as linhas do `conta_contabil` nos três blocos do guia.
 
-    Recorte: só categorias de origem `omie` ATIVAS no plano de contas do cliente — é
-    o que a tela da Omie lista. O resto (inativa, só na base de movimentos, de outra
-    origem) conta em `out_of_scope`. Ordem: código da categoria, como a tela da Omie.
+    Recorte por `in_guide_scope`; o que fica fora conta em `out_of_scope`, somado a
+    `already_out_of_scope` (as linhas que o chamador já recortou antes de resolver
+    nomes). Ordem: código da categoria, como a tela da Omie.
     """
     active = set(active_omie_codes)
     in_scope: list[NamedRow] = []
-    out_of_scope = 0
+    out_of_scope = already_out_of_scope
     for named in rows:
-        row = named.row
-        if row.source_type == CHART_SOURCE_TYPE and row.category_code in active:
+        if in_guide_scope(named.row, active):
             in_scope.append(named)
         else:
             out_of_scope += 1
@@ -156,11 +172,14 @@ def plan_omie_guide(rows: Sequence[NamedRow], active_omie_codes: Collection[str]
             not_mapped.append(named)
         elif situation in {"herdada", "confirmada"}:
             # Só vai para "Configurar" quem tem a conta do plano do cliente: a decisão
-            # legada do catálogo (S16, `requires_redo`) não diz conta nenhuma.
-            if named.account is not None:
-                configure.append(named)
-            else:
+            # legada do catálogo (S16, `requires_redo`) não diz conta nenhuma, e a conta
+            # que virou sintética ou inativa depois da decisão não recebe lançamento.
+            if named.account is None:
                 undecided.append((named, "decisao_sem_conta"))
+            elif not named.account.postable:
+                undecided.append((named, "conta_nao_lancavel"))
+            else:
+                configure.append(named)
         else:
             undecided.append((named, "sem_decisao"))
     return OmieGuidePlan(
@@ -291,8 +310,18 @@ async def assert_has_omie_origin(db: AsyncSession, client: Client, *, settings: 
     da categoria vem do cache fail-soft de sempre), então a conexão com erro NÃO
     barra, como `hasOmieConnection` na tela. Sem conexão nenhuma é 409
     `SEM_CONEXAO`; só por arquivo é 409 `CAPACIDADE_AUSENTE` pela mesma
-    `assert_offers_origin_client` do plano de contas e da conciliação.
+    `assert_offers_origin_client` do plano de contas e da conciliação. Cliente
+    encerrado perdeu as conexões e o plano do Omie no encerramento (§4.12): 409 de
+    encerrado, e não a instrução de conectar uma origem que ele não pode mais ter.
     """
+    if client.closed_at is not None:
+        raise ClientClosedError(
+            f"client {client.id} is closed; no Omie categories guide",
+            user_message=(
+                "Cliente encerrado: as conexões e as categorias do Omie foram removidas no "
+                "encerramento, então não há guia a gerar."
+            ),
+        )
     connections = await resolve_origin_connections(db, client, settings=settings)
     if not connections:
         raise NoOriginConnectionError(f"client {client.id} has no origin connection")
@@ -334,8 +363,11 @@ class OmieCategoriesGuideService:
         destination = await self._decisions.resolve_destination(client, ACCOUNTING_DESTINATION_TYPE)
         rows = await self._listing.universe(client, destination, competence)
         active_codes = {c.category_code for c in await self._repo.active_chart(client.id)}
-        named = await self._listing.with_names(client, destination, rows)
-        plan = plan_omie_guide(named, active_codes)
+        # Nomes e contas só das linhas do guia: a fora do recorte vira só contagem, e
+        # resolvê-la decifraria rótulo e conta para nada.
+        scoped = [row for row in rows if in_guide_scope(row, active_codes)]
+        named = await self._listing.with_names(client, destination, scoped)
+        plan = plan_omie_guide(named, active_codes, already_out_of_scope=len(rows) - len(scoped))
         content = await run_in_threadpool(
             build_omie_guide_workbook,
             plan,

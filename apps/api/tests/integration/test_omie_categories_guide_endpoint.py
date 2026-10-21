@@ -288,3 +288,16 @@ class TestGuia:
         resp = await client_with_db.get(_url(world), params={"comportamento": "nao_gerar"})
         assert resp.status_code == 409, resp.text
         assert resp.json()["error"]["code"] == "SEM_CONEXAO"
+
+    async def test_cliente_encerrado_e_409_de_encerrado(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        from datetime import UTC, datetime
+
+        world.client.closed_at = datetime.now(UTC)
+        await db_session.flush()
+        resp = await client_with_db.get(_url(world), params={"comportamento": "nao_gerar"})
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["error"]["code"] == "CONFLICT"
+        assert "Cliente encerrado" in resp.json()["error"]["userMessage"]
+        assert "Cliente guia Omie" not in resp.text

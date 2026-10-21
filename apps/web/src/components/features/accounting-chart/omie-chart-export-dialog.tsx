@@ -18,7 +18,9 @@
  *
  * Depois do download o diálogo fica aberto com o PRÓXIMO passo (86e3qhht4): importado o
  * plano na Omie, as categorias se configuram com o guia do de-para, no destino conta
- * contábil. Só texto e link.
+ * contábil. Só texto e link, e só para cliente com Omie: é a MESMA pergunta que o
+ * de-para faz para mostrar o botão do guia (`hasOmieConnection`), senão o link
+ * mandaria procurar uma ação que o destino não oferece.
  */
 
 import {
@@ -50,6 +52,7 @@ import {
   useOmieChartExportPreview,
   useRefreshOmieChartExportPreview,
 } from '@/hooks/use-client-accounting-chart';
+import { useClientDetail } from '@/hooks/use-clients';
 import {
   omieExportReasonLabel,
   readOmieExportRefusal,
@@ -58,6 +61,7 @@ import {
 import { ApiError, NetworkError } from '@/lib/api/client';
 import type { OmieExportPreview, OmieRegistryCheck } from '@/lib/contracts';
 import { triggerBrowserDownload } from '@/lib/download';
+import { hasOmieConnection } from '@/lib/origin-capabilities';
 
 interface OmieChartExportActionProps {
   clientId: string;
@@ -203,22 +207,29 @@ function OmieChartExportDialog({
 }
 
 function NextStepNotice({ clientId }: { clientId: string }) {
+  // O shell já carregou este detalhe: vem do cache, sem segundo request.
+  const client = useClientDetail(clientId).data;
+  const offersGuide = hasOmieConnection(client?.connections ?? []);
   return (
     <div role="status" className="space-y-3 text-sm" data-testid="omie-export-next-step">
       <p className="text-success flex items-start gap-2">
         <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <span>Planilha baixada. Importe no Painel do Contador da Omie.</span>
       </p>
-      <p className="text-muted-foreground">
-        Depois de importar o plano na Omie, configure as categorias com o guia do de-para.
-      </p>
-      <Link
-        href={accountingMappingPath(clientId)}
-        className="text-link inline-flex items-center gap-1 font-medium underline underline-offset-4"
-      >
-        Abrir o de-para na conta contábil
-        <ArrowRight className="h-4 w-4" aria-hidden="true" />
-      </Link>
+      {offersGuide && (
+        <>
+          <p className="text-muted-foreground">
+            Depois de importar o plano na Omie, configure as categorias com o guia do de-para.
+          </p>
+          <Link
+            href={accountingMappingPath(clientId)}
+            className="text-link inline-flex items-center gap-1 font-medium underline underline-offset-4"
+          >
+            Abrir o de-para na conta contábil
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </>
+      )}
     </div>
   );
 }

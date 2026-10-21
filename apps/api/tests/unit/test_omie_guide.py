@@ -40,8 +40,10 @@ OUT = date(2026, 10, 1)
 TODAY = date(2026, 10, 21)
 
 
-def _account(code: str, name: str = "Conta", *, resolved: bool = True) -> AccountRef:
-    return AccountRef(id=uuid4(), code=code, name=name, name_resolved=resolved, postable=True)
+def _account(
+    code: str, name: str = "Conta", *, resolved: bool = True, postable: bool = True
+) -> AccountRef:
+    return AccountRef(id=uuid4(), code=code, name=name, name_resolved=resolved, postable=postable)
 
 
 def _named(
@@ -120,6 +122,21 @@ class TestPlan:
         counts = plan.counts
         assert (counts.configurar, counts.nao_gerar, counts.sem_decisao) == (2, 1, 2)
         assert counts.fora_do_guia == 0
+
+    def test_conta_que_ficou_sintetica_ou_inativa_vai_para_sem_decisao(self) -> None:
+        rows = [
+            _named("1", "confirmada", account=_account("10")),
+            _named("2", "confirmada", account=_account("11", postable=False)),
+        ]
+        plan = plan_omie_guide(rows, {"1", "2"})
+        assert [n.row.category_code for n in plan.configure] == ["1"]
+        assert [(n.row.category_code, r) for n, r in plan.undecided] == [
+            ("2", "conta_nao_lancavel")
+        ]
+
+    def test_ja_recortadas_somam_no_fora_do_guia(self) -> None:
+        plan = plan_omie_guide([_named("9", source_type="arquivo")], {"1"}, already_out_of_scope=3)
+        assert plan.out_of_scope == 4
 
 
 class TestWorkbook:
@@ -256,7 +273,9 @@ class _Listing:
         return [n.row for n in self.rows]
 
     async def with_names(self, client: Client, destination: Any, rows: list[Any]) -> list[NamedRow]:
-        return self.rows
+        self.named_codes = [r.category_code for r in rows]
+        by_code = {n.row.category_code: n for n in self.rows}
+        return [by_code[r.category_code] for r in rows]
 
 
 class _Decisions:
@@ -317,6 +336,8 @@ class TestService:
         assert listing.competences == [OUT]
         assert (guide.counts.configurar, guide.counts.sem_decisao) == (1, 1)
         assert guide.counts.fora_do_guia == 1
+        # Só as linhas do guia têm nome resolvido (a "3" não está ativa no plano).
+        assert listing.named_codes == ["1", "2"]
         assert len(events.calls) == 1
         call = events.calls[0]
         assert call["comportamento"] == "provisao_e_baixa"
@@ -352,3 +373,17 @@ def test_props_do_evento_aceitam_todo_comportamento(behavior: OmieCategoryBehavi
         }
     )
     assert props.comportamento == behavior.value
+
+
+def test_router_do_guia_vem_antes_do_de_para_por_destino() -> None:
+    """`/mapping/omie-categories-guide` casaria com `/mapping/{destination_type}` (400).
+
+    O Starlette escolhe a PRIMEIRA rota cujo caminho casa: o guia só responde porque o
+    router dele é registrado antes. Este teste trava a ordem sem precisar de banco.
+    """
+    from app.main import create_app
+
+    paths = [getattr(route, "path", "") for route in create_app().routes]
+    guide = paths.index("/api/v1/clients/{client_id}/mapping/omie-categories-guide")
+    listing = paths.index("/api/v1/clients/{client_id}/mapping/{destination_type}")
+    assert guide < listing

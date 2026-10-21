@@ -52,6 +52,15 @@ vi.mock('@/hooks/use-client-accounting-chart', () => ({
   useRefreshOmieChartExportPreview: () => refreshState,
 }));
 
+const clientDetailState = {
+  data: { connections: [{ provider_type: 'omie' }] } as
+    | { connections: { provider_type: string }[] }
+    | undefined,
+};
+vi.mock('@/hooks/use-clients', () => ({
+  useClientDetail: () => clientDetailState,
+}));
+
 import { OmieChartExportAction } from '@/components/features/accounting-chart/omie-chart-export-dialog';
 import { ApiError } from '@/lib/api/client';
 import type { OmieExportPreview } from '@/lib/contracts';
@@ -91,6 +100,7 @@ beforeEach(() => {
   toastError.mockReset();
   downloadSpy.mockReset();
   previewEnabled.mockReset();
+  clientDetailState.data = { connections: [{ provider_type: 'omie' }] };
 });
 
 describe('OmieChartExportAction', () => {
@@ -178,6 +188,18 @@ describe('OmieChartExportAction', () => {
     expect(within(dialog).queryByRole('button', { name: 'Baixar planilha' })).toBeNull();
     await user.click(within(dialog).getByRole('button', { name: 'Fechar' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('sem Omie, o próximo passo não aponta para o guia, que o de-para não oferece', async () => {
+    clientDetailState.data = { connections: [{ provider_type: 'arquivo' }] };
+    exportState.mutateAsync = vi
+      .fn()
+      .mockResolvedValue({ blob: new Blob(['x']), filename: 'x.xlsx' });
+    const { user, dialog } = await openDialog();
+    await user.click(within(dialog).getByRole('button', { name: 'Baixar planilha' }));
+    const nextStep = await within(dialog).findByTestId('omie-export-next-step');
+    expect(nextStep).toHaveTextContent('Planilha baixada');
+    expect(within(nextStep).queryByRole('link')).toBeNull();
   });
 
   it('a recusa 409 do download aparece no diálogo, nunca em toast', async () => {
