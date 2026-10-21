@@ -279,6 +279,14 @@ class UsageEventName(StrEnum):
     #     count(DISTINCT props->>'client_id') WHERE event = 'guia_categorias_omie_gerado'
     #     sum((props->>'sem_decisao')::int) / sum((props->>'configurar')::int)
     GUIA_CATEGORIAS_OMIE_GERADO = "guia_categorias_omie_gerado"
+    # 86e3r2egr — o reembrulho das DEKs para a KEK do projeto novo rodou em modo de
+    # EXECUÇÃO (o `--dry-run` e o `--verify` não gravam nada, nem este evento). De
+    # SCRIPT, sem `session_id`, fora da dedup: cada execução é uma linha. Só contagens
+    # e a duração: NUNCA nome de chave, `client_id`, DEK nem blob.
+    #
+    # Leitura (o corte só segue com zero falhas e a segunda rodada sem pendentes):
+    #     SELECT props WHERE event = 'deks_reembrulhadas' ORDER BY created_at DESC
+    DEKS_REEMBRULHADAS = "deks_reembrulhadas"
     # Sprint 13 (BACK 13.1, emitido pela geração do arquivo contábil da 13.4) —
     # **a métrica da Sprint 13**. De BACKEND, sem `session_id`, fora da dedup:
     # cada geração (inclusive a segunda da mesma materialização) é uma linha.
@@ -782,6 +790,20 @@ class GuiaCategoriasOmieGeradoProps(_StrictProps):
     nao_gerar: int = Field(ge=0)
     sem_decisao: int = Field(ge=0)
     fora_do_guia: int = Field(ge=0)
+
+
+class DeksReembrulhadasProps(_StrictProps):
+    """`deks_reembrulhadas` (86e3r2egr) — o resultado de uma execução do reembrulho.
+
+    `ja_reembrulhadas` são as DEKs que a KEK nova já abria (rodada repetida);
+    `reembrulhadas` as que esta execução trocou; `falhas` as que nenhuma das duas KEKs
+    abriu. `duracao_s` é inteiro (§3.4). Nenhum identificador, nenhum material de chave.
+    """
+
+    ja_reembrulhadas: int = Field(ge=0)
+    reembrulhadas: int = Field(ge=0)
+    falhas: int = Field(ge=0)
+    duracao_s: int = Field(ge=0)
 
 
 class PlanoContabilVinculosImportadosProps(_StrictProps):

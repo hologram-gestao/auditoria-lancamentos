@@ -155,6 +155,75 @@ A revisão seguinte da API lê o `:latest`. Conferência: envie um lead de teste
 landing e veja a mensagem no canal; a linha em `leads` fica com `notified_at`
 preenchido.
 
+### 7. Reembrulho das DEKs para a KEK de OUTRO projeto (86e3r2egr, épico 86e3r2egb)
+
+Só existe para a mudança de projeto do GCP. Chave do Cloud KMS não se move entre
+projetos e toda DEK de cliente está embrulhada pela KEK do projeto antigo: o banco
+importado no projeto novo fica indecifrável até cada `clients.dek_wrapped` ser
+reembrulhado pela KEK nova. O script `apps/api/scripts/rewrap_client_deks.py` troca
+SÓ esse blob: nenhum campo cifrado muda, o `KEK_KEY_ID` continua `k1` (§3.14) e o modo
+do wrapper continua Cloud KMS dos dois lados (misturar com o wrapper local é recusado).
+
+> ⚠️ **Invariante:** roda SOMENTE sobre a cópia importada na instância NOVA, nunca
+> sobre o banco antigo. É o que mantém o rollback trivial: o banco antigo segue
+> decifrável pela KEK antiga até o desligamento.
+
+Pré-requisitos (no projeto novo `<novo>`, a KEK nova já criada pelo `setup-gcp.sh`):
+
+```bash
+# 1) A SA de runtime do projeto NOVO pode DECIFRAR (só isso) com a KEK ANTIGA.
+#    O binding é no RECURSO da chave, no projeto antigo.
+gcloud kms keys add-iam-policy-binding omie-encryption-kek \
+  --keyring=auditoria-<env> --location=southamerica-east1 --project=<antigo> \
+  --member="serviceAccount:auditoria-api-sa@<novo>.iam.gserviceaccount.com" \
+  --role=roles/cloudkms.cryptoKeyDecrypter
+
+# 2) Job one-off clonado do migrate do projeto novo (mesma receita do setup-gcp.sh com
+#    o da carteira: export, troca de nome, `jobs replace`), com comando e origem:
+gcloud run jobs update auditoria-api-rewrap-deks-<env> \
+  --region=southamerica-east1 --project=<novo> \
+  --command=python --args=-m,scripts.rewrap_client_deks,--dry-run \
+  --update-env-vars="KEK_KMS_KEY_NAME_SOURCE=projects/<antigo>/locations/southamerica-east1/keyRings/auditoria-<env>/cryptoKeys/omie-encryption-kek" \
+  --tasks=1 --parallelism=1 --max-retries=0
+```
+
+O ALVO é o `KEK_KMS_KEY_NAME` do próprio job (a KEK do projeto novo, a mesma do
+serviço); a ORIGEM vem só de `KEK_KMS_KEY_NAME_SOURCE`, que o script exige e recusa se
+for igual à alvo (saída 2, nada lido nem gravado).
+
+> ⚠️ **Sem tráfego e sem job agendado no projeto novo enquanto o reembrulho não termina.**
+> Entre a importação do banco e o `--verify` final, todo cliente ainda não reembrulhado é
+> indecifrável para o serviço novo: a API do projeto novo fica sem ingresso público
+> (`--ingress=internal`) e os Cloud Schedulers de lá pausados
+> (`gcloud scheduler jobs pause`) até o passo 4 dar zero falhas. Sem isso, cada request e
+> cada ciclo da carteira vira 500, `[indecifrável]` e alerta de plantão que não é defeito.
+
+Ordem, sempre com `--wait` e lendo a última linha da execução:
+
+1. **`--dry-run`**: abre cada blob com as duas chaves e prova o embrulho novo em
+   memória, sem gravar. Esperado: `errors=0` e `pending` = número de clientes com DEK.
+   É aqui que se confirma a classe de exceção do KMS para "ciphertext de outra chave"
+   (hipótese `InvalidArgument`, `WRONG_KEY_EXCEPTIONS` no script): se for outra, o
+   dry-run ABORTA e a tupla é corrigida no código antes de seguir.
+2. **execução** (`--args=-m,scripts.rewrap_client_deks`): commit por cliente, UPDATE
+   condicional no blob antigo. Interrompida, roda de novo: o que já foi trocado conta
+   como `already`. Grava `deks_reembrulhadas` em `usage_events`.
+3. **execução de novo**: `pending=0` e `rewrapped=0` (idempotência provada).
+4. **`--verify`**: decifra um campo real de cada cliente com a KEK nova pelo caminho do
+   serviço. **`verify_failed=0` é a condição do corte**; `no_field` é cliente sem campo
+   cifrado no envelope (a DEK abriu, não há o que decifrar). Ele NÃO cobre linha bare
+   legada (cifrada com a `OMIE_ENCRYPTION_KEY`, sem DEK): essa depende de o secret da
+   `OMIE_ENCRYPTION_KEY` do projeto novo ser cópia exata do antigo (landmine 2), conferido
+   à parte na subtask dos secrets.
+5. Depois do corte validado: **revogar** o binding do passo 1
+   (`remove-iam-policy-binding`, mesmos argumentos) e rodar `--verify` de novo, que
+   continua com zero falhas sem a chave antiga.
+
+Saídas: `0` ok; `1` terminou com cliente em falha (ids no log `rewrap_client`); `2`
+configuração recusada; `3` abortado (permissão negada, prova que não fecha, linha
+alterada no meio, erro inesperado). Log e saída só com contagens, `client_id` e os dois
+nomes de chave.
+
 ## Verificação rápida
 
 - [ ] `setup-gcp.sh <env>` rodou sem erro fatal; `KEK_KMS_KEY_NAME` impresso.
@@ -168,3 +237,5 @@ preenchido.
       `::warning::` (se emitiu, o script do passo 1 ainda não rodou neste
       ambiente e a carteira não está agendada).
 - [ ] `auditoria-sync-titles-<env>` agendado às `04:12` `America/Sao_Paulo`.
+- [ ] Só na mudança de projeto: `rewrap_client_deks --verify` com `verify_failed=0` na
+      instância nova, e o binding na KEK antiga revogado depois do corte (passo 7).

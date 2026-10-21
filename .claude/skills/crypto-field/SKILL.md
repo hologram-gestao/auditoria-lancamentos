@@ -75,8 +75,11 @@ grep -rn "ClientCipher(" apps/api/app --include=*.py | grep -v "core/crypto"   #
 1. **Nunca trocar `KEK_KEY_ID`** (hoje `k1`, `core/config.py:95-98`). O `key_id` gravado
    em cada linha é **descartado na leitura** (`crypto.py:224`, `_key_id` não é usado):
    o decrypt sempre desembrulha com a KEK ATUAL. E a rotação só provisiona DEK quando
-   `dek_wrapped IS NULL` — **não existe caminho de re-embrulho no código**. Trocar o
-   `KEK_KEY_ID` torna TODOS os clientes indecifráveis, sem volta.
+   `dek_wrapped IS NULL`. Trocar o `KEK_KEY_ID` torna TODOS os clientes indecifráveis,
+   sem volta. Trocar de **KEK** (outra chave do KMS, como na mudança de projeto do GCP)
+   tem UM caminho: `scripts/rewrap_client_deks.py` (86e3r2egr), que troca só o blob
+   `dek_wrapped` e mantém o `k1`, sobre a cópia do banco no ambiente novo
+   (`scripts/environments-runbook.md`, passo 7).
 2. **Manter `OMIE_ENCRYPTION_KEY` sempre setada** (`config.py:57`). Ela faz duas coisas:
    decifra o dado bare legado (`crypto.py:222`) e **deriva a KEK local** em dev/test
    (`kms.py:173`). Removê-la é outage imediato.
@@ -125,8 +128,11 @@ grep -rn "KEK_KEY_ID\|KEK_KMS_KEY_NAME" .github/workflows/deploy-dev.yml | head 
    (`parse_typed_document`, `parties.py:322`).
 6. **Não precisa entrar no `scripts/rotate_encryption_key.py`.** Ele converte linhas
    **bare legadas** (pré-Sprint 3) e importa 7 das 18 constantes; campo criado depois
-   da Sprint 3 nasce já no envelope `v1` e nunca tem linha bare. Se um dia existir
-   re-embrulho de KEK (hoje não existe — landmine 1), aí sim todos entram.
+   da Sprint 3 nasce já no envelope `v1` e nunca tem linha bare. Quem PRECISA da
+   constante nova é o `VERIFIABLE_PAIRS` do `scripts/rewrap_client_deks.py` (o
+   `--verify` do reembrulho procura um campo real por ela, e o escopo por cliente sai
+   da própria tabela: `clients.id`, coluna `client_id` ou `session_id`); o unitário
+   `test_lista_de_pares_cobre_toda_constante_aad` reprova enquanto ela não entrar lá.
 
 ```bash
 grep -c "^AAD_" apps/api/app/core/crypto_service.py            # hoje 18

@@ -160,6 +160,18 @@ class CloudKmsClient:
         return await asyncio.to_thread(_call)
 
 
+def build_cloud_kms_client(kms_key_name: str, key_id: str) -> KmsClient:
+    """Cloud KMS client para UMA chave nomeada explicitamente, sem passar por `Settings`.
+
+    Existe para o reembrulho das DEKs (`scripts/rewrap_client_deks.py`, épico
+    86e3r2egb): ele precisa de DOIS clientes ao mesmo tempo, a KEK antiga (origem,
+    só decrypt) e a nova (a do serviço). O `key_id` é o do envelope dos campos
+    (`KEK_KEY_ID`, `k1`): o Cloud KMS não o usa no wrap, então trocar de chave no KMS
+    não troca o `key_id` (landmine 1 do CLAUDE.md §3.14).
+    """
+    return CloudKmsClient(kms_key_name=kms_key_name, key_id=key_id)
+
+
 def get_kms_client(settings: Settings) -> KmsClient:
     """Fábrica do KMS client conforme a config.
 
@@ -168,7 +180,7 @@ def get_kms_client(settings: Settings) -> KmsClient:
     """
     key_id = settings.KEK_KEY_ID
     if settings.KEK_KMS_KEY_NAME:
-        return CloudKmsClient(kms_key_name=settings.KEK_KMS_KEY_NAME, key_id=key_id)
+        return build_cloud_kms_client(settings.KEK_KMS_KEY_NAME, key_id)
     return LocalKmsClient(
         master_hex_key=settings.OMIE_ENCRYPTION_KEY.get_secret_value(),
         key_id=key_id,
