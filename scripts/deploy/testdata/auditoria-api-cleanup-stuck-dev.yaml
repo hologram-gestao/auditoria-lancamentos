@@ -1,0 +1,71 @@
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  annotations:
+    run.googleapis.com/client-name: gcloud
+    run.googleapis.com/creator: operador@example.com
+    run.googleapis.com/lastModifier: deploy@liberdade-assessoria.iam.gserviceaccount.com
+    run.googleapis.com/operation-id: 12121212-3434-5656-7878-909090909090
+  generation: 40
+  labels:
+    cloud.googleapis.com/location: southamerica-east1
+    run.googleapis.com/lastUpdatedTime: '2026-10-20T12:00:00.000000Z'
+  name: auditoria-api-cleanup-stuck-dev
+  namespace: '625547925581'
+  resourceVersion: AAYFAKEJOB
+  uid: abababab-cdcd-efef-0101-232323232323
+spec:
+  template:
+    metadata:
+      annotations:
+        client.knative.dev/user-image: southamerica-east1-docker.pkg.dev/liberdade-assessoria/auditoria/auditoria-api:dev
+        run.googleapis.com/client-name: gcloud
+        run.googleapis.com/cloudsql-instances: liberdade-assessoria:southamerica-east1:auditoria-pg
+        run.googleapis.com/execution-environment: gen2
+      labels:
+        client.knative.dev/nonce: uvwxyzabcd
+    spec:
+      parallelism: 1
+      taskCount: 1
+      template:
+        spec:
+          containers:
+          - args:
+            - -m
+            - scripts.cleanup_fixture
+            command:
+            - python
+            env:
+            - name: ENVIRONMENT
+              value: dev
+            - name: KEK_KMS_KEY_NAME
+              value: projects/liberdade-assessoria/locations/southamerica-east1/keyRings/auditoria-dev/cryptoKeys/omie-encryption-kek
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: auditoria-db-url-dev
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: auditoria-redis-url-dev
+            - name: ALERT_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: alert-webhook-url-dev
+            image: southamerica-east1-docker.pkg.dev/liberdade-assessoria/auditoria/auditoria-api:dev@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
+            resources:
+              limits:
+                cpu: 1000m
+                memory: 512Mi
+          maxRetries: 0
+          serviceAccountName: auditoria-api-sa@liberdade-assessoria.iam.gserviceaccount.com
+          timeoutSeconds: '600'
+status:
+  conditions:
+  - status: 'True'
+    type: Ready
+  executionCount: 7
+  observedGeneration: 40

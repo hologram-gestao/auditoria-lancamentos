@@ -1,0 +1,96 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  annotations:
+    run.googleapis.com/client-name: gcloud
+    run.googleapis.com/client-version: 540.0.0
+    run.googleapis.com/creator: operador@example.com
+    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress-status: all
+    run.googleapis.com/lastModifier: deploy@liberdade-assessoria.iam.gserviceaccount.com
+    run.googleapis.com/operation-id: 0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0
+    run.googleapis.com/urls: '["https://auditoria-api-dev-625547925581.southamerica-east1.run.app","https://auditoria-api-dev-i7oep34hva-rj.a.run.app"]'
+    serving.knative.dev/creator: operador@example.com
+    serving.knative.dev/lastModifier: deploy@liberdade-assessoria.iam.gserviceaccount.com
+  creationTimestamp: '2026-04-30T12:00:00.000000Z'
+  generation: 214
+  labels:
+    cloud.googleapis.com/location: southamerica-east1
+  name: auditoria-api-dev
+  namespace: '625547925581'
+  resourceVersion: AAYFAKEFAKEFAKE
+  selfLink: /apis/serving.knative.dev/v1/namespaces/625547925581/services/auditoria-api-dev
+  uid: 11111111-2222-3333-4444-555555555555
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/maxScale: '5'
+        autoscaling.knative.dev/minScale: '1'
+        client.knative.dev/user-image: southamerica-east1-docker.pkg.dev/liberdade-assessoria/auditoria/auditoria-api:dev
+        run.googleapis.com/client-name: gcloud
+        run.googleapis.com/client-version: 540.0.0
+        run.googleapis.com/cloudsql-instances: liberdade-assessoria:southamerica-east1:auditoria-pg
+        run.googleapis.com/cpu-throttling: 'false'
+        run.googleapis.com/startup-cpu-boost: 'true'
+      labels:
+        client.knative.dev/nonce: abcdefghij
+        run.googleapis.com/startupProbeType: Default
+      name: auditoria-api-dev-00214-xyz
+    spec:
+      containerConcurrency: 80
+      containers:
+      - env:
+        - name: ENVIRONMENT
+          value: dev
+        - name: LOG_LEVEL
+          value: INFO
+        - name: ALLOWED_HOSTS
+          value: auditoria-api-dev-i7oep34hva-rj.a.run.app,auditoria-api-dev-625547925581.southamerica-east1.run.app,localhost
+        - name: ALLOWED_ORIGINS
+          value: https://auditoria-web-dev-i7oep34hva-rj.a.run.app,https://auditoria-web-dev-625547925581.southamerica-east1.run.app
+        - name: FRONTEND_URL
+          value: https://auditoria-web-dev-i7oep34hva-rj.a.run.app
+        - name: KEK_KMS_KEY_NAME
+          value: projects/liberdade-assessoria/locations/southamerica-east1/keyRings/auditoria-dev/cryptoKeys/omie-encryption-kek
+        - name: OMIE_POSTING_ENABLED
+          value: 'true'
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: auditoria-db-url-dev
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: auditoria-redis-url-dev
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: auditoria-jwt-secret-dev
+        image: southamerica-east1-docker.pkg.dev/liberdade-assessoria/auditoria/auditoria-api@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        ports:
+        - containerPort: 8080
+          name: http1
+        resources:
+          limits:
+            cpu: '1'
+            memory: 512Mi
+      serviceAccountName: auditoria-api-sa@liberdade-assessoria.iam.gserviceaccount.com
+      timeoutSeconds: 300
+  traffic:
+  - latestRevision: true
+    percent: 100
+status:
+  address:
+    url: https://auditoria-api-dev-i7oep34hva-rj.a.run.app
+  conditions:
+  - lastTransitionTime: '2026-10-20T12:00:00.000000Z'
+    status: 'True'
+    type: Ready
+  latestCreatedRevisionName: auditoria-api-dev-00214-xyz
+  latestReadyRevisionName: auditoria-api-dev-00214-xyz
+  observedGeneration: 214
+  url: https://auditoria-api-dev-i7oep34hva-rj.a.run.app
