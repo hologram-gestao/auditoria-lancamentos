@@ -1110,6 +1110,23 @@ export interface paths {
         patch: operations["update_mapping_target_api_v1_mapping_destinations__destination_id__targets__target_id__patch"];
         trace?: never;
     };
+    "/api/v1/clients/{client_id}/mapping/omie-categories-guide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Guia (.xlsx) para configurar as categorias na tela da Omie a partir do de-para no destino `conta_contabil`, na competência corrente: abas Leia-me, Configurar (categoria, conta do plano contábil e o `comportamento` escolhido em toda linha), Não gerar lançamento e Sem decisão, só com as categorias do Omie ATIVAS no plano de contas do cliente, na ordem do código. Nomes resolvidos na geração, nunca persistidos; célula que começaria fórmula é neutralizada. `comportamento` fora do vocabulário: 400. Cliente sem origem: 409 `SEM_CONEXAO`; só por arquivo: 409 `CAPACIDADE_AUSENTE`; a conexão Omie com erro não impede (o guia não chama a Omie). Destino `conta_contabil` fora do catálogo da organização: 409 `DESTINO_NAO_CONFIGURADO`. Registra a exportação na trilha de acesso. */
+        get: operations["export_omie_categories_guide_api_v1_clients__client_id__mapping_omie_categories_guide_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clients/{client_id}/mapping/{destination_type}/decisions": {
         parameters: {
             query?: never;
@@ -6276,6 +6293,12 @@ export interface components {
             total: number;
         };
         /**
+         * OmieCategoryBehavior
+         * @description Os quatro comportamentos que a tela de categorias da Omie oferece (Gabriel, 19/10).
+         * @enum {string}
+         */
+        OmieCategoryBehavior: "provisao_e_baixa" | "baixa_conta_resultado" | "baixa_conta_terceiro" | "nao_gerar";
+        /**
          * OmieDepartamentoItem
          * @description Item de GET /api/v1/clients/{id}/omie/departamentos (86e3n70q0, bloco B).
          *
@@ -11247,6 +11270,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MappingTargetEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_omie_categories_guide_api_v1_clients__client_id__mapping_omie_categories_guide_get: {
+        parameters: {
+            query: {
+                /** @description Comportamento padrão aplicado a toda linha de Configurar. */
+                comportamento: components["schemas"]["OmieCategoryBehavior"];
+            };
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": unknown;
                 };
             };
             /** @description Validation Error */

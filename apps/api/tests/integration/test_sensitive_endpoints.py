@@ -370,6 +370,10 @@ _QUERIES: dict[str, dict[str, str]] = {
         "categoryCode": "2.04.94"
     },
     "GET /api/v1/clients/{client_id}/mapping/{destination_type}/preview": {"competence": "2026-06"},
+    # 86e3qhht4: com o `comportamento` válido, a negação é do alcance, não do 400.
+    "GET /api/v1/clients/{client_id}/mapping/omie-categories-guide": {
+        "comportamento": "provisao_e_baixa"
+    },
 }
 
 

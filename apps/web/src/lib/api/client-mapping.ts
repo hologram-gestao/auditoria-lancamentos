@@ -46,6 +46,7 @@ import type {
   MaterializationSummary,
   MovementsSyncResult,
   MovementsSyncState,
+  OmieCategoryBehavior,
   OriginTargetsPreview,
 } from '@/lib/contracts';
 
@@ -315,6 +316,19 @@ export async function exportClientMapping(
   destinationType: string,
 ): Promise<BlobResponse> {
   return apiGetBlob(`${mappingBase(clientId, destinationType)}/export`);
+}
+
+/**
+ * O guia para configurar as categorias na tela da Omie (86e3qhht4): planilha gerada do
+ * de-para no destino `conta_contabil`, com o comportamento padrão em toda linha. Não é
+ * de um destino escolhido, por isso fica fora de `mappingBase`.
+ */
+export async function exportOmieCategoriesGuide(
+  clientId: string,
+  behavior: OmieCategoryBehavior,
+): Promise<BlobResponse> {
+  const query = new URLSearchParams({ comportamento: behavior });
+  return apiGetBlob(`/api/v1/clients/${clientId}/mapping/omie-categories-guide?${query}`);
 }
 
 export interface MappingImportInput {

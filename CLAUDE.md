@@ -4,7 +4,7 @@
 >
 > **Status do projeto:** 🚀 **S0–S19, as sprints do agents-hub (tabela da §8) e os épicos de fora do hub estão na `main` e rodando em dev** no Google Cloud Run (GCP `liberdade-assessoria`, região `southamerica-east1`). Acesso pelas URLs `*.run.app` via **BFF reverse-proxy do Next** — não há custom domain (o BFF resolveu o cookie cross-site, então o DNS na Wix nunca foi necessário). **Não trate mais como greenfield:** o código é a fonte da verdade — leia antes de assumir que algo "ainda precisa ser criado".
 >
-> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **136/136** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
+> ⚠️ **O sistema é MULTI-TENANT desde a Sprint 5 e MULTI-ORGANIZAÇÃO desde o épico 86e36ec0q.** Usuários do cliente final logam e enxergam **apenas o próprio tenant**; staff de uma organização alcança **apenas os clientes dela**. Antes de escrever qualquer query, endpoint ou tela que toque dado escopável, leia **§3.15 (autorização por tenant e por organização)**, **§4.8 (modelo de tenancy)** e **§4.9 (matriz de permissões)**. Endpoint novo que esqueça o filtro é vazamento entre clientes **ou entre BPOs** — a lista canônica está em **137/137** (`grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`) e essa cobertura não pode regredir.
 >
 > **O que cada sprint do agents-hub entregou** (todas na `main`):
 >
@@ -197,7 +197,7 @@
       `actor_organization_id` (nula só para a plataforma).
     - **Endpoint novo que lê dado escopável entra na lista canônica**
       [apps/api/app/core/sensitive_endpoints.py](apps/api/app/core/sensitive_endpoints.py)
-      (**136** hoje — o arquivo é a fonte, confira com
+      (**137** hoje — o arquivo é a fonte, confira com
       `grep -c "SensitiveEndpoint(" apps/api/app/core/sensitive_endpoints.py`)
       **com teste negativo cross-tenant E cross-org**: a bateria
       (`tests/integration/test_sensitive_endpoints.py`) dispara cada endpoint com
@@ -205,7 +205,7 @@
       organização — e nenhum pode chegar no recurso nem ler o nome de um cliente
       ou de um staff alheio. "Escopável" inclui o que era "admin-only global":
       `/users`, `/clients` e `/client-categories` são sensíveis a organização
-      (`PENDING_ENDPOINTS` está vazio: cobertura **136/136**). As 3 rotas do
+      (`PENDING_ENDPOINTS` está vazio: cobertura **137/137**). As 3 rotas do
       **plano de contas** (S10) e as 3 da **carteira de títulos** (S11 — lista,
       agregados e sincronizar) e as 3 da S15 (relatório de recebíveis, leitura e
       registro do contexto do título) entraram como coleção; as 20 da S12 também:
@@ -250,7 +250,11 @@
       prévia dos alvos do demonstrativo a partir da origem
       (`GET /clients/{id}/mapping/{tipo}/origin-targets`, 86e3n70pn) também: só LÊ (plano
       de contas do cliente e catálogo da org dele), e o guard é `manage_mapping_catalog`
-      AUDITADO depois do alcance ao cliente. As 2 leituras do lançamento como Contas a
+      AUDITADO depois do alcance ao cliente. O guia das categorias da Omie
+      (`GET /clients/{id}/mapping/omie-categories-guide?comportamento=`, 86e3qhht4) também é
+      coleção, `AccessibleClientDep` como a exportação do de-para, num router PRÓPRIO
+      registrado ANTES do de-para por destino (o caminho casaria com
+      `/mapping/{destination_type}`), 1 linha `export` na trilha. As 2 leituras do lançamento como Contas a
       Pagar (86e3n70q0: `GET /clients/{id}/omie/departamentos` e
       `GET /clients/{id}/omie/fornecedores?cnpj=`) também são coleção, sem permissão
       própria (`AccessibleClientDep`, como as categorias), e a busca nunca grava. As 2
@@ -1520,6 +1524,21 @@ demonstrativo e alvo real no fluxo de caixa). O que vale como lei, não como det
   de-para abre na conta contábil quando o demonstrativo não tem alvos e o cliente já
   tem plano contábil; senão, no demonstrativo. O topo do de-para tem o bloco recolhível
   "Como funciona" (destino, alvo, decisão, herdada), na moldura `collapsible-summary`;
+- **o guia das categorias da Omie sai do de-para no `conta_contabil`** (86e3qhht4): a Omie
+  não importa o vínculo categoria → conta por arquivo nem por API, e o contador o configura
+  na TELA de categorias da integração contábil (o Gabriel, 20/10/2026: "não tem planilha
+  específica"; a aba de categorias da planilha de configuração contábil da Omie foi
+  descartada). O guia é a planilha que ele copia de cima para baixo: só categorias do Omie
+  ATIVAS no plano de contas, na ordem do código, em "Configurar" (com a conta LANÇÁVEL do
+  plano do cliente), "Não gerar lançamento" e "Sem decisão" (inclusive a decisão legada sem
+  conta e a conta que ficou sintética ou inativa), e
+  o resto contado no "Leia-me". A plataforma guarda só a conta: o comportamento da categoria
+  na Omie (quatro, vocabulário fechado) é um PADRÃO escolhido ao gerar e repetido em toda
+  linha. Mão única: nada confere depois o que ficou na Omie. Exige origem Omie em qualquer
+  estado (o guia não chama a Omie; sem conexão 409 `SEM_CONEXAO`, só-arquivo 409
+  `CAPACIDADE_AUSENTE`, encerrado 409 de encerrado); o botão aparece só nesse destino e com
+  `hasOmieConnection`, e o link do próximo passo no diálogo da planilha da Omie pela MESMA
+  pergunta; nomes e contas só são resolvidos para as linhas do recorte;
 - **materialização imutável** `(cliente, destino, competência, versão)`, gravada só com o
   hash da prévia confirmada — é o que a Sprint 13 lê. `depara_aplicado` e
   `movimentos_sincronizados` são os eventos da métrica (sem dedup, só IDs e números).
@@ -1876,6 +1895,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.106, 21/10/2026. **O de-para no destino conta contábil passou a gerar o guia para configurar as categorias na tela da Omie (86e3qhht4, subtask 5 do épico 86e3qhhr0; resposta do Gabriel de 20/10: ele configura pela tela, não há planilha).** `GET /clients/{id}/mapping/omie-categories-guide?comportamento=` (lista canônica 136 → **137**, coleção, bateria dos três atacantes; `AccessibleClientDep`, 1 linha `export`), num router próprio incluído ANTES do de-para por destino, porque `/mapping/omie-categories-guide` casaria com `/mapping/{destination_type}`. O gerador (`client_mapping/omie_guide.py`) lê a MESMA `universe` + `with_names` da lista e o `active_chart` do plano do Omie; XLSX com "Leia-me", "Configurar", "Não gerar lançamento" e "Sem decisão" (esta com o motivo: sem decisão, decisão antiga sem conta do plano ou conta que ficou sintética ou inativa), nome não resolvido vazio, texto em `@`, fórmula neutralizada, nome do arquivo `guia-omie-<hex8>.xlsx`. Os quatro comportamentos e os rótulos moram no backend (`BEHAVIOR_LABELS`) e na tela (`lib/validation/omie-categories-guide.ts`), com um teste do backend que lê o arquivo do front e reprova se um rótulo divergir. Conexão Omie com erro NÃO barra (o guia não chama a Omie, como `hasOmieConnection`); o cliente encerrado perde as conexões no encerramento, então não tem o guia. Evento `guia_categorias_omie_gerado` (o comportamento e as contagens por bloco, sem dedup). Na tela, "Guia para configurar no Omie" ao lado de Exportar só no `conta_contabil` e para cliente com Omie, diálogo com o comportamento padrão (pré-marcado "Gerar provisão e baixa"); o diálogo "Gerar planilha da Omie" passou a ficar aberto depois do download com o próximo passo e, para cliente com Omie (a mesma `hasOmieConnection` do botão), o link para o de-para na conta contábil (`accountingMappingPath`). Um unitário trava a ordem dos routers no app. O inventário de consumidores de origem ganhou o arquivo. Matriz (**29**) e pares de AAD (**18**) iguais, sem migration._
 
 _Versão 1.105, 20/10/2026. **Clientes e fornecedores do plano contábil viraram duas listas, e o vínculo conta ↔ CNPJ/CPF passou a nascer e morrer à mão (86e3tttaf, subtask 9 do épico 86e3qhhr0; pedido do Lucas Landim na reunião de 20/10).** Duas rotas `DETAIL_PK` (lista canônica 134 → **136**, bateria dos três atacantes): `PUT …/accounting-chart/accounts/{account_id}/party` cria ou troca o vínculo (resposta é a linha da lista, documento mascarado) e `DELETE` o desfaz, idempotente. Regra nova na §4.8. Código novo `DOCUMENTO_JA_VINCULADO` (409 para o mesmo documento com o MESMO tipo em outra conta, só o código dela; cliente numa conta e fornecedor noutra é aceito, como na importação) e evento `plano_contabil_vinculo_editado` (IDs, `party_type` e `operacao` ∈ `criado`/`trocado`/`removido`, sem dedup; PUT sem mudança e DELETE de conta sem vínculo não emitem). O par de AAD do documento é o da 86e3qhhrn: **nenhum par novo** (**18**), nenhuma migration, matriz (**29**) igual. Na tela, a aba "Clientes e fornecedores" ganhou as sub-abas "Clientes (N)" e "Fornecedores (N)" (o `vinculo` da URL, `cliente` por padrão; o filtro "Vínculo" e a coluna de tipo saíram, redundantes), "Vincular conta" à direita da faixa (gaveta RHF + zod com o MESMO seletor de conta do de-para, tipo pré-marcado pela sub-aba, documento conferido por `lib/cpf.ts` e `lib/cnpj.ts`, recusa do servidor no campo) e "Remover vínculo" por linha num `AlertDialog`, as duas ações com o gate do "Importar relação"._
 

@@ -60,7 +60,7 @@ import { hasPermission, isPlatformScoped } from '@/lib/authz';
 import { isCompetence, localCurrentCompetence } from '@/lib/competence';
 import type { MappingDestination } from '@/lib/contracts';
 import { triggerBrowserDownload } from '@/lib/download';
-import { originIsFileBased } from '@/lib/origin-capabilities';
+import { hasOmieConnection, originIsFileBased } from '@/lib/origin-capabilities';
 import { useAuthStore } from '@/stores/auth';
 
 import { isAccountingDestination } from './accounting-destination';
@@ -72,6 +72,7 @@ import {
   SITUATION_FILTERS,
 } from './mapping-list-panel';
 import { MappingPreviewPanel } from './mapping-preview-panel';
+import { OmieCategoriesGuideAction } from './omie-categories-guide-dialog';
 
 const PARAM = {
   destination: 'destination',
@@ -195,6 +196,10 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
   // S14: origem por ARQUIVO — a base vem do envio, não do sync (409
   // `ORIGEM_POR_ARQUIVO`). Decidido pela capacidade, no helper único.
   const fileOrigin = originIsFileBased(client?.connections ?? []);
+  // 86e3qhht4: o guia das categorias da Omie só existe no `conta_contabil` e só para
+  // cliente com Omie (em qualquer estado: o guia não chama a Omie). Sem permissão
+  // própria, como Exportar; o servidor decide com a mesma regra.
+  const omieOrigin = hasOmieConnection(client?.connections ?? []);
   const hasFilters = situation !== undefined || codeParam !== '';
 
   async function handleExport() {
@@ -346,6 +351,9 @@ export function ClientMappingScreen({ clientId }: { clientId: string }) {
                   )}
                   {exportMutation.isPending ? 'Exportando…' : 'Exportar'}
                 </Button>
+                {omieOrigin && isAccountingDestination(destination.type) && (
+                  <OmieCategoriesGuideAction clientId={clientId} />
+                )}
                 {canManage && !isClosed && (
                   <Button type="button" variant="secondary" onClick={() => setImportOpen(true)}>
                     <Upload className="h-4 w-4" aria-hidden="true" />

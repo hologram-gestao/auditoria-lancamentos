@@ -270,6 +270,15 @@ class UsageEventName(StrEnum):
     #     count(DISTINCT props->>'client_id') WHERE event = 'planilha_omie_gerada'
     #     sum((props->>'vinculadas')::int) / sum((props->>'contas')::int)
     PLANILHA_OMIE_GERADA = "planilha_omie_gerada"
+    # 86e3qhht4 — o guia para configurar as categorias na tela da Omie foi gerado e
+    # baixado a partir do de-para (`conta_contabil`). De BACKEND, sem `session_id`, fora
+    # da dedup: cada download é uma linha. Só o id do cliente, o comportamento padrão
+    # (vocabulário fechado) e as contagens por bloco: NUNCA código nem nome.
+    #
+    # Leitura (quantos clientes configuram a Omie pelo guia, e com quanta pendência):
+    #     count(DISTINCT props->>'client_id') WHERE event = 'guia_categorias_omie_gerado'
+    #     sum((props->>'sem_decisao')::int) / sum((props->>'configurar')::int)
+    GUIA_CATEGORIAS_OMIE_GERADO = "guia_categorias_omie_gerado"
     # Sprint 13 (BACK 13.1, emitido pela geração do arquivo contábil da 13.4) —
     # **a métrica da Sprint 13**. De BACKEND, sem `session_id`, fora da dedup:
     # cada geração (inclusive a segunda da mesma materialização) é uma linha.
@@ -748,6 +757,31 @@ class PlanilhaOmieGeradaProps(_StrictProps):
     contas: int = Field(ge=0)
     vinculadas: int = Field(ge=0)
     sem_vinculo: int = Field(ge=0)
+
+
+#: Os comportamentos da categoria na tela da Omie (86e3qhht4). Strings literais, e não
+#: `OmieCategoryBehavior`, para não importar `client_mapping` daqui (ciclo); o teste
+#: `test_omie_guide.py` compara os dois.
+type OmieGuideBehaviorValue = Literal[
+    "provisao_e_baixa", "baixa_conta_resultado", "baixa_conta_terceiro", "nao_gerar"
+]
+
+
+class GuiaCategoriasOmieGeradoProps(_StrictProps):
+    """`guia_categorias_omie_gerado` (86e3qhht4) — o cliente, o comportamento e as contagens.
+
+    `configurar` são as categorias com conta; `nao_gerar` as `nao_mapear`; `sem_decisao`
+    as que ainda precisam de decisão (inclusive a decisão antiga sem conta do plano);
+    `fora_do_guia` as do universo que a tela da Omie não lista (inativas no plano do
+    Omie, só na base de movimentos ou de outra origem). Nenhum `str` livre.
+    """
+
+    client_id: UUID
+    comportamento: OmieGuideBehaviorValue
+    configurar: int = Field(ge=0)
+    nao_gerar: int = Field(ge=0)
+    sem_decisao: int = Field(ge=0)
+    fora_do_guia: int = Field(ge=0)
 
 
 class PlanoContabilVinculosImportadosProps(_StrictProps):

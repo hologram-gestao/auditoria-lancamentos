@@ -27,6 +27,7 @@ origem faria o glossário de um cliente sem Omie parar de funcionar.
 | `app/modules/client_file_categories/registry.py` | cifra de dado do tenant — declarado, sem conversão | `load_client_cipher` | cifra o RÓTULO das categorias de origem derivadas do ARQUIVO (S14, BACK 14.4) — dado do tenant, no molde do glossário. Nenhuma chamada ao provedor: a origem `arquivo` não tem credencial. NÃO converter |
 | `app/modules/client_file_ingestion/service.py` | origem — convertido para o contrato | `resolve_origin_connections` | ingestão do ARQUIVO do cliente (S14, BACK 14.3): exige conexão `arquivo` ATIVA pela taxonomia da S9 (`resolve_origin_connections` + `select_capable_connection`) e grava pelo ciclo R0 com um `FileProvider` montado das linhas da request — nunca pela conexão (o adaptador vindo dela é vazio). Não toca em credencial nem no `OmieClient`; a descrição é cifrada pelo `ClientMovementsSyncService` |
 | `app/modules/client_mapping/accounting.py` | cifra de dado do tenant — declarado, sem conversão | `load_client_cipher` | cifra/decifra o HISTÓRICO PADRÃO da decisão do de-para no destino `conta_contabil` e decifra o nome da conta do plano (S16, BACK 16.2) — dado do tenant. `load_` sempre (nunca provisiona). Nenhuma chamada ao provedor. NÃO converter |
+| `app/modules/client_mapping/omie_guide.py` | origem — convertido para o contrato | `resolve_origin_connections` | guia das categorias da Omie (86e3qhht4): só PERGUNTA se o cliente tem origem Omie (`resolve_origin_connections`, em qualquer estado, e `assert_offers_origin_client` para o só-arquivo); não constrói client nem toca em credencial, e o nome da categoria vem do cache fail-soft da lista do de-para |
 | `app/modules/client_movements/service.py` | origem — convertido para o contrato | `provision_client_cipher` · `resolve_capable_connection` | ingestão da base de movimentos por competência (S12, R0): resolve a conexão capaz de `listar_lancamentos` e constrói o provedor pela PORTA, iterando as contas do cache sob o lock por cliente. Não toca em credencial nem nas colunas antigas, e não fala com o `OmieClient` direto |
 | `app/modules/client_titles/routes.py` | origem — convertido para o contrato | `build_capable_client` | lista da carteira (S11): resolve a conexão capaz de `listar_lancamentos` só para resolver NOME de devedor em runtime (§4.5), e é FAIL-SOFT — sem origem alcançável a lista sai com o código e `supplierNameResolved=false`, nunca 409 numa leitura |
 | `app/modules/client_titles/service.py` | origem — convertido para o contrato | `load_client_cipher` · `provision_client_cipher` · `resolve_capable_connection` | ingestão da carteira de títulos (S11): resolve a conexão capaz de `listar_titulos_em_aberto` e constrói o provedor pela PORTA. Não toca em credencial nem nas colunas antigas, e não fala com o `OmieClient` direto. `TitleContextService` (S15) também mora aqui e usa `load_client_cipher`/`provision_client_cipher` para cifrar o TEXTO do contexto do título — dado do tenant, sem relação com origem |
@@ -46,7 +47,7 @@ origem faria o glossário de um cliente sem Omie parar de funcionar.
 
 ## Contagens
 
-- **origem — convertido para o contrato**: 16
+- **origem — convertido para o contrato**: 17
 - **cifra de dado do tenant — declarado, sem conversão**: 7
 - **definição**: 3
 - **fallback / conversão do R2**: 2

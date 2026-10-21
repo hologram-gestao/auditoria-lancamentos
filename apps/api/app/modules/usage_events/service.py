@@ -42,6 +42,7 @@ from app.modules.usage_events.schemas import (
     FechamentoProduzidoProps,
     FlagRevisadoProps,
     GlossarioEditadoProps,
+    GuiaCategoriasOmieGeradoProps,
     LancamentoOmieProvisaoProps,
     LeadRecebidoProps,
     MovimentosSincronizadosProps,
@@ -801,6 +802,40 @@ class UsageEventService:
                 contas=contas,
                 vinculadas=vinculadas,
                 sem_vinculo=sem_vinculo,
+            ),
+        )
+        if props is None:
+            return False
+        return await self.emit(event, props=props)
+
+    async def emit_guia_categorias_omie_gerado(
+        self,
+        *,
+        client_id: UUID,
+        comportamento: str,
+        configurar: int,
+        nao_gerar: int,
+        sem_decisao: int,
+        fora_do_guia: int,
+    ) -> bool:
+        """86e3qhht4 — o guia das categorias da Omie foi gerado a partir do de-para.
+
+        O ponto de chamada é `OmieCategoriesGuideService.build`, depois de montar o
+        arquivo. Props no caminho fail-soft (comportamento fora do vocabulário vira
+        `False`, nunca 500), sem `session_id`, sem dedup.
+        """
+        event = UsageEventName.GUIA_CATEGORIAS_OMIE_GERADO
+        props = self._props_or_none(
+            event,
+            lambda: GuiaCategoriasOmieGeradoProps.model_validate(
+                {
+                    "client_id": client_id,
+                    "comportamento": comportamento,
+                    "configurar": configurar,
+                    "nao_gerar": nao_gerar,
+                    "sem_decisao": sem_decisao,
+                    "fora_do_guia": fora_do_guia,
+                }
             ),
         )
         if props is None:

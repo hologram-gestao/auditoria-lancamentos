@@ -7,6 +7,7 @@
     POST /api/v1/clients/{client_id}/mapping/{destination_type}/inherit
     GET  /api/v1/clients/{client_id}/mapping/{destination_type}                 (12.5)
     GET  /api/v1/clients/{client_id}/mapping/{destination_type}/export          (12.5)
+    GET  /api/v1/clients/{client_id}/mapping/omie-categories-guide             (86e3qhht4)
     POST /api/v1/clients/{client_id}/mapping/{destination_type}/import/preview  (12.5)
     POST /api/v1/clients/{client_id}/mapping/{destination_type}/import          (12.5)
     GET  /api/v1/clients/{client_id}/mapping/{destination_type}/preview         (12.6)
@@ -54,6 +55,12 @@ from app.modules.client_file_categories.registry import FileCategoryRegistry
 from app.modules.client_mapping.accounting import AccountingDecisionSupport
 from app.modules.client_mapping.listing import ClientMappingListService, NamedRow
 from app.modules.client_mapping.materialization import ClientMappingApplyService
+from app.modules.client_mapping.omie_guide import (
+    OmieCategoriesGuideService,
+    OmieCategoryBehavior,
+    assert_has_omie_origin,
+    guide_filename,
+)
 from app.modules.client_mapping.origin_targets import OriginTargetsPreviewService
 from app.modules.client_mapping.portability import (
     MAX_IMPORT_BYTES,
@@ -104,6 +111,8 @@ from app.modules.mapping_catalog.repository import MappingCatalogRepository
 from app.modules.mapping_catalog.service import MappingCatalogService
 from app.modules.omie_data.categorias_service import OmieCategoriasService
 from app.modules.reconciliations.service import author_for_viewer
+from app.modules.usage_events.repository import UsageEventRepository
+from app.modules.usage_events.service import UsageEventService
 from app.modules.users.schemas import PaginationMeta
 from app.utils.upload import parse_content_length, read_upload_within_limit
 
@@ -111,6 +120,15 @@ XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
 
 router = APIRouter(
     prefix="/api/v1/clients/{client_id}/mapping/{destination_type}",
+    tags=["client-mapping"],
+)
+
+#: O guia das categorias da Omie (86e3qhht4) não é de um destino escolhido: é sempre
+#: o `conta_contabil`. Router PRÓPRIO, registrado em `main.py` ANTES de `router`:
+#: o caminho `/mapping/omie-categories-guide` casaria com `/mapping/{destination_type}`
+#: (a lista), e o Starlette escolhe a primeira rota cujo caminho casa.
+guide_router = APIRouter(
+    prefix="/api/v1/clients/{client_id}/mapping",
     tags=["client-mapping"],
 )
 
@@ -198,6 +216,69 @@ def _get_origin_targets_service(
 OriginTargetsServiceDep = Annotated[
     OriginTargetsPreviewService, Depends(_get_origin_targets_service)
 ]
+
+
+def _get_omie_guide_service(
+    db: DbSessionDep, decisions: DecisionServiceDep, listing: ListServiceDep
+) -> OmieCategoriesGuideService:
+    return OmieCategoriesGuideService(
+        listing=listing,
+        decisions=decisions,
+        repository=ClientMappingRepository(db),
+        usage_events=UsageEventService(UsageEventRepository(db)),
+    )
+
+
+OmieGuideServiceDep = Annotated[OmieCategoriesGuideService, Depends(_get_omie_guide_service)]
+
+
+@guide_router.get(
+    "/omie-categories-guide",
+    summary=(
+        "Guia (.xlsx) para configurar as categorias na tela da Omie a partir do de-para "
+        "no destino `conta_contabil`, na competência corrente: abas Leia-me, Configurar "
+        "(categoria, conta do plano contábil e o `comportamento` escolhido em toda linha), "
+        "Não gerar lançamento e Sem decisão, só com as categorias do Omie ATIVAS no plano "
+        "de contas do cliente, na ordem do código. Nomes resolvidos na geração, nunca "
+        "persistidos; célula que começaria fórmula é neutralizada. `comportamento` fora do "
+        "vocabulário: 400. Cliente sem origem: 409 `SEM_CONEXAO`; só por arquivo: 409 "
+        "`CAPACIDADE_AUSENTE`; a conexão Omie com erro não impede (o guia não chama a "
+        "Omie). Destino `conta_contabil` fora do catálogo da organização: 409 "
+        "`DESTINO_NAO_CONFIGURADO`. Registra a exportação na trilha de acesso."
+    ),
+    response_class=Response,
+    responses={200: {"content": {XLSX_MEDIA_TYPE: {}}}},
+)
+async def export_omie_categories_guide(
+    client: AccessibleClientDep,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+    settings: SettingsDep,
+    comportamento: Annotated[
+        OmieCategoryBehavior,
+        Query(description="Comportamento padrão aplicado a toda linha de Configurar."),
+    ],
+    service: OmieGuideServiceDep,
+) -> Response:
+    await assert_has_omie_origin(db, client, settings=settings)
+    guide = await service.build(client, comportamento)
+    # A trilha (§4.7): 1 linha `export`, só IDs, como a exportação do de-para.
+    await record_access(
+        db,
+        user_id=UUID(user.id),
+        client_id=client.id,
+        action=AccessAction.EXPORT,
+        user_scope=user.scope,
+        actor_client_id=user.client_id,
+        actor_organization_id=user.organization_id,
+    )
+    return Response(
+        content=guide.content,
+        media_type=XLSX_MEDIA_TYPE,
+        headers={
+            "Content-Disposition": 'attachment; filename="' + guide_filename(client.id.hex) + '"'
+        },
+    )
 
 
 def _to_input(item: DecisionItemRequest) -> DecisionInput:
