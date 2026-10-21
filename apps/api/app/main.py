@@ -341,6 +341,9 @@ def create_app() -> FastAPI:
     app.include_router(client_summary_routes.router)
     app.include_router(client_movements_routes.router)
     app.include_router(mapping_catalog_routes.router)
+    # O guia da Omie ANTES do router por destino: `/mapping/omie-categories-guide`
+    # casaria com `/mapping/{destination_type}` (86e3qhht4).
+    app.include_router(client_mapping_routes.guide_router)
     app.include_router(client_mapping_routes.router)
     app.include_router(export_layouts_routes.router)
     app.include_router(accounting_files_routes.router)

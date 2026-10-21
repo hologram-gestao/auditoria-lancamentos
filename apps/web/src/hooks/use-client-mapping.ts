@@ -23,6 +23,7 @@ import {
   confirmInheritedDecisions,
   createMappingTargets,
   exportClientMapping,
+  exportOmieCategoriesGuide,
   getMappingPreview,
   getMovementsSyncState,
   getOriginTargetsPreview,
@@ -63,6 +64,7 @@ import type {
   MaterializationSummary,
   MovementsSyncResult,
   MovementsSyncState,
+  OmieCategoryBehavior,
   OriginTargetsPreview,
 } from '@/lib/contracts';
 
@@ -296,6 +298,13 @@ export function useMaterializeMapping(clientId: string, destinationType: string)
 export function useExportClientMapping(clientId: string, destinationType: string) {
   return useMutation<BlobResponse, Error, void>({
     mutationFn: () => exportClientMapping(clientId, destinationType),
+  });
+}
+
+/** O guia das categorias da Omie (86e3qhht4): só baixa, não invalida nada. */
+export function useExportOmieCategoriesGuide(clientId: string) {
+  return useMutation<BlobResponse, Error, OmieCategoryBehavior>({
+    mutationFn: (behavior) => exportOmieCategoriesGuide(clientId, behavior),
   });
 }
 
