@@ -32,12 +32,12 @@
 # Uso (dry-run, o padrão: só grava os manifestos e mostra diff e prova):
 #   bash scripts/deploy/replay_cloud_run_manifests.sh \
 #     --source-project liberdade-assessoria \
-#     --target-project hologramos --target-project-number 910127994973 \
-#     --target-sql-connection hologramos:southamerica-east1:<instância> \
-#     --target-kek projects/hologramos/locations/southamerica-east1/keyRings/auditoria-dev/cryptoKeys/omie-encryption-kek \
-#     --api-url https://auditoria-api-dev-910127994973.southamerica-east1.run.app \
-#     --web-url https://auditoria-web-dev-910127994973.southamerica-east1.run.app \
-#     --out-dir /tmp/replay-hologramos
+#     --target-project hologramos-512320 --target-project-number 114342061812 \
+#     --target-sql-connection hologramos-512320:southamerica-east1:<instância> \
+#     --target-kek projects/hologramos-512320/locations/southamerica-east1/keyRings/auditoria-dev/cryptoKeys/omie-encryption-kek \
+#     --api-url https://auditoria-api-dev-114342061812.southamerica-east1.run.app \
+#     --web-url https://auditoria-web-dev-114342061812.southamerica-east1.run.app \
+#     --out-dir /tmp/replay-hologramos-512320
 #
 # Opcionais:
 #   --apply           aplica no destino (replace um por vez, para no primeiro erro).
@@ -46,6 +46,12 @@
 #                     a fixture de scripts/deploy/testdata/). Não combina com --apply.
 #   --image-tag <t>   tag usada no lugar de um digest (default dev, a do deploy-dev.yml).
 #   --region <r>      default southamerica-east1.
+#   --api-ingress <i> ingresso da API no destino: internal (default) ou all. A API nova
+#                     nasce fechada: até o --verify do reembrulho das DEKs zerar, ela não
+#                     recebe tráfego público (runbook, passo 7). A web mantém o da origem.
+#
+# O --apply exige um dry-run anterior no MESMO --out-dir e só aplica se a origem, lida de
+# novo, gerar exatamente o manifesto revisado; se ela mudou no meio, para sem aplicar.
 #
 # Saídas: 0 ok · 1 alguma prova falhou ou o replace falhou · 2 argumento inválido.
 
@@ -73,6 +79,7 @@ OUT_DIR=""
 FROM_DIR=""
 IMAGE_TAG="dev"
 REGION="southamerica-east1"
+API_INGRESS="internal"
 APPLY=0
 
 usage() {
@@ -85,8 +92,10 @@ die() {
 }
 
 while [[ $# -gt 0 ]]; do
-  # Flag de valor sem valor no fim da linha: o `shift 2` sairia calado sob set -e.
-  if [[ "$1" == --* && "$1" != --apply && "$1" != --help && $# -lt 2 ]]; then
+  # Flag de valor sem valor (no fim da linha ou seguida de outra flag): o `shift 2`
+  # sairia calado sob set -e, ou a flag seguinte viraria o valor.
+  if [[ "$1" == --* && "$1" != --apply && "$1" != --help ]] \
+     && [[ $# -lt 2 || "${2:-}" == --* ]]; then
     die "$1 precisa de um valor."
   fi
   case "$1" in
@@ -101,6 +110,7 @@ while [[ $# -gt 0 ]]; do
     --from-dir) FROM_DIR="${2:-}"; shift 2 ;;
     --image-tag) IMAGE_TAG="${2:-}"; shift 2 ;;
     --region) REGION="${2:-}"; shift 2 ;;
+    --api-ingress) API_INGRESS="${2:-}"; shift 2 ;;
     --apply) APPLY=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "argumento desconhecido: $1 (veja --help)" ;;
@@ -121,6 +131,8 @@ _project_id_re='^[a-z][a-z0-9-]{4,28}[a-z0-9]$'
   || die "--target-kek tem de ser projects/${TARGET_PROJECT}/locations/<r>/keyRings/<k>/cryptoKeys/<c>."
 [[ "$API_URL" =~ ^https://[a-z0-9.-]+$ ]] || die "--api-url tem de ser https://<host>, sem caminho nem barra final."
 [[ "$WEB_URL" =~ ^https://[a-z0-9.-]+$ ]] || die "--web-url tem de ser https://<host>, sem caminho nem barra final."
+[[ "$API_INGRESS" == internal || "$API_INGRESS" == all ]] || die "--api-ingress tem de ser internal ou all."
+[[ "$REGION" =~ ^[a-z]+-[a-z]+[0-9]+$ ]] || die "--region inválida."
 [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || die "--image-tag inválida."
 [[ -n "$OUT_DIR" ]] || die "--out-dir é obrigatório (fora do repositório)."
 if [[ -n "$FROM_DIR" ]]; then
@@ -138,8 +150,12 @@ if [[ -n "$_repo_root" ]]; then
     "$_repo_abs"/*) die "--out-dir ${OUT_DIR} está dentro do repositório (${_repo_abs})." ;;
   esac
 fi
-mkdir -p "$_out_abs"
-chmod 700 "$_out_abs"
+# Permissão só no diretório que o script cria: um --out-dir existente (o $HOME, /tmp)
+# fica como está.
+if [[ ! -d "$_out_abs" ]]; then
+  mkdir -p "$_out_abs"
+  chmod 700 "$_out_abs"
+fi
 
 API_HOST="${API_URL#https://}"
 WEB_HOST="${WEB_URL#https://}"
@@ -209,7 +225,7 @@ function rewrite_globals(s) {
 }
 BEGIN {
   SQ = sprintf("%c", 39)
-  split("RP_MODE RP_AR_SRC RP_AR_DST RP_SA_SRC RP_SA_DST RP_API_OLD1 RP_API_OLD2 RP_WEB_OLD1 RP_WEB_OLD2 RP_API_HOST RP_WEB_HOST RP_TARGET_NUMBER RP_SQL_CONNECTION RP_TARGET_KEK RP_IMAGE_TAG", names, " ")
+  split("RP_MODE RP_AR_SRC RP_AR_DST RP_SA_SRC RP_SA_DST RP_API_OLD1 RP_API_OLD2 RP_WEB_OLD1 RP_WEB_OLD2 RP_API_HOST RP_WEB_HOST RP_TARGET_NUMBER RP_SQL_CONNECTION RP_TARGET_KEK RP_IMAGE_TAG RP_INGRESS", names, " ")
   for (i in names) E[names[i]] = ENVIRON[names[i]]
   rewrite = (E["RP_MODE"] == "rewrite")
   np = 0; depth = 0; skip_ind = -1; skip_list = 0; env_ind = -1; env_name = ""
@@ -218,7 +234,7 @@ BEGIN {
   drop_path["metadata.generation"] = 1; drop_path["metadata.creationTimestamp"] = 1
   drop_path["metadata.selfLink"] = 1
   drop_path["spec.template.metadata.name"] = 1
-  drop_key_re = "^(run\\.googleapis\\.com/(operation-id|lastModifier|creator|urls)|client\\.knative\\.dev/nonce|serving\\.knative\\.dev/.*)$"
+  drop_key_re = "^(run\\.googleapis\\.com/(operation-id|lastModifier|creator|urls|ingress-status)|client\\.knative\\.dev/nonce|serving\\.knative\\.dev/.*)$"
 }
 {
   line = $0
@@ -264,6 +280,9 @@ BEGIN {
 
   pad = substr(line, 1, ind)
   if (p == "metadata.namespace") { emit(pad "namespace: " SQ E["RP_TARGET_NUMBER"] SQ, ind, 0); next }
+  if (p == "metadata.annotations.run.googleapis.com/ingress" && E["RP_INGRESS"] != "") {
+    emit(pad k ": " E["RP_INGRESS"], ind, 0); next
+  }
   if (k == "run.googleapis.com/cloudsql-instances" && parent ~ /annotations$/) {
     emit(pad k ": " E["RP_SQL_CONNECTION"], ind, 0); next
   }
@@ -286,7 +305,8 @@ BEGIN {
 '
 
 run_awk() {
-  # $1 = modo (rewrite | paths), $2 = arquivo, $3 = número do projeto de origem
+  # $1 = modo (rewrite | paths), $2 = arquivo, $3 = número do projeto de origem,
+  # $4 = ingresso a gravar (vazio = o da origem)
   local source_number="$3"
   RP_MODE="$1" \
   RP_AR_SRC="${AR_HOST//./\\.}/${SOURCE_PROJECT}/${AR_REPO}/" \
@@ -302,6 +322,7 @@ run_awk() {
   RP_SQL_CONNECTION="$TARGET_SQL_CONNECTION" \
   RP_TARGET_KEK="$TARGET_KEK" \
   RP_IMAGE_TAG="$IMAGE_TAG" \
+  RP_INGRESS="${4:-}" \
     awk "$AWK_PROGRAM" "$2"
 }
 
@@ -329,6 +350,11 @@ prove() {
   fi
   if grep -qE '^ *(- )?revisionName:' "$file"; then
     echo "    FALHA spec.traffic aponta para uma revisão da origem (revisionName)"
+    ok=1
+  fi
+  if [[ "$name" == auditoria-api-dev ]] \
+     && ! grep -qxE "    run\.googleapis\.com/ingress: ${API_INGRESS}" "$file"; then
+    echo "    FALHA a API não ficou com ingress ${API_INGRESS}"
     ok=1
   fi
   if ! grep -qF "$TARGET_PROJECT" "$file"; then
@@ -364,6 +390,15 @@ for i in "${!NAMES[@]}"; do
   dst_file="${_out_abs}/${name}.yaml"
   echo "--- ${kind%s} ${name} ---"
 
+  # No --apply, o que vai para o destino tem de ser o que foi revisado no dry-run.
+  if [[ "$APPLY" -eq 1 ]]; then
+    [[ -f "$dst_file" ]] || {
+      echo "::error:: ${dst_file} não existe: rode o dry-run neste --out-dir e revise antes do --apply." >&2
+      exit 1
+    }
+    cp "$dst_file" "${dst_file}.reviewed"
+  fi
+
   if [[ -n "$FROM_DIR" ]]; then
     [[ -f "${FROM_DIR}/${name}.yaml" ]] || { echo "::error:: ${FROM_DIR}/${name}.yaml não existe" >&2; exit 2; }
     cp "${FROM_DIR}/${name}.yaml" "$src_file"
@@ -376,7 +411,16 @@ for i in "${!NAMES[@]}"; do
   source_number="$(sed -n "s/^  namespace: *['\"]\{0,1\}\([0-9][0-9]*\)['\"]\{0,1\} *$/\1/p" "$src_file" | head -n 1)"
   [[ -n "$source_number" ]] || { echo "::error:: ${name}: metadata.namespace numérico não encontrado" >&2; exit 2; }
 
-  run_awk rewrite "$src_file" "$source_number" > "$dst_file"
+  ingress=""
+  [[ "$name" == auditoria-api-dev ]] && ingress="$API_INGRESS"
+
+  run_awk rewrite "$src_file" "$source_number" "$ingress" > "$dst_file"
+
+  if [[ "$APPLY" -eq 1 ]] && ! cmp -s "${dst_file}.reviewed" "$dst_file"; then
+    echo "::error:: ${name} mudou na origem desde o dry-run (diff abaixo): nada foi aplicado." >&2
+    diff -u "${dst_file}.reviewed" "$dst_file" | sed 's/^/    /' >&2 || true
+    exit 1
+  fi
 
   echo "  diff -u origem destino:"
   diff -u "$src_file" "$dst_file" | sed 's/^/    /' || true

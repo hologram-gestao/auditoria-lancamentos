@@ -10,7 +10,7 @@
 ### 0. Projeto novo (86e3r2egh, épico 86e3r2egb)
 
 Só quando o ambiente sobe num projeto do GCP que ainda não tem nada (a mudança do
-`liberdade-assessoria` para o `hologramos`). Num projeto que já roda, pule para o passo 1.
+`liberdade-assessoria` para o `hologramos-512320`). Num projeto que já roda, pule para o passo 1.
 O pool do Workload Identity e os serviços e jobs do Cloud Run foram criados à mão no
 projeto antigo; os dois scripts abaixo versionam isso. Nenhum dos dois tem default de
 projeto: todo comando nomeia o destino.
@@ -31,14 +31,22 @@ Ordem, com `<novo>` = id do projeto novo e `<número>` = o número dele:
    names saem de `gcloud iam service-accounts list --project=<antigo>`; sem eles, a SA
    nasce com o próprio id como nome. No fim imprime os três valores dos secrets do GitHub.
 
-2. **Artifact Registry** (operação, uma vez):
-   `gcloud artifacts repositories create auditoria --repository-format=docker --location=southamerica-east1 --project=<novo>`.
+2. **Cloud Build e Artifact Registry** (operação, uma vez):
+   `gcloud services enable cloudbuild.googleapis.com artifactregistry.googleapis.com --project=<novo>`
+   e `gcloud artifacts repositories create auditoria --repository-format=docker --location=southamerica-east1 --project=<novo>`.
+   Confira qual SA o Cloud Build do projeto novo usa
+   (`gcloud builds get-default-service-account --project=<novo>`): projeto novo pode não
+   ter mais a legada `<número>@cloudbuild.gserviceaccount.com`, que é a que o item 3
+   autoriza no Artifact Registry. Se for outra, o binding de `artifactregistry.writer` vai
+   para ela.
 3. **IAM do CI/CD**: `PROJECT_ID=<novo> PROJECT_NUMBER=<número> bash scripts/deploy/grant_cicd_iam.sh`
    (os defaults dele ainda são do projeto antigo: as duas variáveis são obrigatórias aqui).
 4. **Fumaça do WIF**: grave os valores impressos no item 1 como
    `GCP_WORKLOAD_IDENTITY_PROVIDER_NEW` e `GCP_API_SERVICE_ACCOUNT_NEW` no Environment
    `development` e dispare o `wif-smoke.yml` (Actions → WIF smoke → Run workflow). Ele só
-   autentica e lista; os secrets do deploy atual não mudam.
+   autentica e lista; os secrets do deploy atual não mudam. Workflow só de
+   `workflow_dispatch` só aparece em Actions depois que o arquivo está na `main`
+   (PR develop → main).
 5. **`setup-gcp.sh`** (passo 1 abaixo) com `PROJECT_ID=<novo>`: KEK, secrets de alerta e de
    leads. Num projeto vazio a parte da carteira **avisa e segue** (não há job de
    referência ainda); ela é reexecutada no item 8.
@@ -60,10 +68,18 @@ Ordem, com `<novo>` = id do projeto novo e `<número>` = o número dele:
      --out-dir /tmp/replay-<novo>
    ```
 
-   Prova verde nos 7 recursos → o mesmo comando com `--apply` (`services replace` /
-   `jobs replace`, um por vez, para no primeiro erro). Prova vermelha = nada é aplicado:
-   o manifesto tem uma referência ao projeto antigo que a reescrita não conhece, e o
-   trecho aparece na saída.
+   Prova verde nos 7 recursos → o mesmo comando com `--apply` e o MESMO `--out-dir`
+   (`services replace` / `jobs replace`, um por vez, para no primeiro erro). O `--apply`
+   lê a origem de novo e só aplica se o manifesto gerado for idêntico ao revisado no
+   dry-run: um deploy no antigo entre os dois faz ele parar e mostrar o diff. Prova
+   vermelha = nada é aplicado: o manifesto tem uma referência ao projeto antigo que a
+   reescrita não conhece, e o trecho aparece na saída.
+
+   Use a URL da API na forma com o NÚMERO (`…-<número>.southamerica-east1.run.app`) em
+   todo lugar (Variable `API_URL_DEV`, `_API_URL` do build da web). A forma com hash
+   (`…-<hash>-rj.a.run.app`, a que o `status.url` mostra) só existe depois do primeiro
+   `replace` e não entra no `ALLOWED_HOSTS`: requisição com esse host recebe 400 até
+   alguém acrescentá-lo.
 
 8. **`setup-gcp.sh` de novo**: agora o job `cleanup` existe e a carteira ganha contrato e
    Cloud Scheduler.
@@ -74,9 +90,11 @@ Ordem, com `<novo>` = id do projeto novo e `<número>` = o número dele:
 > API só fica pronta com os secrets montados existindo no destino (subtask dos secrets) e
 > a instância do Cloud SQL de pé: sem eles o `replace` da API falha e o script para ali.
 >
-> ⚠️ **A API nova nasce com o ingresso do antigo (`all`).** Até o `--verify` do
-> reembrulho zerar (passo 7), ela fica `--ingress=internal` e os schedulers do projeto
-> novo pausados; ajuste logo depois do `--apply`.
+> ⚠️ **A API nova nasce `internal`** (`--api-ingress`, default `internal`; a prova
+> confere): até o `--verify` do reembrulho zerar (passo 7), ela não recebe tráfego
+> público, e os schedulers do projeto novo ficam pausados. Abrir é
+> `gcloud run services update auditoria-api-dev --ingress=all` depois do `--verify`. A
+> web mantém o ingresso da origem.
 
 O dry-run tem teste sem gcloud, sobre a fixture inventada de `scripts/deploy/testdata/`:
 `bash scripts/deploy/test_replay_cloud_run_manifests.sh` (saída 0 = passou).

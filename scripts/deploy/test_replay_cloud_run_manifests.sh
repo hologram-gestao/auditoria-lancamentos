@@ -15,15 +15,15 @@ FIXTURE="${HERE}/testdata"
 OUT="$(mktemp -d)"
 trap 'rm -r "$OUT"' EXIT
 
-NEW_KEK="projects/hologramos/locations/southamerica-east1/keyRings/auditoria-dev/cryptoKeys/omie-encryption-kek"
-NEW_SQL="hologramos:southamerica-east1:hologramos-pg"
-NEW_API_HOST="auditoria-api-dev-910127994973.southamerica-east1.run.app"
-NEW_WEB_HOST="auditoria-web-dev-910127994973.southamerica-east1.run.app"
+NEW_KEK="projects/hologramos-512320/locations/southamerica-east1/keyRings/auditoria-dev/cryptoKeys/omie-encryption-kek"
+NEW_SQL="hologramos-512320:southamerica-east1:hologramos-pg"
+NEW_API_HOST="auditoria-api-dev-114342061812.southamerica-east1.run.app"
+NEW_WEB_HOST="auditoria-web-dev-114342061812.southamerica-east1.run.app"
 
 replay() {
   bash "$SCRIPT" \
     --source-project liberdade-assessoria \
-    --target-project hologramos --target-project-number 910127994973 \
+    --target-project hologramos-512320 --target-project-number 114342061812 \
     --target-sql-connection "$NEW_SQL" --target-kek "$NEW_KEK" \
     --api-url "https://${NEW_API_HOST}" --web-url "https://${NEW_WEB_HOST}" \
     "$@"
@@ -64,9 +64,9 @@ for m in "${manifests[@]}"; do
     bash -c "! grep -qE '^      name: ' '$m'"
   check "${n}: sem mapa vazio (chave sem valor seguida de irmã ou de nada)" \
     bash -c "! awk 'prev ~ /:\$/ { match(prev, /^ */); pi = RLENGTH; match(\$0, /^ */); if (RLENGTH < pi || (RLENGTH == pi && \$0 !~ /^ *- /)) bad = 1 } { prev = \$0 } END { if (prev ~ /:\$/) bad = 1; exit !bad }' '$m'"
-  check "${n}: namespace do destino" present "namespace: '910127994973'" "$m"
-  check "${n}: SA do destino" present '@hologramos.iam.gserviceaccount.com' "$m"
-  check "${n}: imagem do destino" present 'southamerica-east1-docker.pkg.dev/hologramos/auditoria/' "$m"
+  check "${n}: namespace do destino" present "namespace: '114342061812'" "$m"
+  check "${n}: SA do destino" present '@hologramos-512320.iam.gserviceaccount.com' "$m"
+  check "${n}: imagem do destino" present 'southamerica-east1-docker.pkg.dev/hologramos-512320/auditoria/' "$m"
 done
 
 # 3. Os valores trocados por argumento.
@@ -74,6 +74,9 @@ api="${OUT}/auditoria-api-dev.yaml"
 web="${OUT}/auditoria-web-dev.yaml"
 check "api: minScale '1' preservado" present "autoscaling.knative.dev/minScale: '1'" "$api"
 check "api: cpu-throttling 'false' preservado" present "run.googleapis.com/cpu-throttling: 'false'" "$api"
+check "api: nasce com ingress internal" present "    run.googleapis.com/ingress: internal" "$api"
+check "api: sem ingress-status (campo de saída)" absent 'ingress-status' "$api"
+check "web: mantém o ingress da origem" present "    run.googleapis.com/ingress: all" "$web"
 check "api: cloudsql-instances novo" present "run.googleapis.com/cloudsql-instances: ${NEW_SQL}" "$api"
 check "api: KEK nova" present "value: ${NEW_KEK}" "$api"
 check "api: ALLOWED_HOSTS só host, sem duplicata" \
@@ -105,6 +108,14 @@ expect_exit 2 "--apply com --from-dir é recusado" --from-dir "$FIXTURE" --out-d
 expect_exit 2 "--out-dir dentro do repositório é recusado" --from-dir "$FIXTURE" --out-dir "${HERE}/out-test"
 check "--out-dir recusado não foi criado" test ! -e "${HERE}/out-test"
 expect_exit 2 "flag de valor sem valor no fim é recusada" --from-dir "$FIXTURE" --out-dir
+expect_exit 2 "flag de valor seguida de outra flag é recusada" --from-dir "$FIXTURE" --out-dir --apply
+expect_exit 2 "--api-ingress fora do vocabulário é recusado" --from-dir "$FIXTURE" --out-dir "$OUT/z" --api-ingress public
+expect_exit 1 "--apply sem dry-run no mesmo --out-dir para antes do gcloud" --out-dir "$OUT/sem-dry-run" --apply
+mkdir -m 755 "${OUT}/existente"
+replay --from-dir "$FIXTURE" --out-dir "${OUT}/existente" > /dev/null
+check "--out-dir que já existia mantém a permissão" test "$(stat -c %a "${OUT}/existente")" = 755
+replay --from-dir "$FIXTURE" --out-dir "${OUT}/novo" > /dev/null
+check "--out-dir criado pelo script nasce 700" test "$(stat -c %a "${OUT}/novo")" = 700
 expect_exit 2 "--target-kek de outro projeto é recusado" --from-dir "$FIXTURE" --out-dir "$OUT/y" \
   --target-kek projects/liberdade-assessoria/locations/southamerica-east1/keyRings/a/cryptoKeys/b
 

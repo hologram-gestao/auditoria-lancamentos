@@ -18,7 +18,7 @@
 #
 # Uso (as duas variáveis são OBRIGATÓRIAS e não têm default de propósito: um default
 # apontaria para o projeto antigo e criaria o pool no lugar errado):
-#   PROJECT_ID=hologramos PROJECT_NUMBER=910127994973 bash scripts/deploy/setup_wif.sh
+#   PROJECT_ID=hologramos-512320 PROJECT_NUMBER=114342061812 bash scripts/deploy/setup_wif.sh
 #
 # Opcionais:
 #   API_SA_DISPLAY_NAME / WEB_SA_DISPLAY_NAME  display name das SAs (só na criação;
@@ -30,7 +30,7 @@ set -euo pipefail
 if [[ -z "${PROJECT_ID:-}" || -z "${PROJECT_NUMBER:-}" ]]; then
   echo "::error:: PROJECT_ID e PROJECT_NUMBER são obrigatórios (sem default: um default" >&2
   echo "          apontaria para o projeto antigo). Ex.:" >&2
-  echo "          PROJECT_ID=hologramos PROJECT_NUMBER=910127994973 bash scripts/deploy/setup_wif.sh" >&2
+  echo "          PROJECT_ID=hologramos-512320 PROJECT_NUMBER=114342061812 bash scripts/deploy/setup_wif.sh" >&2
   exit 2
 fi
 if [[ ! "$PROJECT_NUMBER" =~ ^[0-9]+$ ]]; then
@@ -75,8 +75,10 @@ fi
 # 1. APIs que o WIF usa (iam, a troca de token no STS e a impersonação)
 # ------------------------------------------------------------------
 echo "--- APIs ---"
+# run: o wif-smoke.yml lista os serviços do Cloud Run, e sem a API habilitada ele
+# reprovaria com o WIF certo.
 for _api in iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com \
-            cloudresourcemanager.googleapis.com; do
+            cloudresourcemanager.googleapis.com run.googleapis.com; do
   if [[ -n "$(gcloud services list --enabled --project="$PROJECT_ID" \
                 --filter="config.name=${_api}" --format='value(config.name)')" ]]; then
     echo "  ${_api}: já habilitada"
@@ -129,7 +131,7 @@ echo "--- Provider ${PROVIDER_ID} ---"
 if gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
      --workload-identity-pool="$POOL_ID" --location=global \
      --project="$PROJECT_ID" >/dev/null 2>&1; then
-  echo "  já existe — ok (confira a condição abaixo)"
+  echo "  já existe — conferindo issuer, mapeamento e condição"
 else
   echo "  criando…"
   gcloud iam workload-identity-pools providers create-oidc "$PROVIDER_ID" \
@@ -139,10 +141,33 @@ else
     --attribute-condition="$ATTRIBUTE_CONDITION" \
     --quiet
 fi
-echo "  attributeCondition em vigor:"
-gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
-  --workload-identity-pool="$POOL_ID" --location=global --project="$PROJECT_ID" \
-  --format='value(attributeCondition)' | sed 's/^/    /'
+# Provider já existente (criado à mão ou por outra rodada) tem de ser IGUAL ao esperado:
+# sem attribute.repository o principalSet nunca casa, e sem a condição a confiança fica
+# mais larga que o repositório.
+_describe_provider() {
+  gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
+    --workload-identity-pool="$POOL_ID" --location=global --project="$PROJECT_ID" \
+    --format="$1"
+}
+_issuer="$(_describe_provider 'value(oidc.issuerUri)')"
+_condition="$(_describe_provider 'value(attributeCondition)')"
+if [[ "$_issuer" != "$ISSUER_URI" || "$_condition" != "$ATTRIBUTE_CONDITION" ]]; then
+  echo "::error:: o provider existente diverge do esperado." >&2
+  echo "          issuer:   ${_issuer} (esperado ${ISSUER_URI})" >&2
+  echo "          condição: ${_condition} (esperada ${ATTRIBUTE_CONDITION})" >&2
+  exit 1
+fi
+_mapping="$(_describe_provider 'json(attributeMapping)')"
+IFS=',' read -r -a _pairs <<< "$ATTRIBUTE_MAPPING"
+for _pair in "${_pairs[@]}"; do
+  _key="${_pair%%=*}"
+  _value="${_pair#*=}"
+  if ! grep -qF "\"${_key}\": \"${_value}\"" <<< "$_mapping"; then
+    echo "::error:: o attributeMapping do provider existente não tem ${_key}=${_value}." >&2
+    exit 1
+  fi
+done
+echo "  issuer, condição e mapeamento conferidos"
 
 # ------------------------------------------------------------------
 # 5. workloadIdentityUser: só o repositório pode impersonar as duas SAs
