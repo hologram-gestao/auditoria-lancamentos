@@ -15,10 +15,15 @@
  *
  * Quem chama esconde o botão de quem não tem `generate_accounting_file` e de cliente
  * encerrado (o servidor nega os dois de qualquer jeito).
+ *
+ * Depois do download o diálogo fica aberto com o PRÓXIMO passo (86e3qhht4): importado o
+ * plano na Omie, as categorias se configuram com o guia do de-para, no destino conta
+ * contábil. Só texto e link.
  */
 
 import {
   AlertTriangle,
+  ArrowRight,
   CheckCircle2,
   Download,
   FileSpreadsheet,
@@ -26,9 +31,11 @@ import {
   Loader2,
   RefreshCw,
 } from 'lucide-react';
+import Link from 'next/link';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
+import { accountingMappingPath } from '@/components/features/client-mapping/accounting-destination';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -82,16 +89,17 @@ function OmieChartExportDialog({
   const exportMutation = useExportOmieChart(clientId);
   const refreshMutation = useRefreshOmieChartExportPreview(clientId);
   const [refusal, setRefusal] = useState<OmieExportRefusalProblem[] | null>(null);
+  const [downloaded, setDownloaded] = useState(false);
   const data = preview.data;
   const problems = refusal ?? data?.problems ?? [];
-  const canDownload = data !== undefined && problems.length === 0;
+  const canDownload = !downloaded && data !== undefined && problems.length === 0;
 
   async function handleDownload() {
     try {
       const { blob, filename } = await exportMutation.mutateAsync();
       triggerBrowserDownload(blob, filename ?? 'Omie_Plano_Contas.xlsx');
       toast.success('Planilha da Omie baixada. Importe no Painel do Contador da Omie.');
-      onOpenChange(false);
+      setDownloaded(true);
     } catch (err) {
       const problemsFromServer = readOmieExportRefusal(err);
       if (problemsFromServer !== null) {
@@ -118,7 +126,9 @@ function OmieChartExportDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {preview.isLoading ? (
+        {downloaded ? (
+          <NextStepNotice clientId={clientId} />
+        ) : preview.isLoading ? (
           <p className="text-muted-foreground flex items-center gap-2 text-sm" role="status">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
             Conferindo o plano contábil…
@@ -189,6 +199,27 @@ function OmieChartExportDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function NextStepNotice({ clientId }: { clientId: string }) {
+  return (
+    <div role="status" className="space-y-3 text-sm" data-testid="omie-export-next-step">
+      <p className="text-success flex items-start gap-2">
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        <span>Planilha baixada. Importe no Painel do Contador da Omie.</span>
+      </p>
+      <p className="text-muted-foreground">
+        Depois de importar o plano na Omie, configure as categorias com o guia do de-para.
+      </p>
+      <Link
+        href={accountingMappingPath(clientId)}
+        className="text-link inline-flex items-center gap-1 font-medium underline underline-offset-4"
+      >
+        Abrir o de-para na conta contábil
+        <ArrowRight className="h-4 w-4" aria-hidden="true" />
+      </Link>
+    </div>
   );
 }
 

@@ -5,7 +5,7 @@
  *
  * Cobre: a prévia (contagens, conferência do cadastro no Omie nos três estados),
  * os problemas que impedem a geração com os CÓDIGOS das contas e sem o botão de
- * baixar, o download (arquivo, toast, fecha), a recusa 409 do download mostrada no
+ * baixar, o download (arquivo, toast e o próximo passo para o guia do de-para), a recusa 409 do download mostrada no
  * diálogo (nunca toast) e axe sem `critical`/`serious`.
  */
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -154,7 +154,7 @@ describe('OmieChartExportAction', () => {
     expect(within(dialog).getByRole('button', { name: 'Fechar' })).toBeInTheDocument();
   });
 
-  it('baixar: dispara o arquivo, avisa e fecha', async () => {
+  it('baixar: dispara o arquivo, avisa e mostra o próximo passo (86e3qhht4)', async () => {
     const blob = new Blob(['x']);
     exportState.mutateAsync = vi
       .fn()
@@ -167,6 +167,16 @@ describe('OmieChartExportAction', () => {
     expect(toastSuccess).toHaveBeenCalledWith(
       'Planilha da Omie baixada. Importe no Painel do Contador da Omie.',
     );
+    // O diálogo fica aberto com a ponte para o guia das categorias no de-para.
+    const nextStep = await within(dialog).findByTestId('omie-export-next-step');
+    expect(nextStep).toHaveTextContent(
+      'Depois de importar o plano na Omie, configure as categorias com o guia do de-para',
+    );
+    expect(
+      within(nextStep).getByRole('link', { name: /Abrir o de-para na conta contábil/ }),
+    ).toHaveAttribute('href', '/clientes/c1/de-para?destination=conta_contabil');
+    expect(within(dialog).queryByRole('button', { name: 'Baixar planilha' })).toBeNull();
+    await user.click(within(dialog).getByRole('button', { name: 'Fechar' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 

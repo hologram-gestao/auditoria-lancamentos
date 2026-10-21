@@ -138,6 +138,7 @@ vi.mock('@/hooks/use-client-mapping', () => ({
   useInheritMapping: () => inheritState,
   useMaterializeMapping: () => materializeState,
   useExportClientMapping: () => exportState,
+  useExportOmieCategoriesGuide: () => exportState,
   usePreviewMappingImport: () => importPreviewState,
   useApplyMappingImport: () => importApplyState,
   useOriginTargetsPreview: () => originPreviewState,
@@ -546,6 +547,58 @@ describe('ClientMappingScreen — gating por papel (R6)', () => {
     currentSearch = 'destination=conta_contabil';
     render(<ClientMappingScreen clientId={TENANT} />);
     expect(screen.getByRole('button', { name: /Importar/ })).toBeVisible();
+  });
+});
+
+describe('ClientMappingScreen — guia para configurar no Omie (86e3qhht4)', () => {
+  const omie: ClientConnection = {
+    id: 'omie-1',
+    provider_type: 'omie',
+    label: 'Omie',
+    status: 'erro',
+    last_checked_at: null,
+    accounts_synced_at: null,
+    capabilities: ['listar_lancamentos'],
+  };
+  const GUIDE = /Guia para configurar no Omie/;
+
+  beforeEach(() => {
+    destinationsState.data = [
+      destination({ id: 'd-conta', type: 'conta_contabil', name: 'Conta contábil' }),
+      destination(),
+    ];
+  });
+
+  it('aparece no conta contábil para cliente com Omie, mesmo com a conexão em erro', () => {
+    clientDetailState.data = { ...clientDetailState.data!, connections: [omie] };
+    currentSearch = 'destination=conta_contabil';
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.getByRole('button', { name: GUIDE })).toBeVisible();
+  });
+
+  it('não aparece em outro destino', () => {
+    clientDetailState.data = { ...clientDetailState.data!, connections: [omie] };
+    currentSearch = 'destination=demonstrativo_contabil';
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.queryByRole('button', { name: GUIDE })).not.toBeInTheDocument();
+  });
+
+  it('não aparece para cliente sem Omie (só por arquivo)', () => {
+    clientDetailState.data = {
+      ...clientDetailState.data!,
+      connections: [{ ...omie, id: 'arq-1', provider_type: 'arquivo', status: 'ativa' }],
+    };
+    currentSearch = 'destination=conta_contabil';
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.queryByRole('button', { name: GUIDE })).not.toBeInTheDocument();
+  });
+
+  it('não pede permissão própria: o operador do cliente vê, como Exportar', () => {
+    clientDetailState.data = { ...clientDetailState.data!, connections: [omie] };
+    deniedPermissions.add('manage_client_mapping');
+    currentSearch = 'destination=conta_contabil';
+    render(<ClientMappingScreen clientId={TENANT} />);
+    expect(screen.getByRole('button', { name: GUIDE })).toBeVisible();
   });
 });
 

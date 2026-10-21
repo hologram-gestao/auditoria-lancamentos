@@ -2680,6 +2680,15 @@ async function fulfillApi(route: Route): Promise<void> {
       body: Buffer.from('PK'),
     });
   }
+  // 86e3qhht4 — o guia das categorias da Omie, do de-para no `conta_contabil`.
+  if (path === `/api/v1/clients/${CLIENT_ID}/mapping/omie-categories-guide`) {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      headers: { 'content-disposition': 'attachment; filename="guia-omie-11111111.xlsx"' },
+      body: Buffer.from('PK'),
+    });
+  }
   if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/import/preview`) {
     if (enviouXls(route)) return recusarXls(route);
     if (accountingImportOutcome === 'linhas' || accountingImportOutcome === 'dominio') {
@@ -10105,6 +10114,9 @@ for (const vp of VIEWPORTS) {
         page,
       }) => {
         omieExportOutcome = estado;
+        // 86e3qhht4: o link do próximo passo abre o de-para no destino conta contábil, e
+        // o catálogo de destinos já está no cache desde esta página (o contador do menu).
+        mappingAccountingDestination = true;
         sessionUser = SYSTEM_MANAGER_USER;
         await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
         await expect(page.getByRole('heading', { name: 'Plano contábil', level: 1 })).toBeVisible();
@@ -10131,7 +10143,25 @@ for (const vp of VIEWPORTS) {
           const download = page.waitForEvent('download');
           await dialogo.getByRole('button', { name: 'Baixar planilha' }).click();
           expect((await download).suggestedFilename()).toBe('Omie_Plano_Contas_11111111.xlsx');
-          await expect(dialogo).toHaveCount(0);
+          // 86e3qhht4: o diálogo fica com o próximo passo, a ponte para o guia do de-para.
+          const ponte = dialogo.getByTestId('omie-export-next-step');
+          await expect(ponte).toContainText('configure as categorias com o guia do de-para');
+          const link = ponte.getByRole('link', { name: /Abrir o de-para na conta contábil/ });
+          await expect(link).toHaveAttribute(
+            'href',
+            `/clientes/${CLIENT_ID}/de-para?destination=conta_contabil`,
+          );
+          await exigirDentroDaViewport(page, link, `${vp.label}: link para o de-para`);
+          await shot(page, `plano-contabil-planilha-omie-proximo-passo-${slugPC16}`);
+          await analyze(
+            page,
+            `plano contábil — planilha da Omie baixada, próximo passo (${vp.label})`,
+          );
+          await link.click();
+          await expect(page).toHaveURL(/\/de-para\?destination=conta_contabil$/);
+          await expect(page.getByRole('combobox', { name: 'Destino' })).toContainText(
+            'Conta contábil',
+          );
         }
       });
     }
@@ -10221,6 +10251,41 @@ for (const vp of VIEWPORTS) {
         gaveta.getByText('O histórico padrão tem no máximo 500 caracteres.'),
       ).toBeVisible();
       await analyze(page, `de-para conta contábil — histórico acima do limite (${vp.label})`);
+    });
+
+    test('guia para configurar no Omie: diálogo com o comportamento e o download (86e3qhht4)', async ({
+      page,
+    }) => {
+      mappingAccountingDestination = true;
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/de-para?destination=conta_contabil`);
+      const acao = page.getByRole('button', { name: 'Guia para configurar no Omie' });
+      await exigirDentroDaViewport(page, acao, `${vp.label}: "Guia para configurar no Omie"`);
+      await acao.click();
+      const dialogo = page.getByRole('dialog', { name: 'Guia para configurar no Omie' });
+      await aguardarAnimacao(dialogo);
+      const grupo = dialogo.getByRole('group', { name: 'Comportamento padrão na Omie' });
+      await expect(grupo.getByRole('radio')).toHaveCount(4);
+      await expect(grupo.getByRole('radio', { name: 'Gerar provisão e baixa' })).toBeChecked();
+      await grupo.getByRole('radio', { name: 'Não gerar lançamento' }).check();
+      const baixar = dialogo.getByRole('button', { name: 'Baixar guia' });
+      await exigirDentroDaViewport(page, baixar, `${vp.label}: "Baixar guia"`);
+      await shot(page, `de-para-conta-contabil-guia-omie-${slugDC}`);
+      await analyze(page, `de-para conta contábil — guia para configurar no Omie (${vp.label})`);
+      const request = page.waitForRequest((req) =>
+        req.url().includes('/mapping/omie-categories-guide?comportamento=nao_gerar'),
+      );
+      const download = page.waitForEvent('download');
+      await baixar.click();
+      await request;
+      expect((await download).suggestedFilename()).toBe('guia-omie-11111111.xlsx');
+      await expect(dialogo).toHaveCount(0);
+      // Fora do `conta_contabil` o guia não existe.
+      await page.getByRole('combobox', { name: 'Destino' }).click();
+      await page.getByRole('option', { name: 'Demonstrativo contábil' }).click();
+      await expect(page.getByRole('button', { name: 'Guia para configurar no Omie' })).toHaveCount(
+        0,
+      );
     });
 
     test('prévia: partida por categoria, completude e contas de origem pendentes', async ({

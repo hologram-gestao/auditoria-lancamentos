@@ -446,6 +446,11 @@ export type MovementsSyncRequest = Schemas['MovementsSyncRequest'];
 
 /** Um destino do catálogo da ORGANIZAÇÃO (tipo + nome + situação). */
 export type MappingDestination = Schemas['MappingDestinationItem'];
+/**
+ * O comportamento da categoria na tela da Omie (86e3qhht4), escolhido ao gerar o guia
+ * de configuração. Os rótulos moram em `lib/validation/omie-categories-guide.ts`.
+ */
+export type OmieCategoryBehavior = Schemas['OmieCategoryBehavior'];
 /** `{ data: [...] }` — chave ÚNICA: o `apiGet` já entrega o array. */
 export type MappingDestinationListResponse = Schemas['MappingDestinationListResponse'];
 /** Um alvo do destino — código de catálogo + nome. */

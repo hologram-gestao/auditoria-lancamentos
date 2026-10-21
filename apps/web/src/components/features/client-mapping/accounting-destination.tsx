@@ -33,6 +33,15 @@ import { cn } from '@/lib/utils';
 /** O destino cujo alvo é o plano contábil do cliente (BACK 16.2). */
 export const ACCOUNTING_DESTINATION_TYPE = 'conta_contabil';
 
+/**
+ * O de-para já aberto no destino `conta_contabil` (86e3qhht4): é para onde a planilha
+ * do plano da Omie manda configurar as categorias com o guia. `destination` é o
+ * parâmetro que `client-mapping-screen.tsx` lê da URL.
+ */
+export function accountingMappingPath(clientId: string): string {
+  return `/clientes/${clientId}/de-para?destination=${ACCOUNTING_DESTINATION_TYPE}`;
+}
+
 export function isAccountingDestination(destinationType: string): boolean {
   return destinationType === ACCOUNTING_DESTINATION_TYPE;
 }

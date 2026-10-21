@@ -911,6 +911,16 @@ SENSITIVE_ENDPOINTS: tuple[SensitiveEndpoint, ...] = (
         "app/modules/client_mapping/routes.py",
         f"{_VIA_CLIENT_PATH}; 1 linha `export` em access_audit",
     ),
+    # 86e3qhht4: o guia das categorias da Omie, do de-para no `conta_contabil`.
+    SensitiveEndpoint(
+        "GET",
+        "/api/v1/clients/{client_id}/mapping/omie-categories-guide",
+        ScopeKind.COLLECTION,
+        "app/modules/client_mapping/routes.py",
+        f"{_VIA_CLIENT_PATH}; universo, decisões e plano do Omie lidos por client_id; "
+        "nomes de categoria e de conta só em memória para montar o arquivo; 1 linha "
+        "`export` em access_audit",
+    ),
     SensitiveEndpoint(
         "POST",
         "/api/v1/clients/{client_id}/mapping/{destination_type}/import/preview",

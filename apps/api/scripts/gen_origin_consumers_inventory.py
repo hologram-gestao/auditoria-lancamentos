@@ -185,6 +185,14 @@ CLASSIFICATION: tuple[Entry, ...] = (
         "pela origem: nenhuma chamada ao provedor. NÃO converter",
     ),
     Entry(
+        "app/modules/client_mapping/omie_guide.py",
+        Family.ORIGEM,
+        "guia das categorias da Omie (86e3qhht4): só PERGUNTA se o cliente tem origem Omie "
+        "(`resolve_origin_connections`, em qualquer estado, e `assert_offers_origin_client` "
+        "para o só-arquivo); não constrói client nem toca em credencial, e o nome da "
+        "categoria vem do cache fail-soft da lista do de-para",
+    ),
+    Entry(
         "app/modules/client_mapping/accounting.py",
         Family.CIFRA_DADO,
         "cifra/decifra o HISTÓRICO PADRÃO da decisão do de-para no destino `conta_contabil` "
