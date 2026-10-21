@@ -27,6 +27,7 @@ from scripts.rewrap_client_deks import (
     resolve_rewrap_keys,
     run_rewrap,
 )
+from sqlalchemy.dialects import postgresql
 
 from app.core import crypto_service
 from app.core.config import get_settings
@@ -80,6 +81,7 @@ class _MemoryStore:
     swaps: int = 0
     events: list[RewrapStats] = field(default_factory=list)
     force_rowcount: int | None = None
+    fail_emit: bool = False
 
     async def load_wrapped(self) -> list[tuple[UUID, bytes]]:
         return sorted(self.blobs.items())
@@ -102,6 +104,8 @@ class _MemoryStore:
         return AAD_FILE_ENTRY_DESCRIPTION, found.pk, found.envelope, found.iv
 
     async def emit_rewrapped(self, stats: RewrapStats) -> None:
+        if self.fail_emit:
+            raise ConnectionError("banco fora do ar")
         self.events.append(stats)
 
 
@@ -204,7 +208,17 @@ class TestReembrulho:
         assert exc_info.value.reason == "linha_alterada"
         assert exc_info.value.client_id == min(seed.deks)
         assert seed.store.swaps == 1  # parou no primeiro cliente
-        assert seed.store.events == []
+        # A execução interrompida também deixa o evento, com o que chegou a fazer.
+        assert [(e.rewrapped, e.errors) for e in seed.store.events] == [(0, 0)]
+
+    async def test_evento_que_falha_nao_muda_o_resultado(self) -> None:
+        seed = await _seed(2)
+        seed.store.fail_emit = True
+
+        stats = await _run(seed.store, RewrapMode.EXECUTE)
+
+        assert (stats.rewrapped, stats.errors) == (2, 0)
+        assert stats.ok
 
     async def test_blob_que_nenhuma_kek_abre_conta_falha_e_segue(self) -> None:
         seed = await _seed(2)
@@ -301,6 +315,25 @@ class TestVerify:
 
         assert stats.verify_failed == 1
 
+    @pytest.mark.parametrize("pair", VERIFIABLE_PAIRS, ids=lambda p: f"{p[0]}.{p[1]}")
+    def test_a_query_de_cada_par_monta_e_filtra_pelo_cliente(self, pair: tuple[str, str]) -> None:
+        client_id = uuid4()
+        compiled = rewrap._envelope_field_query(pair, client_id).compile(
+            dialect=postgresql.dialect()
+        )
+        sql = str(compiled)
+        assert client_id in compiled.params.values()
+        assert "LIKE" in sql
+        assert f"{pair[1].removesuffix('_encrypted')}_iv" in sql
+
+    def test_credenciais_sao_os_ultimos_pares(self) -> None:
+        credentials = {
+            crypto_service.AAD_CLIENT_APP_KEY,
+            crypto_service.AAD_CLIENT_APP_SECRET,
+            crypto_service.AAD_CONNECTION_CREDENTIALS,
+        }
+        assert set(VERIFIABLE_PAIRS[-len(credentials) :]) == credentials
+
     def test_lista_de_pares_cobre_toda_constante_aad(self) -> None:
         declared = {
             getattr(crypto_service, name) for name in dir(crypto_service) if name.startswith("AAD_")
@@ -366,6 +399,18 @@ class TestConfiguracao:
     def test_kms_sem_origem_recusa(self) -> None:
         with pytest.raises(RewrapConfigError, match="KEK_KMS_KEY_NAME_SOURCE"):
             resolve_rewrap_keys(_settings(kms=_KMS_NEW), {})
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            f"{_KMS_OLD}/cryptoKeyVersions/1",
+            "omie-encryption-kek",
+            "projects/old/keyRings/r/cryptoKeys/kek",
+        ],
+    )
+    def test_kms_origem_fora_do_formato_de_cryptokey_recusa(self, name: str) -> None:
+        with pytest.raises(RewrapConfigError, match="CryptoKey"):
+            resolve_rewrap_keys(_settings(kms=_KMS_NEW), {"KEK_KMS_KEY_NAME_SOURCE": name})
 
     def test_kms_origem_igual_ao_alvo_recusa(self) -> None:
         env = {"KEK_KMS_KEY_NAME_SOURCE": f"  {_KMS_NEW} "}

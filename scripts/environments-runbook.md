@@ -191,6 +191,13 @@ O ALVO é o `KEK_KMS_KEY_NAME` do próprio job (a KEK do projeto novo, a mesma d
 serviço); a ORIGEM vem só de `KEK_KMS_KEY_NAME_SOURCE`, que o script exige e recusa se
 for igual à alvo (saída 2, nada lido nem gravado).
 
+> ⚠️ **Sem tráfego e sem job agendado no projeto novo enquanto o reembrulho não termina.**
+> Entre a importação do banco e o `--verify` final, todo cliente ainda não reembrulhado é
+> indecifrável para o serviço novo: a API do projeto novo fica sem ingresso público
+> (`--ingress=internal`) e os Cloud Schedulers de lá pausados
+> (`gcloud scheduler jobs pause`) até o passo 4 dar zero falhas. Sem isso, cada request e
+> cada ciclo da carteira vira 500, `[indecifrável]` e alerta de plantão que não é defeito.
+
 Ordem, sempre com `--wait` e lendo a última linha da execução:
 
 1. **`--dry-run`**: abre cada blob com as duas chaves e prova o embrulho novo em
@@ -204,7 +211,10 @@ Ordem, sempre com `--wait` e lendo a última linha da execução:
 3. **execução de novo**: `pending=0` e `rewrapped=0` (idempotência provada).
 4. **`--verify`**: decifra um campo real de cada cliente com a KEK nova pelo caminho do
    serviço. **`verify_failed=0` é a condição do corte**; `no_field` é cliente sem campo
-   cifrado no envelope (a DEK abriu, não há o que decifrar).
+   cifrado no envelope (a DEK abriu, não há o que decifrar). Ele NÃO cobre linha bare
+   legada (cifrada com a `OMIE_ENCRYPTION_KEY`, sem DEK): essa depende de o secret da
+   `OMIE_ENCRYPTION_KEY` do projeto novo ser cópia exata do antigo (landmine 2), conferido
+   à parte na subtask dos secrets.
 5. Depois do corte validado: **revogar** o binding do passo 1
    (`remove-iam-policy-binding`, mesmos argumentos) e rodar `--verify` de novo, que
    continua com zero falhas sem a chave antiga.

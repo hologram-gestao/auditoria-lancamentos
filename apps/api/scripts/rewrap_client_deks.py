@@ -66,6 +66,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -144,19 +145,18 @@ PERMISSION_EXCEPTIONS: tuple[type[Exception], ...] = (PermissionDenied, Forbidde
 
 #: Todos os pares cifrados, na ordem em que o `--verify` procura um campo para provar.
 #: Fonte: as constantes `AAD_*` de `crypto_service.py`; o teste unitário falha se uma
-#: constante nova não entrar aqui.
+#: constante nova não entrar aqui. Os pares de CREDENCIAL ficam por último de propósito:
+#: o `--verify` só decifra uma credencial (e a descarta) quando o cliente não tem nenhum
+#: outro campo cifrado para provar a DEK.
 VERIFIABLE_PAIRS: tuple[tuple[str, str], ...] = (
-    AAD_CLIENT_APP_KEY,
-    AAD_CLIENT_APP_SECRET,
-    AAD_CONNECTION_CREDENTIALS,
-    AAD_FILE_NAME,
     AAD_FILE_ENTRY_DESCRIPTION,
+    AAD_FILE_NAME,
     AAD_FILE_ENTRY_USER_NOTE,
     AAD_OMIE_ENTRY_USER_NOTE,
     AAD_ANOMALY_CONTEXT,
     AAD_ANOMALY_RESOLUTION_NOTE,
-    AAD_GLOSSARY_CODE,
     AAD_GLOSSARY_NAME,
+    AAD_GLOSSARY_CODE,
     AAD_GLOSSARY_DESCRIPTION,
     AAD_TITLE_CONTEXT_TEXT,
     AAD_FILE_CATEGORY_LABEL,
@@ -164,7 +164,15 @@ VERIFIABLE_PAIRS: tuple[tuple[str, str], ...] = (
     AAD_ACCOUNTING_ACCOUNT_NAME,
     AAD_ACCOUNTING_ACCOUNT_PARTY_DOCUMENT,
     AAD_DECISION_HISTORY,
+    AAD_CONNECTION_CREDENTIALS,
+    AAD_CLIENT_APP_KEY,
+    AAD_CLIENT_APP_SECRET,
 )
+
+#: Forma do nome de uma CryptoKey (não de uma versão dela). Um nome fora dela faria o
+#: Cloud KMS responder 400 (`InvalidArgument`) a todo cliente, e o script contaria isso
+#: como "chave errada" em vez de recusar a configuração.
+_CRYPTO_KEY_NAME = re.compile(r"^projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+$")
 
 _MASTER_KEY_BYTES = 32
 
@@ -248,6 +256,11 @@ def resolve_rewrap_keys(settings: Settings, environ: Mapping[str, str]) -> Rewra
         if not source_kms_name:
             raise RewrapConfigError(
                 f"{SOURCE_KEK_ENV} é obrigatória: o nome completo da KEK antiga no Cloud KMS."
+            )
+        if not _CRYPTO_KEY_NAME.fullmatch(source_kms_name):
+            raise RewrapConfigError(
+                f"{SOURCE_KEK_ENV} tem de ser o nome completo de uma CryptoKey "
+                "(projects/…/locations/…/keyRings/…/cryptoKeys/…), sem /cryptoKeyVersions."
             )
         if source_kms_name == target_kms_name:
             raise RewrapConfigError(
@@ -525,10 +538,12 @@ async def run_rewrap(
             client_id=str(exc.client_id) if exc.client_id else None,
             **_counts(stats),
         )
+        # A execução interrompida também deixa registro: o que já foi commitado fica.
+        stats.duration_s = round(time.perf_counter() - started)
+        await _emit_if_executed(store, stats)
         raise
     stats.duration_s = round(time.perf_counter() - started)
-    if mode is RewrapMode.EXECUTE:
-        await store.emit_rewrapped(stats)
+    await _emit_if_executed(store, stats)
     log.info(
         "rewrap_done",
         source_key=keys.source_name,
@@ -537,6 +552,17 @@ async def run_rewrap(
         **_counts(stats),
     )
     return stats
+
+
+async def _emit_if_executed(store: DekStore, stats: RewrapStats) -> None:
+    """`deks_reembrulhadas` só na execução, e fail-soft: o evento nunca transforma um
+    reembrulho já commitado em saída de erro."""
+    if stats.mode is not RewrapMode.EXECUTE:
+        return
+    try:
+        await store.emit_rewrapped(stats)
+    except Exception as exc:
+        log.warning("rewrap_event_emit_failed", error_class=type(exc).__name__)
 
 
 def _counts(stats: RewrapStats) -> dict[str, int | str]:
