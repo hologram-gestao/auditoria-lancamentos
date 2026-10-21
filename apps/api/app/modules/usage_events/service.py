@@ -38,6 +38,7 @@ from app.modules.usage_events.schemas import (
     ClienteExcluidoProps,
     ConciliacaoReprocessadaProps,
     ContextoTituloRegistradoProps,
+    DeksReembrulhadasProps,
     DeparaAplicadoProps,
     FechamentoProduzidoProps,
     FlagRevisadoProps,
@@ -835,6 +836,35 @@ class UsageEventService:
                     "nao_gerar": nao_gerar,
                     "sem_decisao": sem_decisao,
                     "fora_do_guia": fora_do_guia,
+                }
+            ),
+        )
+        if props is None:
+            return False
+        return await self.emit(event, props=props)
+
+    async def emit_deks_reembrulhadas(
+        self,
+        *,
+        ja_reembrulhadas: int,
+        reembrulhadas: int,
+        falhas: int,
+        duracao_s: int,
+    ) -> bool:
+        """86e3r2egr — uma execução do reembrulho das DEKs terminou. Só contagens.
+
+        O ponto de chamada é `scripts/rewrap_client_deks.py`, depois dos commits por
+        cliente: props no caminho fail-soft, sem `session_id`, sem dedup.
+        """
+        event = UsageEventName.DEKS_REEMBRULHADAS
+        props = self._props_or_none(
+            event,
+            lambda: DeksReembrulhadasProps.model_validate(
+                {
+                    "ja_reembrulhadas": ja_reembrulhadas,
+                    "reembrulhadas": reembrulhadas,
+                    "falhas": falhas,
+                    "duracao_s": duracao_s,
                 }
             ),
         )

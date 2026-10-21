@@ -61,6 +61,12 @@ ALLOWED: dict[str, str] = {
         "backfill bare→v1 da Sprint 3, pré-existente: converte as colunas no "
         "lugar onde elas estão, sem criar caminho novo"
     ),
+    # --- reembrulho das DEKs (86e3r2egr) ---------------------------------
+    "scripts/rewrap_client_deks.py": (
+        "o --verify decifra UM campo cifrado do cliente para provar que a DEK reembrulhada "
+        "abre o dado, e o par da credencial antiga está na lista de todos os pares de AAD; "
+        "o texto é descartado na hora, nunca usado como credencial nem gravado"
+    ),
     # --- seed de dev/demo ------------------------------------------------
     "scripts/seed_demo_client.py": (
         "seed do cliente-demo: grava nas colunas antigas de propósito, para "

@@ -132,9 +132,15 @@
     vontade — placeholders públicos.
 14. **Landmines do envelope crypto por cliente (Sprint 3) — quebrar = outage/perda de dado:**
     - **Nunca trocar `KEK_KEY_ID`** (manter `k1`). O decrypt sempre usa a KEK
-      atual e a rotação só provisiona DEK quando `dek_wrapped IS NULL` — não há
-      caminho de re-embrulho no código. Trocar = todos os clientes ficam
-      indecifráveis.
+      atual e a rotação só provisiona DEK quando `dek_wrapped IS NULL`. Trocar =
+      todos os clientes ficam indecifráveis.
+    - **Trocar de KEK (outra chave do KMS) só pelo reembrulho** (86e3r2egr):
+      `scripts/rewrap_client_deks.py` abre cada `dek_wrapped` com a KEK antiga
+      (`KEK_KMS_KEY_NAME_SOURCE`, lida só pelo script) e o embrulha com a do serviço,
+      com prova em memória e UPDATE condicional; nenhum campo cifrado muda e o
+      `KEK_KEY_ID` fica `k1`. Roda SOMENTE sobre a cópia do banco no ambiente novo,
+      nunca sobre o banco que a KEK antiga ainda serve (é o rollback), e o corte só
+      segue com `--verify` em zero falhas (runbook, passo 7).
     - **Manter `OMIE_ENCRYPTION_KEY` sempre setada** — lê dado bare-legado e
       deriva a KEK local (dev/test). Removê-la = outage.
     - **Nunca ligar/desligar Cloud KMS sobre um DB que já tenha DEKs do outro
@@ -1938,6 +1944,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.108, 21/10/2026. **Nasceu o caminho de reembrulho das DEKs para outra KEK (86e3r2egr, subtask 2 do épico 86e3r2egb, o Hologram OS no projeto `hologramos` do GCP).** A §3.14 dizia "não há caminho de re-embrulho no código": agora há, e só um. `scripts/rewrap_client_deks.py` (`--dry-run`, execução, `--verify`) com a ORIGEM em `KEK_KMS_KEY_NAME_SOURCE` (obrigatória, igual à alvo é recusada, misturar KMS e wrapper local é recusado, saída 2 sem abrir o banco), classificação da falha pelo TIPO da exceção (`WRONG_KEY_EXCEPTIONS` = `CryptoError` e `InvalidArgument`, esta uma hipótese a confirmar no 1º `--dry-run` do ensaio contra o KMS real; `PermissionDenied`/`Forbidden` abortam), prova `alvo.unwrap(alvo.wrap(dek)) == dek` antes de gravar, `UPDATE … WHERE id AND dek_wrapped = antigo` em Core com commit por cliente, e o `--verify` que decifra um campo real de cada cliente pelo `load_client_cipher` do serviço (a lista `VERIFIABLE_PAIRS` tem de ter toda constante de AAD do `crypto_service.py`: um unitário reprova o campo cifrado novo que não entrar nela). `core/kms.py` ganhou `build_cloud_kms_client` (o `get_kms_client` passou a chamá-lo, mesmo comportamento). Evento `deks_reembrulhadas` só na execução (contagens e duração, sem dedup). Roteiro de execução no `scripts/environments-runbook.md`, passo 7. Endpoints sensíveis (**137**), matriz (**29**) e pares de AAD (**18**) iguais, sem migration._
 
 _Versão 1.107, 21/10/2026. **O épico da ponte Domínio → Omie (86e3qhhr0, reunião com o Gabriel) ganhou o parágrafo dele na §8, e a documentação fechou (86e3qhhtj, subtask 7, no molde da 86e3ndj0p).** O parágrafo conta o ciclo inteiro (relações do Domínio → vínculo conta ↔ CNPJ/CPF, à mão também → planilha do Painel do Contador com documento e natureza → guia das categorias para a tela da Omie; fornecedor pelo nome; reimportação que só adiciona; parcelas futuras com a dedup como critério; encargo do resumo fora da extração), o que ficou no código (cinco migrations, a flag `OMIE_INSTALLMENT_POSTING_ENABLED`, `core/cpf.py`, 11 rotas sobre as 126 de antes) e os números ao fechar, cada um com o comando que o confere: **137** endpoints sensíveis, **29** permissões e **18** pares de AAD. A varredura não achou contagem velha fora dos rodapés e dos "Números deste primer" de cada sprint, que são registro da sprint. Skills: `crypto-field` com 18 constantes e 18 colunas (dizia 11), o par `party_document_encrypted` como exemplo de campo novo nas três pontas e a regra "texto de documento nunca passa por `int`"; `omie` com 12 métodos em 14 chamadas (dizia 13), a chave da parcela futura (`derive_installment_payable_key`), o encontro da fatura seguinte, o aviso `parcela_nao_veio` e a data ORIGINAL que a Cora imprime na parcela, todas as âncoras conferidas por grep. Manual 1.4 (54 páginas, 24 figuras, 6,4 MB; o botão da landing diz "PDF, 6 MB"), com o selo "No Omie" (86e3t4vpq) e o cartão em tipo desconhecido (86e3qyu04) de carona. PRD consolidado v1.31 (34.1, 34.2 e 34.7). Nenhum código de produto mudou._
 
