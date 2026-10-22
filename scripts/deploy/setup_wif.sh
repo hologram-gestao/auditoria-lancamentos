@@ -75,8 +75,8 @@ fi
 # 1. APIs que o WIF usa (iam, a troca de token no STS e a impersonação)
 # ------------------------------------------------------------------
 echo "--- APIs ---"
-# run: o wif-smoke.yml lista os serviços do Cloud Run, e sem a API habilitada ele
-# reprovaria com o WIF certo.
+# run: o deploy e o replay dos manifestos falam com o Cloud Run assim que o WIF
+# existe, e sem a API habilitada reprovariam com o WIF certo.
 for _api in iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com \
             cloudresourcemanager.googleapis.com run.googleapis.com; do
   if [[ -n "$(gcloud services list --enabled --project="$PROJECT_ID" \
@@ -205,5 +205,6 @@ echo "GCP_WORKLOAD_IDENTITY_PROVIDER = ${PROVIDER_NAME}"
 echo "GCP_API_SERVICE_ACCOUNT        = ${API_SA}"
 echo "GCP_WEB_SERVICE_ACCOUNT        = ${WEB_SA}"
 echo ""
-echo "Antes do corte, grave os dois primeiros como GCP_WORKLOAD_IDENTITY_PROVIDER_NEW e"
-echo "GCP_API_SERVICE_ACCOUNT_NEW e rode o workflow wif-smoke.yml (workflow_dispatch)."
+echo "Rode scripts/deploy/grant_cicd_iam.sh antes de usar o WIF: a SA recém-criada não tem"
+echo "nem resourcemanager.projects.get (vem com run.developer). No corte, grave os três"
+echo "valores acima nos secrets do GitHub de mesmo nome."

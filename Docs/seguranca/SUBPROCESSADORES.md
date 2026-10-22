@@ -110,20 +110,23 @@ essas variáveis, mas uma variável de ambiente no Cloud Run sobrescreveria:
 
 ## Google Cloud
 
-**O que é.** A hospedagem inteira, no projeto `liberdade-assessoria`:
+**O que é.** A hospedagem inteira, no projeto `hologramos-512320` (desde o corte do épico
+86e3r2egb; até lá, num projeto compartilhado com outras unidades):
 
 - **Cloud Run** para a API, o web e os jobs (migração, limpeza, sincronização diária da
   carteira): `REGION: southamerica-east1` em `.github/workflows/deploy-dev.yml:58`.
 - **Artifact Registry** para as imagens: `southamerica-east1-docker.pkg.dev`
   (`deploy-dev.yml:60`), com build pelo Cloud Build (`deploy-dev.yml:153`).
 - **Cloud KMS** para a chave-mestra que embrulha a chave de cada cliente: keyring criado
-  em `REGION`, padrão `southamerica-east1` (`scripts/setup-gcp.sh:49` e `:64`).
-- **Secret Manager** para os segredos de runtime (`setup-gcp.sh:96-101` e `:172-190`).
-- **Cloud Scheduler** para o job diário da carteira (`setup-gcp.sh:402-409`).
+  em `REGION`, padrão `southamerica-east1` (`scripts/setup-gcp.sh:53` e `:68`).
+- **Secret Manager** para os segredos de runtime (`setup-gcp.sh:110-115` e `:186-204`).
+- **Cloud Scheduler** para o job diário da carteira e para a limpeza de hora em hora
+  (`setup-gcp.sh:416-433` e `:507-533`).
 - **Cloud SQL** para o PostgreSQL: a conta de serviço recebe `roles/cloudsql.client`
-  (`setup-gcp.sh:360-368`). A instância não é criada por nenhum script do repositório, então
-  **a região do banco e dos backups está a confirmar** no console do GCP
-  (`gcloud sql instances list --project liberdade-assessoria`).
+  (`setup-gcp.sh:374-382` e `:468-480`). A instância não é criada por nenhum script do
+  repositório: a `auditoria-pg` do projeto novo está em `southamerica-east1` (conferido em
+  22/10/2026 com `gcloud sql instances list --project hologramos-512320`); **o local dos
+  backups está a confirmar** no console do GCP.
 - **Cloud Logging**, implicitamente: a API escreve log estruturado em stdout
   (`apps/api/app/core/logging.py:199`), e o Cloud Run guarda o stdout. O redactor do
   structlog mascara chave sensível, e a regra da casa proíbe logar conteúdo de arquivo,

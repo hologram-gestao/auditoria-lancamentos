@@ -12,6 +12,10 @@
 #   - R5 / INFRA 11.6: Cloud Run Job + Cloud Scheduler da sincronização DIÁRIA da
 #     carteira de títulos (`python -m scripts.sync_client_titles`). Não há
 #     scheduler dentro da aplicação — o molde é o job de limpeza que já roda.
+# E (86e3r2ehn, o que o ensaio do projeto novo fez à mão em 22/10/2026):
+#   - run.invoker para allUsers nos serviços da API e da web, cloudsql.client para a
+#     SA de runtime, a SA auditoria-worker-sa do job de limpeza e o Cloud Scheduler
+#     de hora em hora dele. O replay dos manifestos não leva a política de IAM.
 #
 # ⚠️ ORDEM IMPORTA: rode este script ANTES do próximo deploy — o `--update-secrets
 #    ...:latest` do workflow FALHA se o secret não tiver versão (semeamos vazia).
@@ -45,7 +49,7 @@ if [[ "$ENV" != "dev" && "$ENV" != "prod" ]]; then
   exit 2
 fi
 
-PROJECT_ID="${PROJECT_ID:-liberdade-assessoria}"
+PROJECT_ID="${PROJECT_ID:-hologramos-512320}"
 REGION="${REGION:-southamerica-east1}"
 AR_HOST="${AR_HOST:-southamerica-east1-docker.pkg.dev}"
 AR_REPO="${AR_REPO:-auditoria}"
@@ -82,6 +86,16 @@ SYNC_TITLES_TASK_TIMEOUT="${SYNC_TITLES_TASK_TIMEOUT:-1800s}"
 SYNC_TITLES_SCHEDULER="${SYNC_TITLES_SCHEDULER:-auditoria-sync-titles-${ENV}}"
 SCHEDULER_SA_ID="${SCHEDULER_SA_ID:-auditoria-scheduler-${ENV}}"
 SCHEDULER_SA="${SCHEDULER_SA_ID}@${PROJECT_ID}.iam.gserviceaccount.com"
+
+# --- Serviços públicos e job de limpeza (86e3r2ehn) -------------------------
+API_SERVICE="${API_SERVICE:-auditoria-api-${ENV}}"
+WEB_SERVICE="${WEB_SERVICE:-auditoria-web-${ENV}}"
+# A SA do job de limpeza não tem sufixo de ambiente: é o nome do projeto antigo.
+WORKER_SA_ID="${WORKER_SA_ID:-auditoria-worker-sa}"
+WORKER_SA="${WORKER_SA_ID}@${PROJECT_ID}.iam.gserviceaccount.com"
+CLEANUP_SCHEDULER="${CLEANUP_SCHEDULER:-auditoria-cleanup-stuck-${ENV}-hourly}"
+CLEANUP_SCHEDULE="${CLEANUP_SCHEDULE:-0 * * * *}"
+CLEANUP_TZ="${CLEANUP_TZ:-Etc/UTC}"
 
 echo "=== setup-gcp (${ENV}) — projeto ${PROJECT_ID} / região ${REGION} ==="
 echo "    keyring:     ${KEYRING}"
@@ -419,6 +433,103 @@ else
       && echo "  ${_sched_verb} ok" \
       || echo "::warning:: falha ao ${_sched_verb} o Cloud Scheduler ${SYNC_TITLES_SCHEDULER}"
   fi
+fi
+
+# ------------------------------------------------------------------
+# 5b. Acesso público, Cloud SQL e o job de limpeza (86e3r2ehn)
+#     O que o ensaio do projeto novo (22/10/2026) achou faltando depois do replay
+#     e deste script, e fez à mão. Fica aqui para um projeto novo sair igual ao
+#     antigo sem depender de memória. Guard por `describe` em cada passo; o
+#     `add-iam-policy-binding` é no-op se já existe.
+# ------------------------------------------------------------------
+echo ""
+echo "=== Acesso público, Cloud SQL e job de limpeza (${ENV}) ==="
+
+# ---- 5b.1 run.invoker para allUsers nos dois serviços ---------------------
+# A política de IAM do serviço não vai no manifesto do replay: no antigo os dois
+# dão run.invoker a allUsers (a web é a página pública; a API é chamada pelo BFF
+# do Next) e no novo nasceram sem, com 403 em todo acesso. Isso não abre o
+# INGRESSO: a API do projeto novo continua `internal` até o corte.
+for _svc in "$API_SERVICE" "$WEB_SERVICE"; do
+  if gcloud run services describe "$_svc" \
+       --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
+    gcloud run services add-iam-policy-binding "$_svc" \
+      --region="$REGION" --project="$PROJECT_ID" \
+      --member="allUsers" \
+      --role="roles/run.invoker" \
+      --quiet >/dev/null \
+      && echo "  ${_svc}: run.invoker para allUsers (ou já existia)" \
+      || echo "::warning:: falha ao conceder run.invoker a allUsers em ${_svc}"
+  else
+    echo "::warning:: serviço ${_svc} não existe ainda (replay/deploy) — re-execute depois."
+  fi
+done
+
+# ---- 5b.2 cloudsql.client para a SA de runtime ---------------------------
+# O 5.4 só concede quando o job da carteira existe; o serviço da API precisa
+# dela antes disso. A role só existe no nível do projeto.
+if gcloud iam service-accounts describe "$RUNTIME_SA" --project="$PROJECT_ID" >/dev/null 2>&1; then
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:${RUNTIME_SA}" \
+    --role="roles/cloudsql.client" \
+    --condition=None --quiet >/dev/null \
+    && echo "  ${RUNTIME_SA}: cloudsql.client (ou já existia)" \
+    || echo "::warning:: falha ao conceder cloudsql.client a ${RUNTIME_SA}"
+else
+  echo "::warning:: SA ${RUNTIME_SA} não existe — rode setup_wif.sh e re-execute."
+fi
+
+# ---- 5b.3 SA do job de limpeza -------------------------------------------
+# O ${CLEANUP_JOB} roda como ${WORKER_SA}, que nenhum outro script cria. As três
+# roles no PROJETO são as que ela tem no projeto antigo (paridade; estreitar o
+# secretAccessor para por secret é melhoria à parte).
+echo "--- SA do job de limpeza ${WORKER_SA} ---"
+if gcloud iam service-accounts describe "$WORKER_SA" --project="$PROJECT_ID" >/dev/null 2>&1; then
+  echo "  já existe — ok"
+else
+  gcloud iam service-accounts create "$WORKER_SA_ID" \
+    --display-name="Cloud Run Job — limpeza de conciliações presas" \
+    --project="$PROJECT_ID" --quiet >/dev/null \
+    && echo "  criada" \
+    || echo "::warning:: falha ao criar ${WORKER_SA}"
+  # Criação de SA é eventual-consistente (mesmo motivo do 5.5).
+  sleep 10
+fi
+for _role in roles/cloudsql.client roles/run.invoker roles/secretmanager.secretAccessor; do
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:${WORKER_SA}" \
+    --role="$_role" \
+    --condition=None --quiet >/dev/null \
+    && echo "  ${_role}: ok (ou já existia)" \
+    || echo "::warning:: falha ao conceder ${_role} a ${WORKER_SA}"
+done
+
+# ---- 5b.4 Cloud Scheduler do job de limpeza ------------------------------
+# Mesma forma do da carteira (API admin do Cloud Run, token OAuth), com a SA do
+# próprio job. Só CRIA: um agendamento que já existe não é tocado, então o que
+# o corte deixou pausado continua pausado até alguém despausar.
+if gcloud run jobs describe "$CLEANUP_JOB" \
+     --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
+  echo "--- Cloud Scheduler ${CLEANUP_SCHEDULER} ('${CLEANUP_SCHEDULE}' ${CLEANUP_TZ}) ---"
+  if gcloud scheduler jobs describe "$CLEANUP_SCHEDULER" \
+       --location="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
+    echo "  já existe — não tocado (estado e pausa preservados)"
+  else
+    gcloud scheduler jobs create http "$CLEANUP_SCHEDULER" \
+      --location="$REGION" --project="$PROJECT_ID" \
+      --schedule="$CLEANUP_SCHEDULE" \
+      --time-zone="$CLEANUP_TZ" \
+      --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/${CLEANUP_JOB}:run" \
+      --http-method=POST \
+      --oauth-service-account-email="$WORKER_SA" \
+      --attempt-deadline=180s \
+      --description="Marca como erro as conciliações presas em processamento — ${ENV}" \
+      --quiet >/dev/null \
+      && echo "  criado" \
+      || echo "::warning:: falha ao criar o Cloud Scheduler ${CLEANUP_SCHEDULER}"
+  fi
+else
+  echo "::warning:: job ${CLEANUP_JOB} não existe ainda — o agendamento da limpeza fica para a próxima execução."
 fi
 
 # ------------------------------------------------------------------
