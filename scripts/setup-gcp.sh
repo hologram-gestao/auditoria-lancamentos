@@ -92,6 +92,9 @@ API_SERVICE="${API_SERVICE:-auditoria-api-${ENV}}"
 WEB_SERVICE="${WEB_SERVICE:-auditoria-web-${ENV}}"
 # A SA do job de limpeza não tem sufixo de ambiente: é o nome do projeto antigo.
 WORKER_SA_ID="${WORKER_SA_ID:-auditoria-worker-sa}"
+# Serviços abertos a allUsers: dev por padrão (é como o projeto antigo roda);
+# prod só com PUBLIC_INVOKER=1 explícito, porque abrir prod é decisão à parte.
+PUBLIC_INVOKER="${PUBLIC_INVOKER:-$([[ "$ENV" == "dev" ]] && echo 1 || echo 0)}"
 WORKER_SA="${WORKER_SA_ID}@${PROJECT_ID}.iam.gserviceaccount.com"
 CLEANUP_SCHEDULER="${CLEANUP_SCHEDULER:-auditoria-cleanup-stuck-${ENV}-hourly}"
 CLEANUP_SCHEDULE="${CLEANUP_SCHEDULE:-0 * * * *}"
@@ -450,7 +453,11 @@ echo "=== Acesso público, Cloud SQL e job de limpeza (${ENV}) ==="
 # dão run.invoker a allUsers (a web é a página pública; a API é chamada pelo BFF
 # do Next) e no novo nasceram sem, com 403 em todo acesso. Isso não abre o
 # INGRESSO: a API do projeto novo continua `internal` até o corte.
+if [[ "$PUBLIC_INVOKER" != "1" ]]; then
+  echo "  run.invoker para allUsers pulado (PUBLIC_INVOKER=${PUBLIC_INVOKER}; em ${ENV} só com PUBLIC_INVOKER=1)"
+fi
 for _svc in "$API_SERVICE" "$WEB_SERVICE"; do
+  [[ "$PUBLIC_INVOKER" == "1" ]] || break
   if gcloud run services describe "$_svc" \
        --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
     gcloud run services add-iam-policy-binding "$_svc" \

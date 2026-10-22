@@ -32,8 +32,11 @@ WEB_SA="auditoria-web-sa@${PROJECT_ID}.iam.gserviceaccount.com"
 
 if [[ -z "${CLOUDBUILD_SA:-}" ]]; then
   # Devolve `projects/<número>/serviceAccounts/<e-mail>`; fica só o e-mail.
+  # Falha do gcloud (API do Cloud Build desligada, sem permissão) cai no erro
+  # orientado abaixo em vez de derrubar o script pelo `set -e`.
   _default_build_sa="$(gcloud builds get-default-service-account \
-                         --project="$PROJECT_ID" --format='value(serviceAccountEmail)')"
+                         --project="$PROJECT_ID" --format='value(serviceAccountEmail)')" \
+    || _default_build_sa=""
   CLOUDBUILD_SA="${_default_build_sa##*/}"
 fi
 if [[ "$CLOUDBUILD_SA" != *@*.gserviceaccount.com ]]; then

@@ -21,9 +21,11 @@ despausar os agendamentos) não é deste runbook: é o roteiro do plano do épic
 (`Docs/PLANO_GCP_PROJETO_PROPRIO.md`, §3 e §4, documento de trabalho fora do
 repositório) e da subtask do corte (86e3r2ehv). O que
 o corte troca no GitHub: os secrets `GCP_WORKLOAD_IDENTITY_PROVIDER`,
-`GCP_API_SERVICE_ACCOUNT`, `GCP_WEB_SERVICE_ACCOUNT` e `GCP_PROJECT_ID` (repositório) e a
-Variable `API_URL_DEV` (Environment `development`). Os workflows de deploy já apontam para
-o `hologramos-512320`: com os secrets antigos, o deploy falha na autenticação.
+`GCP_API_SERVICE_ACCOUNT` e `GCP_WEB_SERVICE_ACCOUNT` (repositório) e a Variable
+`API_URL_DEV` (Environment `development`); `GCP_PROJECT_ID` também, por coerência, mas
+nenhum workflow o lê. O projeto do deploy é o `PROJECT_ID` escrito nos workflows, que já
+apontam para o `hologramos-512320`: com os secrets antigos o deploy falha na autenticação,
+e voltar ao projeto antigo é reverter o commit, não um secret.
 
 Ordem, com `<antigo>` = id do projeto de origem, `<novo>` = id do projeto novo e
 `<número>` = o número dele:
@@ -92,7 +94,7 @@ Ordem, com `<antigo>` = id do projeto de origem, `<novo>` = id do projeto novo e
 7. **`setup-gcp.sh` de novo**: agora os serviços e o job `cleanup` existem. A carteira ganha
    contrato e Cloud Scheduler, e a seção 5b do script faz o que o ensaio de 22/10/2026 fez
    à mão: `run.invoker` para `allUsers` nos dois serviços (a política de IAM não vai no
-   manifesto do replay: sem isso, 403 em todo acesso), `cloudsql.client` para a
+   manifesto do replay: sem isso, 403 em todo acesso; em `prod`, só com `PUBLIC_INVOKER=1`), `cloudsql.client` para a
    `auditoria-api-sa`, a SA `auditoria-worker-sa` do job de limpeza (com `cloudsql.client`,
    `run.invoker` e `secretmanager.secretAccessor`) e o Cloud Scheduler
    `auditoria-cleanup-stuck-<env>-hourly` (`0 * * * *` em `Etc/UTC`). Agendamento que já

@@ -119,11 +119,11 @@ essas variáveis, mas uma variável de ambiente no Cloud Run sobrescreveria:
   (`deploy-dev.yml:60`), com build pelo Cloud Build (`deploy-dev.yml:153`).
 - **Cloud KMS** para a chave-mestra que embrulha a chave de cada cliente: keyring criado
   em `REGION`, padrão `southamerica-east1` (`scripts/setup-gcp.sh:53` e `:68`).
-- **Secret Manager** para os segredos de runtime (`setup-gcp.sh:110-115` e `:186-204`).
+- **Secret Manager** para os segredos de runtime (`setup-gcp.sh:113-118` e `:189-207`).
 - **Cloud Scheduler** para o job diário da carteira e para a limpeza de hora em hora
-  (`setup-gcp.sh:416-433` e `:507-533`).
+  (`setup-gcp.sh:419-436` e `:514-540`).
 - **Cloud SQL** para o PostgreSQL: a conta de serviço recebe `roles/cloudsql.client`
-  (`setup-gcp.sh:374-382` e `:468-480`). A instância não é criada por nenhum script do
+  (`setup-gcp.sh:377-385` e `:475-487`). A instância não é criada por nenhum script do
   repositório: a `auditoria-pg` do projeto novo está em `southamerica-east1` (conferido em
   22/10/2026 com `gcloud sql instances list --project hologramos-512320`); **o local dos
   backups está a confirmar** no console do GCP.
