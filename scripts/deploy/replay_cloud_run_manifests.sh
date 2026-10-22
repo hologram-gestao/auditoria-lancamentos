@@ -20,11 +20,15 @@
 #     a annotation run.googleapis.com/cloudsql-instances (--target-sql-connection); o env
 #     KEK_KMS_KEY_NAME (--target-kek); os hosts antigos da API e da web, nas duas formas
 #     (*-<hash>-rj.a.run.app e *-<número>.southamerica-east1.run.app), por --api-url e
-#     --web-url, com duplicata removida em ALLOWED_HOSTS e ALLOWED_ORIGINS.
+#     --web-url, com duplicata removida em ALLOWED_HOSTS e ALLOWED_ORIGINS. Esses dois
+#     valores saem SEMPRE entre aspas simples (aspa interna dobrada): `*.run.app` sem
+#     aspas é um alias de YAML, e o manifesto não abriria.
 #
-# Depois da reescrita, uma PROVA por recurso: zero ocorrências do id e do número da
-# origem, dos hosts antigos e de REDIS_URL, sem nome de revisão, sem tráfego preso a
-# revisão e sem digest. Prova que falha = saída 1 e nada é aplicado.
+# Depois da reescrita, uma PROVA por recurso: o manifesto é YAML válido (parse com
+# python3 + PyYAML, `yaml.safe_load`, e o documento é um mapa); zero ocorrências do id e
+# do número da origem, dos hosts antigos e de REDIS_URL, sem nome de revisão, sem tráfego
+# preso a revisão e sem digest. Prova que falha = saída 1 e nada é aplicado. Sem python3
+# ou sem PyYAML o script para antes de ler a origem (saída 1): a prova nunca é pulada.
 #
 # A origem só é LIDA (describe). Nenhum valor de secret passa por aqui: os manifestos
 # só têm NOMES de secret (secretKeyRef).
@@ -91,6 +95,18 @@ die() {
   exit 2
 }
 
+# Sem parser não há prova: falha fechado, antes de ler a origem.
+require_yaml_parser() {
+  if ! command -v python3 > /dev/null 2>&1; then
+    echo "::error:: python3 não encontrado: a prova faz parse de YAML de cada manifesto e não roda sem ele. Nada foi lido nem aplicado." >&2
+    exit 1
+  fi
+  if ! python3 -I -c 'import yaml' > /dev/null 2>&1; then
+    echo "::error:: PyYAML não disponível no python3 ($(command -v python3)): a prova faz parse de YAML de cada manifesto e não roda sem ele (instale python3-yaml ou pip install pyyaml). Nada foi lido nem aplicado." >&2
+    exit 1
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   # Flag de valor sem valor (no fim da linha ou seguida de outra flag): o `shift 2`
   # sairia calado sob set -e, ou a flag seguinte viraria o valor.
@@ -139,6 +155,8 @@ if [[ -n "$FROM_DIR" ]]; then
   [[ -d "$FROM_DIR" ]] || die "--from-dir ${FROM_DIR} não é um diretório."
   [[ "$APPLY" -eq 0 ]] || die "--apply não combina com --from-dir: fixture nunca vai para o destino."
 fi
+
+require_yaml_parser
 
 # Os manifestos não entram no repositório: o --out-dir tem de ficar fora dele.
 # A conferência vem antes do mkdir: recusado, o diretório nem chega a existir.
@@ -189,10 +207,20 @@ function push(ind, k) {
   while (depth > 0 && stack_ind[depth] >= ind) depth--
   depth++; stack_ind[depth] = ind; stack_key[depth] = k
 }
+# Escalar entre aspas simples: '' dentro dele é uma aspa (regra do YAML). Entre aspas
+# duplas, só os escapes \\ e \" (o gcloud não escreve outros num valor de env).
 function unquote(v) {
-  if (v ~ ("^" SQ ".*" SQ "$") || v ~ /^".*"$/) return substr(v, 2, length(v) - 2)
+  if (v ~ ("^" SQ ".*" SQ "$")) { v = substr(v, 2, length(v) - 2); gsub(SQ SQ, SQ, v); return v }
+  if (v ~ /^".*"$/) {
+    v = substr(v, 2, length(v) - 2)
+    gsub(/\\\\/, "\001", v); gsub(/\\"/, "\"", v); gsub(/\001/, "\\", v)
+    return v
+  }
   return v
 }
+# O inverso: sempre aspas simples, aspa interna dobrada. Valor reemitido sem aspas pode
+# virar outra coisa em YAML (`*` no início é alias, `&` é âncora, `: ` quebra o mapa).
+function squote(v) { gsub(SQ, SQ SQ, v); return SQ v SQ }
 function dedup_csv(v,   n, parts, i, seen, out, item) {
   n = split(v, parts, ",")
   out = ""
@@ -290,7 +318,7 @@ BEGIN {
     if (env_name == "KEK_KMS_KEY_NAME") { emit(pad "value: " E["RP_TARGET_KEK"], ind, 0); next }
     if (env_name == "ALLOWED_HOSTS" || env_name == "ALLOWED_ORIGINS") {
       v = line; sub(/^ *value: */, "", v)
-      emit(pad "value: " dedup_csv(rewrite_globals(unquote(v))), ind, 0)
+      emit(pad "value: " squote(dedup_csv(rewrite_globals(unquote(v)))), ind, 0)
       next
     }
   }
@@ -327,11 +355,35 @@ run_awk() {
 }
 
 # ------------------------------------------------------------------
-# Prova: o manifesto reescrito não aponta para nada da origem
+# Prova: o manifesto reescrito é YAML válido e não aponta para nada da origem
 # ------------------------------------------------------------------
+# O grep da prova não faz parse: um valor reemitido sem aspas (o `*.run.app` do
+# ALLOWED_HOSTS em 22/10/2026) passava nele e o `replace` recusaria o manifesto.
+# shellcheck disable=SC2016 # o programa é python, não shell
+YAML_CHECK='
+import sys
+import yaml
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as f:
+        doc = yaml.safe_load(f)
+except yaml.YAMLError as exc:
+    print(" ".join(str(exc).split()))
+    sys.exit(1)
+if not isinstance(doc, dict):
+    print("o documento não é um mapa (" + type(doc).__name__ + ")")
+    sys.exit(1)
+'
+
 prove() {
-  local name="$1" file="$2" source_number="$3" ok=0 count
+  local name="$1" file="$2" source_number="$3" ok=0 count parse_error
   echo "  prova:"
+  if parse_error="$(python3 -I -c "$YAML_CHECK" "$file" 2>&1)"; then
+    echo "    ok    YAML válido"
+  else
+    echo "    FALHA ${name}: o manifesto reescrito não é YAML válido: ${parse_error}"
+    ok=1
+  fi
   for pattern in "$SOURCE_PROJECT" "$source_number" '-rj\.a\.run\.app' 'REDIS_URL' '@sha256:'; do
     count="$(grep -cE -- "$pattern" "$file" || true)"
     if [[ "$count" -eq 0 ]]; then
