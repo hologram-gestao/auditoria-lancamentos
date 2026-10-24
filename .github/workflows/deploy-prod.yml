@@ -64,7 +64,7 @@ permissions:
 
 env:
   REGION: southamerica-east1
-  PROJECT_ID: liberdade-assessoria
+  PROJECT_ID: hologramos-512320
   AR_HOST: southamerica-east1-docker.pkg.dev
   AR_REPO: auditoria
   API_SERVICE: auditoria-api-prod
@@ -75,7 +75,7 @@ env:
   # sufixo de ambiente. Provisionado por `bash scripts/setup-gcp.sh prod`.
   SYNC_TITLES_JOB: auditoria-api-sync-titles-prod
   # KEK do KMS -prod (isolada da de dev). Provisionada por scripts/setup-gcp.sh prod.
-  KEK_KMS_KEY_NAME: projects/liberdade-assessoria/locations/southamerica-east1/keyRings/auditoria-prod/cryptoKeys/omie-encryption-kek
+  KEK_KMS_KEY_NAME: projects/hologramos-512320/locations/southamerica-east1/keyRings/auditoria-prod/cryptoKeys/omie-encryption-kek
   # Alerting -prod (isolado do de dev). Secrets provisionados por setup-gcp.sh prod;
   # o operador adiciona o VALOR do canal de plantão de PROD. Fail-closed no boot.
   ALERT_WEBHOOK_SECRET: alert-webhook-url-prod

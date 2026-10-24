@@ -9,13 +9,26 @@
 
 ### 0. Projeto novo (86e3r2egh, épico 86e3r2egb)
 
-Só quando o ambiente sobe num projeto do GCP que ainda não tem nada (a mudança do
-`liberdade-assessoria` para o `hologramos-512320`). Num projeto que já roda, pule para o passo 1.
+Só quando o ambiente sobe num projeto do GCP que ainda não tem nada (a mudança para o
+`hologramos-512320`, número `114342061812`). Num projeto que já roda, pule para o passo 1.
 O pool do Workload Identity e os serviços e jobs do Cloud Run foram criados à mão no
-projeto antigo; os dois scripts abaixo versionam isso. Nenhum dos dois tem default de
-projeto: todo comando nomeia o destino.
+projeto antigo; os scripts abaixo versionam isso. O `setup_wif.sh` e o replay não têm
+default de projeto (todo comando nomeia o destino); o `grant_cicd_iam.sh` e o
+`setup-gcp.sh` têm o `hologramos-512320` como default.
 
-Ordem, com `<novo>` = id do projeto novo e `<número>` = o número dele:
+**O corte** (importar o banco, reembrulhar, trocar os secrets do GitHub, deploy, smoke,
+despausar os agendamentos) não é deste runbook: é o roteiro do plano do épico 86e3r2egb
+(`Docs/PLANO_GCP_PROJETO_PROPRIO.md`, §3 e §4, documento de trabalho fora do
+repositório) e da subtask do corte (86e3r2ehv). O que
+o corte troca no GitHub: os secrets `GCP_WORKLOAD_IDENTITY_PROVIDER`,
+`GCP_API_SERVICE_ACCOUNT` e `GCP_WEB_SERVICE_ACCOUNT` (repositório) e a Variable
+`API_URL_DEV` (Environment `development`); `GCP_PROJECT_ID` também, por coerência, mas
+nenhum workflow o lê. O projeto do deploy é o `PROJECT_ID` escrito nos workflows, que já
+apontam para o `hologramos-512320`: com os secrets antigos o deploy falha na autenticação,
+e voltar ao projeto antigo é reverter o commit, não um secret.
+
+Ordem, com `<antigo>` = id do projeto de origem, `<novo>` = id do projeto novo e
+`<número>` = o número dele:
 
 1. **WIF e SAs** (idempotente, guard por `describe` em cada passo):
 
@@ -30,36 +43,33 @@ Ordem, com `<novo>` = id do projeto novo e `<número>` = o número dele:
    antigo) e o `workloadIdentityUser` das duas SAs. Nunca cria chave de SA. Os display
    names saem de `gcloud iam service-accounts list --project=<antigo>`; sem eles, a SA
    nasce com o próprio id como nome. No fim imprime os três valores dos secrets do GitHub.
+   O WIF só funciona depois do item 3: a SA recém-criada não tem nem
+   `resourcemanager.projects.get` (vem com `run.developer`). A ordem é WIF → IAM.
 
 2. **Cloud Build e Artifact Registry** (operação, uma vez):
    `gcloud services enable cloudbuild.googleapis.com artifactregistry.googleapis.com --project=<novo>`
    e `gcloud artifacts repositories create auditoria --repository-format=docker --location=southamerica-east1 --project=<novo>`.
-   Confira qual SA o Cloud Build do projeto novo usa
-   (`gcloud builds get-default-service-account --project=<novo>`): projeto novo pode não
-   ter mais a legada `<número>@cloudbuild.gserviceaccount.com`, que é a que o item 3
-   autoriza no Artifact Registry. Se for outra, o binding de `artifactregistry.writer` vai
-   para ela.
-3. **IAM do CI/CD**: `PROJECT_ID=<novo> PROJECT_NUMBER=<número> bash scripts/deploy/grant_cicd_iam.sh`
-   (os defaults dele ainda são do projeto antigo: as duas variáveis são obrigatórias aqui).
-4. **Fumaça do WIF**: grave os valores impressos no item 1 como
-   `GCP_WORKLOAD_IDENTITY_PROVIDER_NEW` e `GCP_API_SERVICE_ACCOUNT_NEW` no Environment
-   `development` e dispare o `wif-smoke.yml` (Actions → WIF smoke → Run workflow). Ele só
-   autentica e lista; os secrets do deploy atual não mudam. Workflow só de
-   `workflow_dispatch` só aparece em Actions depois que o arquivo está na `main`
-   (PR develop → main).
-5. **`setup-gcp.sh`** (passo 1 abaixo) com `PROJECT_ID=<novo>`: KEK, secrets de alerta e de
+3. **IAM do CI/CD**: `bash scripts/deploy/grant_cicd_iam.sh` (defaults `hologramos-512320` /
+   `114342061812`; outro projeto, `PROJECT_ID=<novo> PROJECT_NUMBER=<número>`). A SA do
+   Cloud Build que recebe `artifactregistry.writer` é descoberta por
+   `gcloud builds get-default-service-account`: no `hologramos-512320` é a padrão do
+   Compute (`114342061812-compute@developer.gserviceaccount.com`), e a legada
+   `<número>@cloudbuild.gserviceaccount.com` não existe (`CLOUDBUILD_SA=<e-mail>` pula a
+   descoberta). As SAs da API e da web recebem também `cloudbuild.builds.editor` e
+   `serviceusage.serviceUsageConsumer`, por paridade com o projeto antigo.
+4. **`setup-gcp.sh`** (passo 1 abaixo) com `PROJECT_ID=<novo>`: KEK, secrets de alerta e de
    leads. Num projeto vazio a parte da carteira **avisa e segue** (não há job de
-   referência ainda); ela é reexecutada no item 8.
-6. **Build das imagens no destino**:
+   referência ainda); ela é reexecutada no item 7.
+5. **Build das imagens no destino**:
    `gcloud builds submit --config=docker/cloudbuild/cloudbuild-api.yaml --substitutions=_TAG=dev --project=<novo> .`
    e o mesmo para a web com `_API_URL=<URL nova da API>` (a URL da API é build-arg da web:
    a imagem do antigo não serve).
-7. **Replay dos serviços e jobs**, primeiro em dry-run (lê a origem, grava os manifestos
+6. **Replay dos serviços e jobs**, primeiro em dry-run (lê a origem, grava os manifestos
    fora do repositório, mostra o `diff -u` e a prova de cada um):
 
    ```bash
    bash scripts/deploy/replay_cloud_run_manifests.sh \
-     --source-project liberdade-assessoria \
+     --source-project <antigo> \
      --target-project <novo> --target-project-number <número> \
      --target-sql-connection <novo>:southamerica-east1:<instância> \
      --target-kek projects/<novo>/locations/southamerica-east1/keyRings/auditoria-dev/cryptoKeys/omie-encryption-kek \
@@ -81,10 +91,16 @@ Ordem, com `<novo>` = id do projeto novo e `<número>` = o número dele:
    `replace` e não entra no `ALLOWED_HOSTS`: requisição com esse host recebe 400 até
    alguém acrescentá-lo.
 
-8. **`setup-gcp.sh` de novo**: agora o job `cleanup` existe e a carteira ganha contrato e
-   Cloud Scheduler.
+7. **`setup-gcp.sh` de novo**: agora os serviços e o job `cleanup` existem. A carteira ganha
+   contrato e Cloud Scheduler, e a seção 5b do script faz o que o ensaio de 22/10/2026 fez
+   à mão: `run.invoker` para `allUsers` nos dois serviços (a política de IAM não vai no
+   manifesto do replay: sem isso, 403 em todo acesso; em `prod`, só com `PUBLIC_INVOKER=1`), `cloudsql.client` para a
+   `auditoria-api-sa`, a SA `auditoria-worker-sa` do job de limpeza (com `cloudsql.client`,
+   `run.invoker` e `secretmanager.secretAccessor`) e o Cloud Scheduler
+   `auditoria-cleanup-stuck-<env>-hourly` (`0 * * * *` em `Etc/UTC`). Agendamento que já
+   existe não é tocado: o que está pausado continua pausado.
 
-> ⚠️ **O `replace` exige a imagem já existente no Artifact Registry do destino** (item 6):
+> ⚠️ **O `replace` exige a imagem já existente no Artifact Registry do destino** (item 5):
 > o manifesto aponta para `<AR>/<novo>/auditoria/<imagem>:dev`, e um digest do antigo
 > vira essa tag porque o build no destino gera outro digest. Além da imagem, a revisão da
 > API só fica pronta com os secrets montados existindo no destino (subtask dos secrets) e
@@ -116,6 +132,9 @@ Cria/garante, sem duplicar:
 - **Sincronização diária da carteira de títulos** (Sprint 11 R5 / 11.6):
   Cloud Run Job `auditoria-api-sync-titles-<env>` + Cloud Scheduler
   `auditoria-sync-titles-<env>` — detalhes no passo 5.
+- **Acesso público, Cloud SQL e o job de limpeza** (seção 5b, 86e3r2ehn): `run.invoker`
+  para `allUsers` na API e na web, `cloudsql.client` para a SA de runtime, a SA
+  `auditoria-worker-sa` e o agendamento de hora em hora da limpeza (passo 0, item 7).
 
 > ⚠️ Rode **antes** do 1º deploy: o `--update-secrets ...:latest` dos workflows
 > falha se o secret não tiver versão.
@@ -133,7 +152,7 @@ Adicione o VALOR de **pelo menos um** canal entregável (senão o serviço é
 
 ```bash
 printf 'https://hooks.slack.com/services/XXX' \
-  | gcloud secrets versions add alert-webhook-url-<env> --data-file=- --project=liberdade-assessoria
+  | gcloud secrets versions add alert-webhook-url-<env> --data-file=- --project=hologramos-512320
 # (e-mail só entrega se ALERT_SMTP_HOST também estiver setado no serviço;
 #  o webhook é o canal deliverable por padrão)
 ```
@@ -216,10 +235,10 @@ Conferência depois de rodar o script:
 
 ```bash
 gcloud scheduler jobs describe auditoria-sync-titles-<env> \
-  --location=southamerica-east1 --project=liberdade-assessoria
+  --location=southamerica-east1 --project=hologramos-512320
 # execução manual de conferência (o mesmo que o cron faz)
 gcloud run jobs execute auditoria-api-sync-titles-<env> \
-  --region=southamerica-east1 --project=liberdade-assessoria --wait
+  --region=southamerica-east1 --project=hologramos-512320 --wait
 ```
 
 > O botão de sincronizar manual da tela é outro caminho (rota da API, papel
@@ -240,7 +259,7 @@ adiciona o valor:
 
 ```bash
 printf '%s' 'https://hooks.slack.com/services/XXX' \
-  | gcloud secrets versions add leads-slack-webhook-url-<env> --data-file=- --project=liberdade-assessoria
+  | gcloud secrets versions add leads-slack-webhook-url-<env> --data-file=- --project=hologramos-512320
 ```
 
 A revisão seguinte da API lê o `:latest`. Conferência: envie um lead de teste pela
@@ -329,8 +348,8 @@ nomes de chave.
       `::warning::` (se emitiu, o script do passo 1 ainda não rodou neste
       ambiente e a carteira não está agendada).
 - [ ] `auditoria-sync-titles-<env>` agendado às `04:12` `America/Sao_Paulo`.
-- [ ] Só na mudança de projeto: `setup_wif.sh` imprimiu o provider, o `wif-smoke.yml`
-      ficou verde e o `replay_cloud_run_manifests.sh` deu prova OK nos 7 recursos antes do
-      `--apply` (passo 0).
+- [ ] Só na mudança de projeto: `setup_wif.sh` imprimiu o provider, o `grant_cicd_iam.sh`
+      rodou depois dele e o `replay_cloud_run_manifests.sh` deu prova OK nos 7 recursos
+      antes do `--apply` (passo 0).
 - [ ] Só na mudança de projeto: `rewrap_client_deks --verify` com `verify_failed=0` na
       instância nova, e o binding na KEK antiga revogado depois do corte (passo 7).

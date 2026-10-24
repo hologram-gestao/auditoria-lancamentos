@@ -56,7 +56,7 @@ permissions:
 
 env:
   REGION: southamerica-east1
-  PROJECT_ID: liberdade-assessoria
+  PROJECT_ID: hologramos-512320
   AR_HOST: southamerica-east1-docker.pkg.dev
   AR_REPO: auditoria
   API_SERVICE: auditoria-api-dev
@@ -74,7 +74,7 @@ env:
   # como env var comum. O backend usa este nome pra wrap/unwrap das DEKs por
   # cliente (Sprint 3, Req. 1). Precisa estar no serviço da API E no job de
   # migração (o backfill roda no job) — paridade garantida abaixo.
-  KEK_KMS_KEY_NAME: projects/liberdade-assessoria/locations/southamerica-east1/keyRings/auditoria-dev/cryptoKeys/omie-encryption-kek
+  KEK_KMS_KEY_NAME: projects/hologramos-512320/locations/southamerica-east1/keyRings/auditoria-dev/cryptoKeys/omie-encryption-kek
   # Alerting (Sprint 3, Req. 4 / INFRA 03.7) — secrets do canal COMPARTILHADO de
   # plantão. Provisionados por scripts/setup-gcp.sh dev; o VALOR real é adicionado
   # pelo operador (não versionado). Montados como ALERT_WEBHOOK_URL/ALERT_EMAIL_TO
