@@ -91,6 +91,22 @@ for SA in "$API_SA" "$WEB_SA"; do
     --member="serviceAccount:$SA" \
     --role="roles/iam.serviceAccountUser" \
     --quiet >/dev/null
+
+  # actAs na SA do Cloud Build: o `gcloud builds submit` roda o build COMO ela, e
+  # quem dispara precisa de iam.serviceAccountUser nela. A do Compute exige; sem
+  # isso o deploy do corte (23/10/2026) falhou com "caller does not have
+  # permission to act as service account". A legada `<número>@cloudbuild` é
+  # gerenciada pelo Google, não exige e nem é recurso de IAM do projeto.
+  if [[ "$CLOUDBUILD_SA" == *@cloudbuild.gserviceaccount.com ]]; then
+    echo "  = roles/iam.serviceAccountUser on $CLOUDBUILD_SA pulado (SA legada do Cloud Build)"
+  else
+    echo "  + roles/iam.serviceAccountUser on $CLOUDBUILD_SA"
+    gcloud iam service-accounts add-iam-policy-binding "$CLOUDBUILD_SA" \
+      --project="$PROJECT_ID" \
+      --member="serviceAccount:$SA" \
+      --role="roles/iam.serviceAccountUser" \
+      --quiet >/dev/null
+  fi
 done
 
 # ------------------------------------------------------------------
@@ -109,22 +125,6 @@ gcloud artifacts repositories add-iam-policy-binding "$AR_REPO" \
   --quiet >/dev/null
 
 # ------------------------------------------------------------------
-# SAs do CI → actAs na SA do Cloud Build. O `gcloud builds submit` roda o build
-# COMO ela, e quem dispara precisa de iam.serviceAccountUser nela: a legada
-# `<número>@cloudbuild` do projeto antigo não exigia, a do Compute exige. Sem
-# isso o deploy do corte (23/10/2026) falhou com "caller does not have permission
-# to act as service account".
-# ------------------------------------------------------------------
-for SA in "$API_SA" "$WEB_SA"; do
-  echo "  + roles/iam.serviceAccountUser for $SA"
-  gcloud iam service-accounts add-iam-policy-binding "$CLOUDBUILD_SA" \
-    --project="$PROJECT_ID" \
-    --member="serviceAccount:$SA" \
-    --role="roles/iam.serviceAccountUser" \
-    --quiet >/dev/null
-done
-
-# ------------------------------------------------------------------
 # Validação rápida
 # ------------------------------------------------------------------
 echo ""
@@ -137,13 +137,15 @@ for SA in "$API_SA" "$WEB_SA"; do
     --format="value(bindings.role)" | sort -u
 done
 
-echo ""
-echo "=== Quem age como $CLOUDBUILD_SA (iam.serviceAccountUser) ==="
-gcloud iam service-accounts get-iam-policy "$CLOUDBUILD_SA" \
-  --project="$PROJECT_ID" \
-  --flatten="bindings[].members" \
-  --filter="bindings.role:roles/iam.serviceAccountUser" \
-  --format="value(bindings.members)" | sort -u
+if [[ "$CLOUDBUILD_SA" != *@cloudbuild.gserviceaccount.com ]]; then
+  echo ""
+  echo "=== Quem age como $CLOUDBUILD_SA (iam.serviceAccountUser) ==="
+  gcloud iam service-accounts get-iam-policy "$CLOUDBUILD_SA" \
+    --project="$PROJECT_ID" \
+    --flatten="bindings[].members" \
+    --filter="bindings.role:roles/iam.serviceAccountUser" \
+    --format="value(bindings.members)" | sort -u
+fi
 
 echo ""
 echo "✓ CI/CD IAM setup completo."

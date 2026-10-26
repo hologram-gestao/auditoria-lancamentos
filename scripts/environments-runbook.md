@@ -101,9 +101,10 @@ Ordem, com `<antigo>` = id do projeto de origem, `<novo>` = id do projeto novo e
    manifesto do replay: sem isso, 403 em todo acesso; em `prod`, só com `PUBLIC_INVOKER=1`), `cloudsql.client` para a
    `auditoria-api-sa`, a SA `auditoria-worker-sa` do job de limpeza (com `cloudsql.client`,
    `run.invoker` e `secretmanager.secretAccessor`, e com `iam.serviceAccountUser` para a
-   `auditoria-api-sa`: o job `migrate` do deploy roda como a `api-sa` e atualiza o job de
-   limpeza, que roda como a `worker-sa`; sem o binding o `migrate` do corte recebeu `actAs`
-   negado) e o Cloud Scheduler
+   SA com que o deploy se autentica, o secret `GCP_API_SERVICE_ACCOUNT`, hoje a
+   `auditoria-api-sa` (`CI_DEPLOY_SA` muda): o job `migrate` do workflow faz
+   `gcloud run jobs update` no job de limpeza, que roda como a `worker-sa`; sem o binding o
+   deploy do corte recebeu `actAs` negado) e o Cloud Scheduler
    `auditoria-cleanup-stuck-<env>-hourly` (`0 * * * *` em `Etc/UTC`). Agendamento que já
    existe não é tocado: o que está pausado continua pausado.
 
