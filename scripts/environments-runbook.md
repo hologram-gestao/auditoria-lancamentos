@@ -56,7 +56,11 @@ Ordem, com `<antigo>` = id do projeto de origem, `<novo>` = id do projeto novo e
    Compute (`114342061812-compute@developer.gserviceaccount.com`), e a legada
    `<número>@cloudbuild.gserviceaccount.com` não existe (`CLOUDBUILD_SA=<e-mail>` pula a
    descoberta). As SAs da API e da web recebem também `cloudbuild.builds.editor` e
-   `serviceusage.serviceUsageConsumer`, por paridade com o projeto antigo.
+   `serviceusage.serviceUsageConsumer`, por paridade com o projeto antigo, e
+   `iam.serviceAccountUser` NA SA do Cloud Build: o `gcloud builds submit` roda o build como
+   ela, e a do Compute (ao contrário da legada) exige `actAs` de quem dispara. Sem esse
+   binding o deploy do corte (23/10/2026) falhou nos builds com "caller does not have
+   permission to act as service account".
 4. **`setup-gcp.sh`** (passo 1 abaixo) com `PROJECT_ID=<novo>`: KEK, secrets de alerta e de
    leads. Num projeto vazio a parte da carteira **avisa e segue** (não há job de
    referência ainda); ela é reexecutada no item 7.
@@ -96,7 +100,11 @@ Ordem, com `<antigo>` = id do projeto de origem, `<novo>` = id do projeto novo e
    à mão: `run.invoker` para `allUsers` nos dois serviços (a política de IAM não vai no
    manifesto do replay: sem isso, 403 em todo acesso; em `prod`, só com `PUBLIC_INVOKER=1`), `cloudsql.client` para a
    `auditoria-api-sa`, a SA `auditoria-worker-sa` do job de limpeza (com `cloudsql.client`,
-   `run.invoker` e `secretmanager.secretAccessor`) e o Cloud Scheduler
+   `run.invoker` e `secretmanager.secretAccessor`, e com `iam.serviceAccountUser` para a
+   SA com que o deploy se autentica, o secret `GCP_API_SERVICE_ACCOUNT`, hoje a
+   `auditoria-api-sa` (`CI_DEPLOY_SA` muda): o job `migrate` do workflow faz
+   `gcloud run jobs update` no job de limpeza, que roda como a `worker-sa`; sem o binding o
+   deploy do corte recebeu `actAs` negado) e o Cloud Scheduler
    `auditoria-cleanup-stuck-<env>-hourly` (`0 * * * *` em `Etc/UTC`). Agendamento que já
    existe não é tocado: o que está pausado continua pausado.
 
