@@ -109,6 +109,22 @@ gcloud artifacts repositories add-iam-policy-binding "$AR_REPO" \
   --quiet >/dev/null
 
 # ------------------------------------------------------------------
+# SAs do CI → actAs na SA do Cloud Build. O `gcloud builds submit` roda o build
+# COMO ela, e quem dispara precisa de iam.serviceAccountUser nela: a legada
+# `<número>@cloudbuild` do projeto antigo não exigia, a do Compute exige. Sem
+# isso o deploy do corte (23/10/2026) falhou com "caller does not have permission
+# to act as service account".
+# ------------------------------------------------------------------
+for SA in "$API_SA" "$WEB_SA"; do
+  echo "  + roles/iam.serviceAccountUser for $SA"
+  gcloud iam service-accounts add-iam-policy-binding "$CLOUDBUILD_SA" \
+    --project="$PROJECT_ID" \
+    --member="serviceAccount:$SA" \
+    --role="roles/iam.serviceAccountUser" \
+    --quiet >/dev/null
+done
+
+# ------------------------------------------------------------------
 # Validação rápida
 # ------------------------------------------------------------------
 echo ""
@@ -120,6 +136,14 @@ for SA in "$API_SA" "$WEB_SA"; do
     --filter="bindings.members:$SA" \
     --format="value(bindings.role)" | sort -u
 done
+
+echo ""
+echo "=== Quem age como $CLOUDBUILD_SA (iam.serviceAccountUser) ==="
+gcloud iam service-accounts get-iam-policy "$CLOUDBUILD_SA" \
+  --project="$PROJECT_ID" \
+  --flatten="bindings[].members" \
+  --filter="bindings.role:roles/iam.serviceAccountUser" \
+  --format="value(bindings.members)" | sort -u
 
 echo ""
 echo "✓ CI/CD IAM setup completo."

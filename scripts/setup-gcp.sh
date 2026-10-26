@@ -510,6 +510,17 @@ for _role in roles/cloudsql.client roles/run.invoker roles/secretmanager.secretA
     && echo "  ${_role}: ok (ou já existia)" \
     || echo "::warning:: falha ao conceder ${_role} a ${WORKER_SA}"
 done
+# A SA de runtime age como a worker-sa: o job `migrate` do deploy roda como
+# ${RUNTIME_SA} e atualiza o ${CLEANUP_JOB}, que roda como ${WORKER_SA}, o que
+# exige iam.serviceAccountUser nela. No antigo a política da worker-sa tem esse
+# binding; sem ele o migrate do corte (23/10/2026) recebeu actAs negado.
+gcloud iam service-accounts add-iam-policy-binding "$WORKER_SA" \
+  --project="$PROJECT_ID" \
+  --member="serviceAccount:${RUNTIME_SA}" \
+  --role="roles/iam.serviceAccountUser" \
+  --quiet >/dev/null \
+  && echo "  ${RUNTIME_SA} age como ${WORKER_SA}: ok (ou já existia)" \
+  || echo "::warning:: falha ao conceder iam.serviceAccountUser em ${WORKER_SA} a ${RUNTIME_SA}"
 
 # ---- 5b.4 Cloud Scheduler do job de limpeza ------------------------------
 # Mesma forma do da carteira (API admin do Cloud Run, token OAuth), com a SA do
