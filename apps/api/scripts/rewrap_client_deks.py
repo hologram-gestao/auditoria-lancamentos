@@ -2,9 +2,12 @@
 
 O caso:
     Toda DEK de cliente está embrulhada pela KEK do projeto `liberdade-assessoria`, e chave
-    do Cloud KMS não se move entre projetos. Subir o banco no projeto `hologramos` com a
-    KEK de lá deixaria TODO cliente `[indecifrável]`. Este script troca, cliente a
+    do Cloud KMS não se move entre projetos. Subir o banco no projeto `hologramos-512320`
+    com a KEK de lá deixaria TODO cliente `[indecifrável]`. Este script troca, cliente a
     cliente, o blob `clients.dek_wrapped` da KEK antiga (ORIGEM) para a nova (ALVO).
+    Executado no ensaio (22/10/2026) e no corte (23/10/2026): 14 clientes reembrulhados,
+    `--verify` com 14 ok e 0 falhas nas duas vezes (runbook, "Migração de projeto: como
+    foi executada").
 
 O que ele NÃO toca (CLAUDE.md §3.14):
     - **Nenhum campo cifrado.** O envelope dos campos (`v1:<key_id>:<hex>`) é cifrado com a
@@ -134,10 +137,12 @@ SOURCE_LOCAL_KEY_ENV = "OMIE_ENCRYPTION_KEY_SOURCE"
 
 #: "Este ciphertext não é desta chave": o blob fica PENDENTE de reembrulho, não é erro.
 #: - `CryptoError`: o `LocalKmsClient` (tag GCM inválida sob outra KEK).
-#: - `InvalidArgument`: o Cloud KMS, HIPÓTESE (400 "Decryption failed: the ciphertext is
-#:   invalid"). A confirmar na 1ª rodada do `--dry-run` do ensaio contra o KMS real: se a
-#:   classe for outra, o dry-run ABORTA (exceção fora desta tupla é fatal) e esta tupla é
-#:   corrigida, nunca o texto da mensagem comparado.
+#: - `InvalidArgument`: o Cloud KMS (400 "Decryption failed: the ciphertext is invalid").
+#:   CONFIRMADO contra o KMS real no `--dry-run` do ensaio (22/10/2026: 14 clientes
+#:   classificados `pending`, nenhum aborto) e de novo no do corte (23/10/2026). O
+#:   `CloudKmsClient.unwrap_dek` não embrulha a exceção do SDK, então é ela que chega aqui.
+#:   Se um dia a classe mudar, o dry-run ABORTA (exceção fora desta tupla é fatal) e esta
+#:   tupla é corrigida, nunca o texto da mensagem comparado.
 WRONG_KEY_EXCEPTIONS: tuple[type[Exception], ...] = (CryptoError, InvalidArgument)
 #: A SA não pode usar a chave: aborta a execução inteira (é configuração, não dado).
 #: `PermissionDenied` é subclasse de `Forbidden`; as duas listadas para ser explícito.

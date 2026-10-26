@@ -17,9 +17,9 @@ default de projeto (todo comando nomeia o destino); o `grant_cicd_iam.sh` e o
 `setup-gcp.sh` têm o `hologramos-512320` como default.
 
 **O corte** (importar o banco, reembrulhar, trocar os secrets do GitHub, deploy, smoke,
-despausar os agendamentos) não é deste runbook: é o roteiro do plano do épico 86e3r2egb
-(`Docs/PLANO_GCP_PROJETO_PROPRIO.md`, §3 e §4, documento de trabalho fora do
-repositório) e da subtask do corte (86e3r2ehv). O que
+despausar os agendamentos) e o desligamento do projeto antigo estão, como foram
+executados em 22 a 26/10/2026, na seção "Migração de projeto: como foi executada", no
+fim deste runbook. O que
 o corte troca no GitHub: os secrets `GCP_WORKLOAD_IDENTITY_PROVIDER`,
 `GCP_API_SERVICE_ACCOUNT` e `GCP_WEB_SERVICE_ACCOUNT` (repositório) e a Variable
 `API_URL_DEV` (Environment `development`); `GCP_PROJECT_ID` também, por coerência, mas
@@ -321,9 +321,10 @@ Ordem, sempre com `--wait` e lendo a última linha da execução:
 
 1. **`--dry-run`**: abre cada blob com as duas chaves e prova o embrulho novo em
    memória, sem gravar. Esperado: `errors=0` e `pending` = número de clientes com DEK.
-   É aqui que se confirma a classe de exceção do KMS para "ciphertext de outra chave"
-   (hipótese `InvalidArgument`, `WRONG_KEY_EXCEPTIONS` no script): se for outra, o
-   dry-run ABORTA e a tupla é corrigida no código antes de seguir.
+   A classe de exceção do Cloud KMS para "ciphertext de outra chave" é `InvalidArgument`
+   (`WRONG_KEY_EXCEPTIONS` no script), confirmada contra o KMS real no dry-run do ensaio
+   (22/10/2026, 14 clientes `pending`, nenhum aborto) e de novo no do corte. Se um dia
+   ela mudar, o dry-run ABORTA e a tupla é corrigida no código antes de seguir.
 2. **execução** (`--args=-m,scripts.rewrap_client_deks`): commit por cliente, UPDATE
    condicional no blob antigo. Interrompida, roda de novo: o que já foi trocado conta
    como `already`. Grava `deks_reembrulhadas` em `usage_events`.
@@ -342,6 +343,159 @@ Saídas: `0` ok; `1` terminou com cliente em falha (ids no log `rewrap_client`);
 configuração recusada; `3` abortado (permissão negada, prova que não fecha, linha
 alterada no meio, erro inesperado). Log e saída só com contagens, `client_id` e os dois
 nomes de chave.
+
+## Migração de projeto: como foi executada (épico 86e3r2egb, 22 a 26/10/2026)
+
+O Hologram OS saiu do `liberdade-assessoria` (projeto compartilhado com outras áreas) para
+o `hologramos-512320` (número `114342061812`). Esta seção é o roteiro REAL, na ordem em
+que rodou, com as armadilhas que só a execução mostrou. Para uma próxima mudança de
+projeto, repita a ordem: o passo 0 monta o destino, o passo 7 reembrulha, e o resto está
+aqui.
+
+**Princípio que segurou o rollback:** o banco antigo nunca recebeu escrita depois do
+export final e nunca foi reembrulhado. Até o deploy do corte, voltar era
+`--ingress=all` na API antiga e despausar os agendamentos de lá, nada mais.
+
+### Ensaio (22/10/2026), sobre uma cópia parada no tempo
+
+O ambiente do ensaio É o ambiente final: no corte só o dado foi refeito.
+
+1. **Montagem do destino pelo passo 0** (WIF, IAM do CI, `setup-gcp.sh`, instância
+   `auditoria-pg` espelhando a antiga campo a campo: ENTERPRISE, `db-g1-small`, zonal,
+   PD_SSD 10 GB, backup 03:00 × 7, PITR 7 dias; bancos `auditoria_dev` e `auditoria_prod`
+   em UTF8 / `en_US.UTF8`; usuários com os mesmos nomes e senhas novas, digitadas fora do
+   Claude Code).
+2. **Build a partir de uma cópia LIMPA da `main`**, nunca da pasta de trabalho:
+   `git worktree add --detach <dir> origin/main` e o `gcloud builds submit` de lá. O
+   `.gcloudignore` não exclui os arquivos locais do hub de agentes, que subiriam para o
+   bucket de fonte do Cloud Build. A web é REBUILDADA no destino (a URL da API é
+   build-arg).
+3. **Replay dos manifestos** em dry-run, depois `--apply` (passo 0, item 6). A API nasce
+   `internal`. A política de IAM dos serviços (`allUsers` invoker) NÃO vai no manifesto:
+   sem ela, 403 em todo acesso (a seção 5b do `setup-gcp.sh` concede).
+4. **Agendamentos do destino PAUSADOS** logo depois de criados
+   (`gcloud scheduler jobs pause`): o `setup-gcp.sh` cria o da carteira ATIVO e não há
+   `--paused`. O da limpeza também foi pausado. Ficam assim até o `--verify` do
+   reembrulho.
+5. **Backup on-demand na instância antiga**, ponto de restauração independente do export.
+6. **Export `--offload`** do `auditoria_dev` para um bucket no projeto NOVO
+   (`gs://hologramos-512320-migracao-sql`, uniform access, public access prevention
+   `enforced`), com `roles/storage.objectAdmin` no BUCKET para a SA da instância antiga
+   (export) e da nova (import), nunca no projeto.
+7. **Import com `--user=auditoria_dev_user`** (o usuário do Alembic e da API). O dump do
+   Cloud SQL não traz `OWNER TO`, extensão nem `CREATE ROLE`: o dono das tabelas é quem
+   importa, e ele tem de ser o mesmo usuário com que o Alembic e a API conectam.
+8. **Conferência do banco por execução AVULSA de um job existente** (o `promote`) com
+   `--args` sobrescrito para um `python -c` que abre transação `READ ONLY` e loga só a
+   versão do Alembic, os nomes das tabelas, o dono e as contagens. Critério: Alembic igual
+   ao head da `main`, mesmo número de tabelas, dono `auditoria_dev_user` em todas,
+   contagem de cada tabela IGUAL à do dump. Sem psql de fora e sem abrir a instância.
+9. **Flags de escrita no Omie DESLIGADAS na API nova** (`OMIE_POSTING_ENABLED`,
+   `OMIE_PAYABLE_POSTING_ENABLED`, `OMIE_INSTALLMENT_POSTING_ENABLED` = `false`). O replay
+   as copia ligadas, e um "Lançar no Omie" no ensaio escreveria na contabilidade do
+   cliente com a intenção registrada só num banco que o corte descarta (§3.16, critério
+   de rollback). O `deploy-dev.yml` só faz `--update-env-vars` e nunca as toca.
+10. **Reembrulho** pelo passo 7: `--dry-run`, execução, execução de novo, `--verify`.
+11. **Smoke**: API aberta (`--ingress=all`) só depois do `--verify` em zero; login, lista
+    de clientes, conciliação existente sem `[indecifrável]`, reprocessamento de uma
+    concluída, conciliação nova com parse de PDF, job da carteira à mão; log sem 5xx e
+    sem `decrypt_failed`. Depois, a API de volta a `internal` até o corte.
+
+Números do ensaio: dump de 1,72 MB, 40 tabelas, 28.837 linhas iguais às do dump, 14
+clientes com DEK (de 16), reembrulho `pending=14` → `rewrapped=14` → `already=14`,
+`--verify` 14 ok e 0 falhas; carteira 14/14 sem falha.
+
+### Corte (23/10/2026, 21:06 a 24/10 00:05 -03, cerca de 3 h)
+
+1. Time avisado. Os 2 agendamentos do Hologram OS no ANTIGO pausados (os das outras
+   áreas intocados).
+2. API ANTIGA `--ingress=internal` (reversível em um comando; a web antiga passa a
+   falhar, que é o desejado). Conferido no log que nada estava em processamento.
+3. Backup on-demand final na antiga; export final para `corte-2026-10-23/` no bucket.
+4. `auditoria_dev` do ensaio apagado e recriado vazio na nova; import do dump final com
+   `--user=auditoria_dev_user`; conferência do item 8 do ensaio.
+5. Reembrulho completo pelo passo 7 (`--verify` em zero é condição para seguir).
+6. `grant_cicd_iam.sh` e `setup-gcp.sh` no novo, a partir da cópia limpa do PR do corte.
+7. **Flags de escrita no Omie RELIGADAS na API nova** e conferidas no `describe`: o deploy
+   não as religa sozinho.
+8. Secrets do GitHub (`GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_API_SERVICE_ACCOUNT`,
+   `GCP_WEB_SERVICE_ACCOUNT`, `GCP_PROJECT_ID`) e a Variable `API_URL_DEV` trocados. Os
+   valores antigos (identificadores, não credenciais) anotados para o rollback.
+9. PR do CI/CD mergeado (develop → main). O push da `main` só rodou `changes` e
+   `summary`: o filtro de paths do `deploy-dev.yml` não dispara build por mudança em
+   workflow.
+10. **API nova aberta ANTES do `workflow_dispatch`**: o `smoke-alert` do Deploy to Dev
+    chama a API pela URL pública (`vars.API_URL_DEV`).
+11. `Deploy to Dev` por `workflow_dispatch` com `target=all`. Foram **3 tentativas**:
+    - 1ª: os dois builds falharam com "caller does not have permission to act as service
+      account": no projeto novo o build roda como a SA do Compute, que exige
+      `iam.serviceAccountUser` das SAs do CI. Os builds do ensaio passaram porque rodaram
+      como owner.
+    - 2ª: builds ok; o job `migrate` falhou ao atualizar o job de limpeza (`actAs` negado
+      na `auditoria-worker-sa` para a SA do deploy). O Alembic não chegou a rodar.
+    - 3ª: verde, com o smoke `delivered=true` e a invariante `minScale 1` /
+      `cpu-throttling false` sem aviso.
+
+    Os dois `actAs` só aparecem no deploy PELO CI e hoje estão nos scripts (passo 0, itens
+    3 e 7).
+
+12. Conferência pós-deploy: revisões novas, flags `true`, KEK e `FRONTEND_URL` novos, log
+    sem erro, banco com as contagens do dump (mais os eventos do smoke).
+13. Agendamentos do novo despausados.
+14. Binding da SA nova na KEK antiga REVOGADO e `--verify` de novo, sem ela: 14 ok, 0
+    falhas.
+15. `alembic check` no novo (execução avulsa do job `migrate` com `--args=check`, rodada
+    em 24/10 na conferência das subtasks): "No new upgrade operations detected", sem
+    drift. É critério de fechamento do banco, não detalhe.
+
+Números do corte: dump de 1,73 MB, 40 tabelas, 28.948 linhas, Alembic `c8d1f4e6a2b9`,
+14 DEKs reembrulhadas, `--verify` 14/0 antes e depois da revogação, 3 tentativas de
+deploy. No primeiro dia útil (26/10), uso real sem 5xx, sem `decrypt_failed` e sem alerta.
+
+### Desligamento do antigo (26/10/2026)
+
+Só depois de todas as subtasks do corte conferidas contra o critério, e de provar que o
+banco antigo não recebeu escrita desde o corte (zero execuções de job e zero requisições
+na API desde 24/10 00:18 -03): com isso, o dump do corte é o último estado. Inventário
+primeiro, separando o que é do Hologram OS do que é das outras áreas do projeto (que não
+se toca), e então, nesta ordem:
+
+1. agendamentos;
+2. jobs;
+3. serviços;
+4. instância do Cloud SQL, com backup FINAL (`eaa404dd-7efa-44e2-ae9a-cf977c569c6a`, válido
+   até 24/01/2027);
+5. secrets (pré-checagem: nenhum serviço ou job restante os monta);
+6. repositório do Artifact Registry;
+7. pool do WIF (recuperável por 30 dias);
+8. papéis de projeto e SAs (recuperáveis por 30 dias).
+
+No projeto novo, depois: o job one-off do reembrulho e o `objectAdmin` das SAs do Cloud
+SQL no bucket.
+
+**Fica de propósito:** o keyring `auditoria-dev` com a KEK antiga no `liberdade-assessoria`.
+O `dek_wrapped` do dump do corte está embrulhado por ela; destruí-la torna o dump
+inútil. Retenção decidida pelo Pedro: o dump do ensaio apagado; o do corte
+(`gs://hologramos-512320-migracao-sql/corte-2026-10-23/`) guardado até 24/01/2027 por
+regra de ciclo de vida do bucket (`Delete`, `age` 92), a mesma validade do backup final.
+**Em 24/01/2027:** apagar o bucket vazio e desativar a KEK antiga.
+
+### Armadilhas, em uma linha cada
+
+- O `.gcloudignore` não exclui arquivos locais do hub: build sempre de um `git worktree`
+  limpo da `main`.
+- O dump do Cloud SQL não tem dono: import com `--user=<usuário do app>`.
+- O replay não leva IAM: o `allUsers` invoker dos serviços, o `cloudsql.client` da
+  `auditoria-api-sa` e a `auditoria-worker-sa` com os papéis dela vêm do `setup-gcp.sh` 5b.
+- Prova verde não é manifesto aplicável: a prova do replay passou a fazer parse do YAML
+  depois que um `*.run.app` sem aspas virou alias.
+- As flags de escrita no Omie vão copiadas ligadas pelo replay e o deploy não as toca:
+  desligar no ensaio, religar no corte.
+- O agendamento nasce ativo: pausar até o `--verify`.
+- O smoke do deploy usa a URL pública: abrir a API antes do `workflow_dispatch`.
+- Dois `actAs` só o deploy pelo CI revela (SA do build e `worker-sa`).
+- `alembic check` sem drift fecha o corte.
+- A KEK antiga só morre depois do último dump que ela abre.
 
 ## Verificação rápida
 
