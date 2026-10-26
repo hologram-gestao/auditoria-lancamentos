@@ -1,7 +1,7 @@
 """Reembrulho das DEKs dos clientes para a KEK do projeto novo (épico 86e3r2egb, 86e3r2egr).
 
 O caso:
-    Toda DEK de cliente está embrulhada pela KEK do projeto `liberdade-assessoria`, e chave
+    Toda DEK de cliente estava embrulhada pela KEK do projeto `liberdade-assessoria`, e chave
     do Cloud KMS não se move entre projetos. Subir o banco no projeto `hologramos-512320`
     com a KEK de lá deixaria TODO cliente `[indecifrável]`. Este script troca, cliente a
     cliente, o blob `clients.dek_wrapped` da KEK antiga (ORIGEM) para a nova (ALVO).

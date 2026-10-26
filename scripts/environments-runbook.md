@@ -116,7 +116,9 @@ Ordem, com `<antigo>` = id do projeto de origem, `<novo>` = id do projeto novo e
 >
 > ⚠️ **A API nova nasce `internal`** (`--api-ingress`, default `internal`; a prova
 > confere): até o `--verify` do reembrulho zerar (passo 7), ela não recebe tráfego
-> público, e os schedulers do projeto novo ficam pausados. Abrir é
+> público, e os schedulers do projeto novo ficam pausados: o `setup-gcp.sh` cria o da
+> carteira ATIVO, então ele é pausado à mão (`gcloud scheduler jobs pause`) logo depois
+> do item 7, junto com o da limpeza. Abrir é
 > `gcloud run services update auditoria-api-dev --ingress=all` depois do `--verify`. A
 > web mantém o ingresso da origem.
 
@@ -353,26 +355,33 @@ projeto, repita a ordem: o passo 0 monta o destino, o passo 7 reembrulha, e o re
 aqui.
 
 **Princípio que segurou o rollback:** o banco antigo nunca recebeu escrita depois do
-export final e nunca foi reembrulhado. Até o deploy do corte, voltar era
-`--ingress=all` na API antiga e despausar os agendamentos de lá, nada mais.
+export final e nunca foi reembrulhado. Até a troca dos secrets do GitHub e o merge do PR
+do CI/CD (itens 8 e 9 do corte), voltar era `--ingress=all` na API antiga e despausar os
+agendamentos de lá, nada mais. Depois deles, voltar exige também restaurar os secrets e
+a Variable antigos e reverter o commit dos workflows, senão o próximo push na `main`
+publica no projeto novo enquanto os usuários estão no antigo.
 
 ### Ensaio (22/10/2026), sobre uma cópia parada no tempo
 
 O ambiente do ensaio É o ambiente final: no corte só o dado foi refeito.
 
-1. **Montagem do destino pelo passo 0** (WIF, IAM do CI, `setup-gcp.sh`, instância
-   `auditoria-pg` espelhando a antiga campo a campo: ENTERPRISE, `db-g1-small`, zonal,
-   PD_SSD 10 GB, backup 03:00 × 7, PITR 7 dias; bancos `auditoria_dev` e `auditoria_prod`
-   em UTF8 / `en_US.UTF8`; usuários com os mesmos nomes e senhas novas, digitadas fora do
-   Claude Code).
-2. **Build a partir de uma cópia LIMPA da `main`**, nunca da pasta de trabalho:
+1. **Montagem do destino pelo passo 0, itens 1 a 4** (WIF, Cloud Build e AR, IAM do CI,
+   `setup-gcp.sh`), mais a instância `auditoria-pg` espelhando a antiga campo a campo:
+   ENTERPRISE, `db-g1-small`, zonal, PD_SSD 10 GB, backup 03:00 × 7, PITR 7 dias; bancos
+   `auditoria_dev` e `auditoria_prod` em UTF8 / `en_US.UTF8`; usuários com os mesmos nomes
+   e senhas novas, digitadas fora do Claude Code; secrets com versão (os de valor igual ao
+   antigo copiados pelo Pedro, fora do Claude Code).
+2. **Build (passo 0, item 5) a partir de uma cópia LIMPA da `main`**, nunca da pasta de
+   trabalho:
    `git worktree add --detach <dir> origin/main` e o `gcloud builds submit` de lá. O
    `.gcloudignore` não exclui os arquivos locais do hub de agentes, que subiriam para o
    bucket de fonte do Cloud Build. A web é REBUILDADA no destino (a URL da API é
    build-arg).
-3. **Replay dos manifestos** em dry-run, depois `--apply` (passo 0, item 6). A API nasce
-   `internal`. A política de IAM dos serviços (`allUsers` invoker) NÃO vai no manifesto:
-   sem ela, 403 em todo acesso (a seção 5b do `setup-gcp.sh` concede).
+3. **Replay dos manifestos** em dry-run, depois `--apply` (passo 0, item 6), e o
+   **`setup-gcp.sh` de novo** (passo 0, item 7). A API nasce `internal`. A política de IAM
+   dos serviços (`allUsers` invoker), o `cloudsql.client` da `auditoria-api-sa` e a
+   `auditoria-worker-sa` NÃO vêm no replay: é a segunda rodada do `setup-gcp.sh` (seção
+   5b) que os cria, junto com os dois agendamentos. Sem ela, 403 em todo acesso.
 4. **Agendamentos do destino PAUSADOS** logo depois de criados
    (`gcloud scheduler jobs pause`): o `setup-gcp.sh` cria o da carteira ATIVO e não há
    `--paused`. O da limpeza também foi pausado. Ficam assim até o `--verify` do
@@ -455,8 +464,11 @@ deploy. No primeiro dia útil (26/10), uso real sem 5xx, sem `decrypt_failed` e 
 ### Desligamento do antigo (26/10/2026)
 
 Só depois de todas as subtasks do corte conferidas contra o critério, e de provar que o
-banco antigo não recebeu escrita desde o corte (zero execuções de job e zero requisições
-na API desde 24/10 00:18 -03): com isso, o dump do corte é o último estado. Inventário
+banco antigo não recebeu escrita depois do export final: os agendamentos de lá foram
+pausados às 21:16 de 23/10 e a API saiu do ar às 21:17, antes do export (21:27); a
+última requisição na API antiga foi em 23/10 às 15:56 -03; e a conferência de 26/10 não
+achou nenhuma execução de job nem requisição desde então. Com isso, o dump do corte é o
+último estado. Inventário
 primeiro, separando o que é do Hologram OS do que é das outras áreas do projeto (que não
 se toca), e então, nesta ordem:
 
@@ -473,12 +485,14 @@ se toca), e então, nesta ordem:
 No projeto novo, depois: o job one-off do reembrulho e o `objectAdmin` das SAs do Cloud
 SQL no bucket.
 
-**Fica de propósito:** o keyring `auditoria-dev` com a KEK antiga no `liberdade-assessoria`.
-O `dek_wrapped` do dump do corte está embrulhado por ela; destruí-la torna o dump
-inútil. Retenção decidida pelo Pedro: o dump do ensaio apagado; o do corte
+**Fica de propósito:** o keyring `auditoria-dev` com a KEK antiga no `liberdade-assessoria`
+(o projeto segue existindo, com as outras áreas). O `dek_wrapped` do dump do corte E o do
+backup final da instância antiga estão embrulhados por ela; destruí-la torna os dois
+inúteis. Retenção decidida pelo Pedro: o dump do ensaio apagado; o do corte
 (`gs://hologramos-512320-migracao-sql/corte-2026-10-23/`) guardado até 24/01/2027 por
 regra de ciclo de vida do bucket (`Delete`, `age` 92), a mesma validade do backup final.
-**Em 24/01/2027:** apagar o bucket vazio e desativar a KEK antiga.
+**Em 24/01/2027:** conferir que o objeto do dump já saiu (a regra de ciclo de vida não é
+instantânea), apagar o bucket vazio e desativar a KEK antiga.
 
 ### Armadilhas, em uma linha cada
 
@@ -495,7 +509,7 @@ regra de ciclo de vida do bucket (`Delete`, `age` 92), a mesma validade do backu
 - O smoke do deploy usa a URL pública: abrir a API antes do `workflow_dispatch`.
 - Dois `actAs` só o deploy pelo CI revela (SA do build e `worker-sa`).
 - `alembic check` sem drift fecha o corte.
-- A KEK antiga só morre depois do último dump que ela abre.
+- A KEK antiga só morre depois do último dump e do último backup que ela abre.
 
 ## Verificação rápida
 
