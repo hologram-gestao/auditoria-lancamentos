@@ -65,6 +65,12 @@ KEK_KEY="${KEK_KEY:-omie-encryption-kek}"
 # do unwrap). Prod pode, no futuro, ter uma SA dedicada — sobrescreva RUNTIME_SA.
 RUNTIME_SA="${RUNTIME_SA:-auditoria-api-sa@${PROJECT_ID}.iam.gserviceaccount.com}"
 
+# SA com que o DEPLOY da API se autentica (o secret GCP_API_SERVICE_ACCOUNT do
+# GitHub, via WIF): é ela que roda os `gcloud run jobs update` do deploy. Hoje é a
+# mesma SA de runtime, mas são papéis diferentes: separar o RUNTIME_SA não muda
+# quem faz o deploy.
+CI_DEPLOY_SA="${CI_DEPLOY_SA:-auditoria-api-sa@${PROJECT_ID}.iam.gserviceaccount.com}"
+
 KEK_KMS_KEY_NAME="projects/${PROJECT_ID}/locations/${REGION}/keyRings/${KEYRING}/cryptoKeys/${KEK_KEY}"
 
 # --- Jobs Cloud Run (Sprint 11, R5) — TUDO sufixado por ambiente ------------
@@ -510,6 +516,19 @@ for _role in roles/cloudsql.client roles/run.invoker roles/secretmanager.secretA
     && echo "  ${_role}: ok (ou já existia)" \
     || echo "::warning:: falha ao conceder ${_role} a ${WORKER_SA}"
 done
+# A SA do deploy age como a worker-sa: o job `migrate` do deploy-<env>.yml
+# (GitHub Actions, autenticado como ${CI_DEPLOY_SA}) faz `gcloud run jobs update`
+# no ${CLEANUP_JOB}, que roda como ${WORKER_SA}, o que exige
+# iam.serviceAccountUser nela. No antigo a política da worker-sa tem esse binding;
+# sem ele o deploy do corte (23/10/2026) recebeu actAs negado. Fica aqui, e não no
+# grant_cicd_iam.sh, porque a worker-sa nasce neste script, que roda depois dele.
+gcloud iam service-accounts add-iam-policy-binding "$WORKER_SA" \
+  --project="$PROJECT_ID" \
+  --member="serviceAccount:${CI_DEPLOY_SA}" \
+  --role="roles/iam.serviceAccountUser" \
+  --quiet >/dev/null \
+  && echo "  ${CI_DEPLOY_SA} age como ${WORKER_SA}: ok (ou já existia)" \
+  || echo "::warning:: falha ao conceder iam.serviceAccountUser em ${WORKER_SA} a ${CI_DEPLOY_SA}"
 
 # ---- 5b.4 Cloud Scheduler do job de limpeza ------------------------------
 # Mesma forma do da carteira (API admin do Cloud Run, token OAuth), com a SA do
