@@ -26,11 +26,17 @@ grava, e nada daqui decide reimportação: só lê.
   conta, e o que vem depois só é OLHADO para garantir que nenhuma conta ficou fora.
 
 **Na dúvida, recusa** (lei da Sprint 2: nenhuma perda silenciosa). Linha do bloco
-fora do padrão, grau que não bate com a profundidade da classificação,
-classificação repetida e qualquer linha com cara de conta DEPOIS do fim do bloco
-recusam o arquivo inteiro com `LINHAS_INVALIDAS`, motivo de vocabulário fechado e
-número de linha. A célula nunca sai daqui: o banner tem razão social e CNPJ, o
-rodapé tem nome e CPF, e o nome de conta é dado do cliente final (§4.5).
+fora do padrão, grau que não bate com a profundidade da classificação e qualquer
+linha com cara de conta DEPOIS do fim do bloco recusam o arquivo inteiro com
+`LINHAS_INVALIDAS`, motivo de vocabulário fechado e número de linha. A célula nunca
+sai daqui: o banner tem razão social e CNPJ, o rodapé tem nome e CPF, e o nome de
+conta é dado do cliente final (§4.5).
+
+**Classificação repetida NÃO é recusa** (86e3uyzcf): o Domínio aceita duas contas
+analíticas com a mesma classificação e códigos reduzidos diferentes (amostra da 4S,
+22/10/2026: 114 EDIFÍCIOS e 115 CONSTRUÇÕES em `1.2.3.01.002`). A chave da conta é
+o código reduzido, e código repetido continua recusado pelo validador do modelo
+(`codigo_repetido`).
 
 O que este módulo NÃO aceita, de propósito: o CSV nativo do Domínio (não há
 amostra; cai na recusa de cabeçalho de hoje) e qualquer variação que não case com
@@ -71,8 +77,6 @@ type DominioLineReason = Literal[
     "codigo_ausente",
     # Nenhuma célula com a forma de classificação (`1.1.2`).
     "classificacao_ausente",
-    # A mesma classificação em duas contas (a segunda ocorrência em diante).
-    "classificacao_repetida",
     # O grau (inteiro no fim da linha) não existe.
     "grau_ausente",
     # O grau não é a profundidade da classificação: a leitura saiu do padrão.
@@ -221,7 +225,6 @@ def convert_dominio(
 
     converted: list[tuple[int, list[Any]]] = []
     problems: list[DominioLineProblem] = []
-    seen_classifications: set[str] = set()
     while position < len(after_header):
         line, cells = after_header[position]
         if not _looks_like_account(cells):
@@ -231,11 +234,6 @@ def convert_dominio(
         if reason is not None or values is None:
             problems.append(DominioLineProblem(line, reason or "linha_irreconhecivel"))
             continue
-        classification = values[3]
-        if classification in seen_classifications:
-            problems.append(DominioLineProblem(line, "classificacao_repetida"))
-            continue
-        seen_classifications.add(classification)
         converted.append((line, values))
 
     problems.extend(

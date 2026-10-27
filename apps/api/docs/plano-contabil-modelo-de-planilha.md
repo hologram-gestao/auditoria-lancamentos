@@ -144,9 +144,10 @@ trilha de acesso; nome que não decifra recusa com 409 `PLANO_CONTABIL_INDECIFRA
 (cabeçalho = 1).
 
 No plano exportado do Domínio, `reason` também pode ser `codigo_ausente`,
-`classificacao_ausente`, `classificacao_repetida`, `grau_ausente`, `grau_divergente`,
-`linha_irreconhecivel` ou `conta_fora_do_bloco`, e `line` é a linha que a pessoa vê no
-Excel (o banner e o cabeçalho contam).
+`classificacao_ausente`, `grau_ausente`, `grau_divergente`, `linha_irreconhecivel` ou
+`conta_fora_do_bloco`, e `line` é a linha que a pessoa vê no Excel (o banner e o cabeçalho
+contam). Classificação repetida não é recusa: o Domínio aceita duas contas com a mesma
+classificação e códigos reduzidos diferentes, e a chave da conta é o código reduzido.
 
 ## Validador único de conta (consumido pelas 16.2 e 16.3)
 

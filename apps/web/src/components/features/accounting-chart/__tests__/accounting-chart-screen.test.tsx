@@ -796,12 +796,11 @@ describe('importação', () => {
     expect(within(dialog).getByText(/Planilha \(\.csv, \.xlsx ou \.xls\)/)).toBeInTheDocument();
   });
 
-  it('LINHAS_INVALIDAS do plano do Domínio: os sete motivos novos saem em português', async () => {
+  it('LINHAS_INVALIDAS do plano do Domínio: os seis motivos próprios saem em português', async () => {
     withoutPlan();
     const reasons = [
       'codigo_ausente',
       'classificacao_ausente',
-      'classificacao_repetida',
       'grau_ausente',
       'grau_divergente',
       'linha_irreconhecivel',
@@ -828,7 +827,7 @@ describe('importação', () => {
     expect(within(notice).getByText(/Conta depois do fim do plano/)).toBeInTheDocument();
     // O cabeçalho do Domínio não está na linha 1: o rodapé não pode afirmar isso.
     expect(within(notice).getByTestId('accounting-invalid-lines-count')).toHaveTextContent(
-      '7 linhas inválidas. Os números são os das linhas da planilha, como aparecem no Excel.',
+      '6 linhas inválidas. Os números são os das linhas da planilha, como aparecem no Excel.',
     );
   });
 
