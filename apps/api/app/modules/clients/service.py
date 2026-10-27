@@ -75,6 +75,7 @@ from app.modules.clients.schemas import (
     ClientDetailResponse,
     ClientManagerResponse,
     ClientResponse,
+    LatestReconciliationSummary,
     ManagerSummary,
     OrganizationSummary,
     ReconciliationSessionSummary,
@@ -126,6 +127,11 @@ def _row_to_response(row: ClientRow) -> ClientResponse:
         # S9 (BACK 09.4): derivado das contagens que vieram na MESMA query.
         origin_status=derive_origin_status(
             total=row.connections_total, active=row.connections_active
+        ),
+        latest_reconciliation=(
+            LatestReconciliationSummary(**row.latest_reconciliation._asdict())
+            if row.latest_reconciliation is not None
+            else None
         ),
     )
 

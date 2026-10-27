@@ -281,6 +281,19 @@ def derive_origin_status(*, total: int, active: int) -> OriginStatus:
     return OriginStatus.ATIVA if active > 0 else OriginStatus.ERRO
 
 
+class LatestReconciliationSummary(BaseModel):
+    """A conciliação ativa mais recente do cliente, como a lista mostra (86e3w9v8m).
+
+    Mesmo critério do painel (`created_at DESC, id DESC`, sessão não descartada).
+    `status` é `str` leniente, como em `ReconciliationSessionSummary`.
+    """
+
+    id: UUID
+    reference_month: date
+    status: str
+    created_at: datetime
+
+
 class ClientResponse(BaseModel):
     """Representação pública de um Client. NUNCA inclui campos `*_encrypted`/`*_iv`."""
 
@@ -325,6 +338,9 @@ class ClientResponse(BaseModel):
             "`erro` = há conexão, nenhuma ativa."
         ),
     )
+    # 86e3w9v8m — a coluna "Última conciliação" da lista. Vem do MESMO SELECT da
+    # linha (LATERAL), então lista e detalhe trazem igual; `null` = nenhuma sessão.
+    latest_reconciliation: LatestReconciliationSummary | None = None
 
     model_config = {"from_attributes": True}
 
