@@ -44,7 +44,6 @@ export const ACCOUNTING_LINE_REASON_LABELS: Record<string, string> = {
   // Só no plano exportado do Domínio (86e3gkd7y).
   codigo_ausente: 'Conta sem o código reduzido na primeira coluna',
   classificacao_ausente: 'Conta sem classificação',
-  classificacao_repetida: 'Classificação repetida no plano',
   grau_ausente: 'Conta sem o grau no fim da linha',
   grau_divergente: 'Grau diferente da profundidade da classificação',
   linha_irreconhecivel: 'Linha fora do padrão do plano exportado do Domínio',

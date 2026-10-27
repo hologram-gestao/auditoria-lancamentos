@@ -28,6 +28,10 @@ O que este módulo afirma (critérios de aceite da 16.1):
     depois do rodapé recusa o arquivo inteiro com ZERO linhas gravadas;
   - as duas amostras do Domínio saem da lista na ORDEM DO ARQUIVO (a classificação
     ordena como texto, como no Domínio, em collation `C`; 86e3n70p9);
+  - duas contas do Domínio com a MESMA classificação entram as duas (86e3uyzcf, amostra
+    da 4S): a chave é o código reduzido, e na lista elas saem lado a lado na ordem do
+    código (o `_chart_order`, que compara o código como texto), mesmo quando o arquivo
+    traz a outra antes;
   - o `.xls` que o Domínio grava (fixture anonimizada do arquivo real, 86e3n70p6), sem
     edição: 370 contas, 141 sintéticas, `layout=dominio`; `.xls` truncado recusa com
     `FORMATO_NAO_SUPORTADO` e motivo, sem gravar nada.
@@ -826,6 +830,47 @@ class TestOrdemDoArquivoDoDominio:
         assert primeira_diferenca is None, (
             f"fora da ordem do Domínio a partir da posição {primeira_diferenca}"
         )
+
+
+class TestClassificacaoRepetidaDoDominio:
+    """86e3uyzcf — o Domínio aceita duas contas analíticas com a mesma classificação e
+    códigos reduzidos diferentes (4S, 22/10/2026: 115 CONSTRUÇÕES e depois 114 EDIFÍCIOS,
+    as duas em `1.2.3.01.002`). A fixture mutada reproduz a forma: a linha 101 ganha a
+    classificação da 100, e os códigos trocam de lugar para o MAIOR vir antes no arquivo.
+    O desempate da lista é o código (`_chart_order`, comparado como texto: com o mesmo
+    número de dígitos, o menor primeiro), nunca a ordem do arquivo."""
+
+    async def test_as_duas_entram_e_saem_lado_a_lado_pelo_codigo(
+        self, client_with_db: AsyncClient, world: World, db_session: AsyncSession
+    ) -> None:
+        wb = load_workbook(_DOMINIO)
+        ws = wb.worksheets[0]
+        classification = ws["H100"].value
+        assert (ws["A100"].value, ws["A101"].value) == (868, 869)
+        ws["A100"], ws["A101"], ws["H101"] = 869, 868, classification
+        buffer = io.BytesIO()
+        wb.save(buffer)
+
+        await _login(client_with_db, world.admin)
+        resp = await _import(client_with_db, world.client, buffer.getvalue(), filename="p.xlsx")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["contas"] == 563
+        assert await _count(db_session, world.client.id) == 563
+
+        lidos: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            body = (
+                await client_with_db.get(_url(world.client), params={"pageSize": 100, "page": page})
+            ).json()
+            lidos += body["data"]
+            if page >= body["pagination"]["totalPages"]:
+                break
+            page += 1
+        codes = [i["code"] for i in lidos]
+        at = codes.index("868")
+        assert codes[at - 1 : at + 2] == ["867", "868", "869"]
+        assert lidos[at]["classification"] == lidos[at + 1]["classification"] == classification
 
 
 class TestPlanoDoDominioEmXls:

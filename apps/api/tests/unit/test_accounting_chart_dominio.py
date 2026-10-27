@@ -10,8 +10,10 @@ O que é provado aqui:
   nunca do fato de ter filhos (40 grupos sintéticos vazios);
 - linha com cara de conta DEPOIS do fim do bloco recusa o arquivo inteiro (nenhuma
   conta descartada calada), e o rodapé fica fora sem ser interpretado;
-- grau divergente, conta sem nome, classificação repetida e marca de tipo estranha
-  recusam com motivo FECHADO e número de linha, sem o texto da célula;
+- grau divergente, conta sem nome e marca de tipo estranha recusam com motivo FECHADO
+  e número de linha, sem o texto da célula;
+- classificação repetida entra (o Domínio aceita duas contas com a mesma
+  classificação; a chave é o código reduzido), e código repetido segue recusado;
 - a detecção só olha as primeiras linhas e exige o cabeçalho exato; CSV com o
   cabeçalho do Domínio e planilha irreconhecível seguem na recusa de hoje;
 - o modelo da plataforma (CSV e XLSX) continua importando, marcado `modelo`.
@@ -200,12 +202,19 @@ class TestRecusasDeLinha:
         refused = _refused_lines(_mutated(**cells))
         assert refused.details == {"lines": [{"line": _ROW, "reason": reason}], "total": 1}
 
-    def test_classificacao_repetida_marca_a_segunda(self) -> None:
+    def test_mesma_classificacao_entra_as_duas(self) -> None:
+        # O Domínio aceita duas contas com a mesma classificação e códigos diferentes
+        # (amostra da 4S, 22/10/2026: 114 EDIFÍCIOS e 115 CONSTRUÇÕES em 1.2.3.01.002).
         wb = load_workbook(io.BytesIO(_fixture_bytes()), read_only=True)
         classification = wb.worksheets[0][f"H{_ROW}"].value
         wb.close()
-        refused = _refused_lines(_mutated(**{f"H{_ROW + 1}": classification}))
-        assert refused.details["lines"] == [{"line": _ROW + 1, "reason": "classificacao_repetida"}]
+        parsed = parse_chart_sheet(_mutated(**{f"H{_ROW + 1}": classification}))
+        assert parsed.layout == "dominio"
+        assert len(parsed.rows) == 563
+        twins = [r for r in parsed.rows if r.line in (_ROW, _ROW + 1)]
+        assert [r.line for r in twins] == [_ROW, _ROW + 1]
+        assert twins[0].classification == twins[1].classification == classification
+        assert twins[0].code != twins[1].code
 
     def test_codigo_repetido_e_o_validador_do_modelo(self) -> None:
         refused = _refused_lines(_mutated(**{f"A{_ROW + 1}": 1}))  # 1 é o da linha 6
