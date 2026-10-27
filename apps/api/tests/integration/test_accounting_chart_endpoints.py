@@ -29,8 +29,9 @@ O que este módulo afirma (critérios de aceite da 16.1):
   - as duas amostras do Domínio saem da lista na ORDEM DO ARQUIVO (a classificação
     ordena como texto, como no Domínio, em collation `C`; 86e3n70p9);
   - duas contas do Domínio com a MESMA classificação entram as duas (86e3uyzcf, amostra
-    da 4S): a chave é o código reduzido, e na lista elas saem lado a lado, a de código
-    menor primeiro mesmo quando o arquivo traz a outra antes;
+    da 4S): a chave é o código reduzido, e na lista elas saem lado a lado na ordem do
+    código (o `_chart_order`, que compara o código como texto), mesmo quando o arquivo
+    traz a outra antes;
   - o `.xls` que o Domínio grava (fixture anonimizada do arquivo real, 86e3n70p6), sem
     edição: 370 contas, 141 sintéticas, `layout=dominio`; `.xls` truncado recusa com
     `FORMATO_NAO_SUPORTADO` e motivo, sem gravar nada.
@@ -836,7 +837,8 @@ class TestClassificacaoRepetidaDoDominio:
     códigos reduzidos diferentes (4S, 22/10/2026: 115 CONSTRUÇÕES e depois 114 EDIFÍCIOS,
     as duas em `1.2.3.01.002`). A fixture mutada reproduz a forma: a linha 101 ganha a
     classificação da 100, e os códigos trocam de lugar para o MAIOR vir antes no arquivo.
-    O desempate da lista é o código (`_chart_order`), nunca a ordem do arquivo."""
+    O desempate da lista é o código (`_chart_order`, comparado como texto: com o mesmo
+    número de dígitos, o menor primeiro), nunca a ordem do arquivo."""
 
     async def test_as_duas_entram_e_saem_lado_a_lado_pelo_codigo(
         self, client_with_db: AsyncClient, world: World, db_session: AsyncSession
