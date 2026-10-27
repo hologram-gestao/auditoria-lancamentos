@@ -143,6 +143,7 @@ function client(over: Partial<Client> = {}): Client {
     origin_status: 'ativa',
     card_posting_date_mode: 'purchase_date',
     omie_department_required: false,
+    latest_reconciliation: null,
     ...over,
   };
 }
@@ -298,5 +299,67 @@ describe('Clientes — encerrar pela lista (86e3fr9qj)', () => {
     render(<ClientesPage />);
 
     expect(screen.queryByRole('button', { name: /^Encerrar / })).not.toBeInTheDocument();
+  });
+});
+
+describe('Clientes — coluna "Última conciliação" (86e3w9v8m)', () => {
+  const SESSION_ID = '9f0c1d2e-3a4b-4c5d-8e6f-708192a3b4c5';
+
+  beforeEach(() => {
+    listState.data = {
+      data: [
+        client({
+          latest_reconciliation: {
+            id: SESSION_ID,
+            reference_month: '2026-08-01',
+            status: 'processing',
+            created_at: '2026-10-14T12:00:00Z',
+          },
+        }),
+        client({ id: 'c2', name: 'Sem Conciliação SA', latest_reconciliation: null }),
+      ],
+      pagination: { page: 1, pageSize: 20, total: 2, totalPages: 1 },
+    };
+  });
+
+  it('Categoria sai e "Última conciliação" entra entre Conciliações e Cadastrado em', () => {
+    authState.user = PLATFORM;
+    render(<ClientesPage />);
+
+    const headers = within(screen.getByRole('table'))
+      .getAllByRole('columnheader')
+      .map((th) => th.textContent?.trim());
+    expect(headers).not.toContain('Categoria');
+    const at = headers.indexOf('Última conciliação');
+    expect(at).toBeGreaterThan(-1);
+    expect(headers[at - 1]).toBe('Conciliações');
+    expect(headers[at + 1]).toBe('Cadastrado em');
+    // O filtro por categoria é independente da coluna e fica.
+    expect(screen.getByRole('combobox', { name: 'Filtrar por categoria' })).toBeInTheDocument();
+  });
+
+  it('mostra a data de criação como link para a sessão, com o selo de status', () => {
+    authState.user = ORG_ADMIN;
+    render(<ClientesPage />);
+
+    const link = screen.getByRole('link', {
+      name: 'Conciliação de Agosto de 2026, criada em 14 de out de 2026',
+    });
+    expect(link).toHaveTextContent('14 de out de 2026');
+    expect(link).toHaveAttribute('href', `/clientes/c1/conciliacao/${SESSION_ID}`);
+    const row = link.closest('tr');
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getByText('Em processamento')).toBeInTheDocument();
+  });
+
+  it('cliente sem conciliação mostra "—" na coluna', () => {
+    authState.user = ORG_ADMIN;
+    render(<ClientesPage />);
+
+    const headers = within(screen.getByRole('table')).getAllByRole('columnheader');
+    const col = headers.findIndex((th) => th.textContent?.trim() === 'Última conciliação');
+    const row = screen.getByText('Sem Conciliação SA').closest('tr') as HTMLElement;
+    const cells = within(row).getAllByRole('cell');
+    expect(cells[col]).toHaveTextContent(/^—$/);
   });
 });

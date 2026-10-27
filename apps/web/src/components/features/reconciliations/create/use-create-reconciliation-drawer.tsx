@@ -48,6 +48,8 @@ export function useCreateReconciliationDrawer(clientId: string): {
     // Refetch imediato: o item novo entra na lista sem reload manual, e o
     // polling de 3 s assume a partir daí.
     void queryClient.invalidateQueries({ queryKey: clientsKeys.reconciliationsAll(clientId) });
+    // A coluna "Última conciliação" da lista de clientes passa a ser esta (86e3w9v8m).
+    void queryClient.invalidateQueries({ queryKey: clientsKeys.lists });
   }
 
   return {

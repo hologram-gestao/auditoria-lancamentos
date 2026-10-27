@@ -33,10 +33,10 @@
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Archive, ChevronLeft, ChevronRight, Eye, Plus, Search, SquarePen } from 'lucide-react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
-import { CategoryBadge } from '@/components/features/client-categories/category-badge';
 import { ClientStatusBadge } from '@/components/features/clients/client-status-badge';
 import { CloseClientDialog } from '@/components/features/clients/close-client-dialog';
 import { OriginStatusBadge } from '@/components/features/clients/connections/connection-badges';
@@ -44,6 +44,7 @@ import { CreateClientModal } from '@/components/features/clients/create-client-m
 import { EditClientModal } from '@/components/features/clients/edit-client-modal';
 import { FavoriteToggle } from '@/components/features/clients/favorite-toggle';
 import { ManagerAccessHint } from '@/components/features/clients/manager-access-hint';
+import { ReconciliationStatusBadge } from '@/components/features/clients/reconciliation-status-badge';
 import {
   ALL_ORGANIZATIONS,
   OrganizationFilterSelect,
@@ -75,6 +76,7 @@ import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { ApiError } from '@/lib/api/client';
 import type { Client } from '@/lib/api/clients';
 import { hasPermission, homePathFor, isClientScoped, isPlatformScoped } from '@/lib/authz';
+import { formatReferenceMonth } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 
@@ -243,10 +245,10 @@ export default function ClientesPage() {
               </TableHead>
               <TableHead>Nome</TableHead>
               {isPlatform && <TableHead>Organização</TableHead>}
-              <TableHead>Categoria</TableHead>
               {isAdmin && <TableHead>Gerente Responsável</TableHead>}
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Conciliações</TableHead>
+              <TableHead>Última conciliação</TableHead>
               <TableHead>Cadastrado em</TableHead>
               <TableHead className="w-40 text-right">Ações</TableHead>
             </TableRow>
@@ -296,13 +298,6 @@ export default function ClientesPage() {
                       {c.organization.name}
                     </TableCell>
                   )}
-                  <TableCell>
-                    {c.category ? (
-                      <CategoryBadge name={c.category.name} tone={c.category.tone} />
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
                   {isAdmin && (
                     <TableCell className="text-muted-foreground whitespace-nowrap">
                       {c.responsible_manager?.name ?? '—'}
@@ -315,8 +310,11 @@ export default function ClientesPage() {
                   <TableCell className="text-muted-foreground text-right tabular-nums">
                     {c.reconciliation_count}
                   </TableCell>
+                  <TableCell>
+                    <LatestReconciliationCell clientId={c.id} latest={c.latest_reconciliation} />
+                  </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
-                    {format(new Date(c.created_at), "dd 'de' MMM 'de' yyyy", { locale: ptBR })}
+                    {format(new Date(c.created_at), CREATED_AT_FORMAT, { locale: ptBR })}
                   </TableCell>
                   <TableCell className="text-right">
                     <div
@@ -456,6 +454,39 @@ export default function ClientesPage() {
       {closing !== null && (
         <CloseClientDialog open={closeOpen} onOpenChange={setCloseOpen} client={closing} />
       )}
+    </div>
+  );
+}
+
+const CREATED_AT_FORMAT = "dd 'de' MMM 'de' yyyy";
+
+/**
+ * "Última conciliação" (86e3w9v8m): a data de CRIAÇÃO da sessão mais recente,
+ * no formato de "Cadastrado em", como link para ela, e o selo de status. O
+ * critério de "mais recente" é o do painel e vem do servidor; a competência só
+ * entra no nome acessível do link (decisão do Pedro sobre o mockup).
+ */
+function LatestReconciliationCell({
+  clientId,
+  latest,
+}: {
+  clientId: string;
+  latest: Client['latest_reconciliation'];
+}) {
+  if (!latest) return <span className="text-muted-foreground">—</span>;
+  const createdAt = format(new Date(latest.created_at), CREATED_AT_FORMAT, { locale: ptBR });
+  return (
+    <div className="flex items-center gap-2 whitespace-nowrap">
+      <Link
+        href={`/clientes/${clientId}/conciliacao/${latest.id}`}
+        // O clique da linha leva à lista de conciliações; este leva à sessão.
+        onClick={(e) => e.stopPropagation()}
+        aria-label={`Conciliação de ${formatReferenceMonth(latest.reference_month)}, criada em ${createdAt}`}
+        className="text-link text-sm underline-offset-4 hover:underline"
+      >
+        {createdAt}
+      </Link>
+      <ReconciliationStatusBadge status={latest.status} />
     </div>
   );
 }

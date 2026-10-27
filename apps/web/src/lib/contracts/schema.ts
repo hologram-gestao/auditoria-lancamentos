@@ -3768,6 +3768,7 @@ export interface components {
              * @default sem_origem
              */
             origin_status: components["schemas"]["OriginStatus"];
+            latest_reconciliation?: components["schemas"]["LatestReconciliationSummary"] | null;
             /** Accounts */
             accounts?: components["schemas"]["app__modules__clients__schemas__BankAccountResponse"][];
             /** Accounts Synced At */
@@ -3887,6 +3888,7 @@ export interface components {
              * @default sem_origem
              */
             origin_status: components["schemas"]["OriginStatus"];
+            latest_reconciliation?: components["schemas"]["LatestReconciliationSummary"] | null;
         };
         /**
          * ClientSummaryEnvelope
@@ -5432,6 +5434,32 @@ export interface components {
              * @description `true` = o cliente já tem mapeamento salvo (a tela mostra o resumo).
              */
             hasMapping: boolean;
+        };
+        /**
+         * LatestReconciliationSummary
+         * @description A conciliação ativa mais recente do cliente, como a lista mostra (86e3w9v8m).
+         *
+         *     Mesmo critério do painel (`created_at DESC, id DESC`, sessão não descartada).
+         *     `status` é `str` leniente, como em `ReconciliationSessionSummary`.
+         */
+        LatestReconciliationSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Reference Month
+             * Format: date
+             */
+            reference_month: string;
+            /** Status */
+            status: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** LatestSessionSummary */
         LatestSessionSummary: {
