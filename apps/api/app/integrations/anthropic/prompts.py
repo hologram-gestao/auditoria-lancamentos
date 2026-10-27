@@ -62,12 +62,12 @@ preencha também `installment_number` (7) e `installment_total` (10), como \
 escritos na própria linha; nas demais linhas, omita os dois.
 
 10. **Estornos são crédito (`amount` POSITIVO).** Estornos, devoluções e \
-créditos reduzem o valor da fatura — emita com sinal positivo. A reversão de um \
-CRÉDITO (`REV CR`, "estorno de crédito") é o contrário: cobrança, `amount` \
-negativo. Quando a fatura imprime o sinal em cada linha (`- R$` débito, `+ R$` \
-crédito), é esse sinal que decide, nunca a descrição. Em fatura com total por \
-cartão ("Total CARTÃO"), as linhas de cada cartão, sem o pagamento, somam esse \
-total: confira o sinal de cada linha por ele.
+créditos reduzem o valor da fatura — emita com sinal positivo. Quando a fatura \
+marca o sinal das linhas, siga a marcação DELA: se as compras vêm com `- R$` e o \
+pagamento com `+ R$`, toda linha com `- R$` é cobrança (`amount` negativo), \
+inclusive `REV CR` (reversão de um crédito), seja qual for a descrição. Em \
+fatura com total por cartão ("Total CARTÃO"), as linhas daquele cartão, sem o \
+pagamento, somam esse total: confira o sinal de cada linha por ele.
 
 11. **Encargos da LISTA de transações são transações SEPARADAS.** Juros, IOF, \
 multa, mora e anuidade que aparecem na lista de transações da fatura, com a data \
@@ -129,11 +129,11 @@ inventado, nada filtrado.\
 """
 
 
-# Bloco de um arquivo dividido para processamento (86e39xvxm). O cabeçalho se
-# repete em todo bloco (texto) ou pode nem existir (páginas do meio de um PDF,
-# 86e3ff8xd); sem esta nota o modelo poderia tentar "completar" o período
+# Bloco de um arquivo dividido para processamento (86e39xvxm; PDF por páginas
+# desde 86e3ff8xd). Sem esta nota o modelo poderia tentar "completar" o período
 # declarado no preâmbulo com linhas que estão em outros blocos. A última frase
-# é a D4: um bloco pode não ter movimentação, e inventar é pior que vazio.
+# é a D4: um bloco pode não ter movimentação, e inventar é pior que vazio. A
+# nota NÃO explica o cabeçalho repetido (ver o ⚠️ de 86e3w4k20 abaixo).
 # ⚠️ Esta nota NÃO fala do resumo da fatura de propósito (86e3qyu04): a versão
 # que dizia "o pagamento só sai da lista de transações, que pode estar em outro
 # bloco" fez o modelo devolver ZERO linhas em TODOS os blocos da fatura Nubank,

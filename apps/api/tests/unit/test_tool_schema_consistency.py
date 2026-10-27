@@ -154,10 +154,14 @@ def test_regra_10_o_sinal_impresso_e_o_total_do_cartao_decidem_86e3w4k20() -> No
     """86e3w4k20 — "REV CR COMPRA INTERNAC - R$ 150,00" (reversão de um crédito) é
     cobrança, mas a regra 10 ("estornos são crédito") a fazia sair +150 em 8 de 8
     rodadas. Mandar só obedecer ao sinal impresso acertou 2 de 8; conferir pelo
-    "Total CARTÃO" daquele cartão acertou 8 de 8."""
+    "Total CARTÃO" daquele cartão acertou 8 de 8. A marcação que vale é a da
+    PRÓPRIA fatura (compras `- R$`, pagamento `+ R$` no Inter), nunca uma convenção
+    universal: há emissor que imprime o estorno com o menos."""
     regra_10 = SYSTEM_PROMPT.split("10. **")[1].split("11. **")[0]
     assert "Estornos são crédito" in regra_10
     assert "`REV CR`" in regra_10
-    assert "cobrança, `amount` negativo" in regra_10
+    assert "siga a marcação DELA" in regra_10
+    assert "cobrança (`amount` negativo)" in regra_10
+    assert "estorno de crédito" not in regra_10
     assert '"Total CARTÃO"' in regra_10
     assert "sem o pagamento" in regra_10
