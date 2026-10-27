@@ -1256,6 +1256,13 @@ const CLIENT_DETAIL = {
   // 86e3n70q0 (bloco C) — Contas a Pagar: sem rateio obrigatório e sem padrão.
   omie_department_required: false,
   omie_default_supplier_code: null,
+  // 86e3w9v8m — "Última conciliação" da lista: a sessão criada por último.
+  latest_reconciliation: {
+    id: SESSION_ID,
+    reference_month: '2026-06-01',
+    status: 'reviewing',
+    created_at: '2026-10-14T12:00:00Z',
+  },
 };
 
 /**
@@ -1270,6 +1277,7 @@ const OTHER_ORG_CLIENT = {
   responsible_manager: null,
   manager_count: 0,
   is_favorite: false,
+  latest_reconciliation: null,
 };
 
 /** Uma linha por status — é o badge que precisa estar legível nos três casos. */
@@ -7762,13 +7770,28 @@ for (const vp of VIEWPORTS) {
       await analyze(page, `exclusão bloqueada de categoria em uso (${vp.label})`);
     });
 
-    test('lista de clientes: chip e filtro de categoria (86e34jd8m)', async ({ page }) => {
+    test('lista de clientes: Última conciliação no lugar da Categoria, filtro mantido (86e3w9v8m)', async ({
+      page,
+    }) => {
       await page.goto('/clientes');
       await expect(page.getByRole('heading', { name: 'Clientes', level: 1 })).toBeVisible();
       const linha = page.getByRole('row', { name: /Cliente Exemplo Ltda/ });
-      await expect(linha.getByText('Fintech')).toBeVisible();
+      // A coluna Categoria saiu (só mostrava "—"); o FILTRO por categoria fica.
+      await expect(page.getByRole('columnheader', { name: 'Categoria' })).toHaveCount(0);
+      await expect(page.getByRole('columnheader', { name: 'Última conciliação' })).toBeVisible();
+      // A data de criação é o link para a sessão; a competência fica no nome acessível.
+      const ultima = linha.getByRole('link', {
+        name: 'Conciliação de Junho de 2026, criada em 14 de out de 2026',
+      });
+      await expect(ultima).toHaveText('14 de out de 2026');
+      await expect(ultima).toHaveAttribute(
+        'href',
+        `/clientes/${CLIENT_ID}/conciliacao/${SESSION_ID}`,
+      );
+      await expect(linha.getByText('Processada')).toBeVisible();
+      await shot(page, `clientes-ultima-conciliacao-${slug}`);
 
-      await analyze(page, `lista de clientes com chip de categoria (${vp.label})`);
+      await analyze(page, `lista de clientes com última conciliação (${vp.label})`);
 
       const filtro = page.getByRole('combobox', { name: 'Filtrar por categoria' });
       await expect(filtro).toBeVisible();

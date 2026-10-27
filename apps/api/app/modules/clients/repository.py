@@ -30,6 +30,7 @@ from sqlalchemy import (
     func,
     literal,
     select,
+    true,
     update,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -73,6 +74,15 @@ from app.db.models import (
 from app.modules.client_connections.legacy_fallback import legacy_origin_available
 
 
+class LatestReconciliationRow(NamedTuple):
+    """Só o que a lista mostra da última conciliação: id, mês, status e criação."""
+
+    id: UUID
+    reference_month: date
+    status: str
+    created_at: datetime
+
+
 class ClientRow(NamedTuple):
     """Linha agregada da listagem: cliente + manager responsável + contagem.
 
@@ -97,6 +107,9 @@ class ClientRow(NamedTuple):
     #: uma consulta por linha. Vêm de subqueries escalares na MESMA query.
     connections_total: int = 0
     connections_active: int = 0
+    #: 86e3w9v8m: a sessão ativa mais recente, pelo MESMO critério do painel
+    #: (`ClientSummaryRepository.latest_session`). `None` = nenhuma conciliação.
+    latest_reconciliation: LatestReconciliationRow | None = None
 
 
 class _FavoriteJoin(NamedTuple):
@@ -237,6 +250,26 @@ def _client_row_query(
     connections_total_sq, connections_active_sq = _connection_counts_subqueries(
         include_legacy_origin=include_legacy_origin
     )
+    # 86e3w9v8m: a sessão ativa mais recente, no critério do painel
+    # (`ClientSummaryRepository.latest_session`: `created_at DESC, id DESC`), para
+    # lista e painel nunca discordarem. LATERAL correlacionado por `Client.id`:
+    # uma linha por cliente, sem query por linha, e o alcance vem da query externa.
+    latest_recon = (
+        select(
+            ReconciliationSession.id,
+            ReconciliationSession.reference_month,
+            ReconciliationSession.status,
+            ReconciliationSession.created_at,
+        )
+        .where(
+            ReconciliationSession.client_id == Client.id,
+            ReconciliationSession.deleted_at.is_(None),
+        )
+        .order_by(ReconciliationSession.created_at.desc(), ReconciliationSession.id.desc())
+        .limit(1)
+        .correlate(Client)
+        .lateral("latest_recon")
+    )
     stmt = (
         select(
             Client,
@@ -248,6 +281,10 @@ def _client_row_query(
             Organization,
             connections_total_sq.label("connections_total"),
             connections_active_sq.label("connections_active"),
+            latest_recon.c.id,
+            latest_recon.c.reference_month,
+            latest_recon.c.status,
+            latest_recon.c.created_at,
         )
         .outerjoin(ClientAssignment, _responsible_join_clause())
         .outerjoin(manager, manager.id == ClientAssignment.user_id)
@@ -255,6 +292,7 @@ def _client_row_query(
         .outerjoin(ClientCategory, ClientCategory.id == Client.category_id)
         # Interno: todo cliente tem organização (NOT NULL, 86e36ec7p).
         .join(Organization, Organization.id == Client.organization_id)
+        .outerjoin(latest_recon, true())
     )
     return _ClientRowQuery(stmt=stmt, is_favorite=favorite.is_favorite)
 
@@ -271,6 +309,13 @@ def _to_client_row(row: Row[Any]) -> ClientRow:
         organization=row[6],
         connections_total=int(row[7] or 0),
         connections_active=int(row[8] or 0),
+        latest_reconciliation=(
+            LatestReconciliationRow(
+                id=row[9], reference_month=row[10], status=row[11], created_at=row[12]
+            )
+            if row[9] is not None
+            else None
+        ),
     )
 
 

@@ -42,6 +42,8 @@ Cenários cobertos (≥ 15):
 from __future__ import annotations
 
 import json
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -58,7 +60,14 @@ from app.core.crypto_service import (
     load_client_cipher,
 )
 from app.core.security import hash_password
-from app.db.models import Client, ClientAssignment, ClientConnection, User, UserRole
+from app.db.models import (
+    Client,
+    ClientAssignment,
+    ClientConnection,
+    ReconciliationSession,
+    User,
+    UserRole,
+)
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
@@ -254,6 +263,158 @@ class TestListClients:
         assert body["pagination"]["pageSize"] == 2
         assert body["pagination"]["total"] == 5
         assert body["pagination"]["totalPages"] == 3
+
+
+async def _seed_session(
+    session: AsyncSession,
+    *,
+    client: Client,
+    creator: User,
+    reference_month: date,
+    created_at: datetime,
+    status: str = "reviewing",
+    deleted_at: datetime | None = None,
+) -> ReconciliationSession:
+    """Sessão com `created_at` EXPLÍCITO: na mesma transação o `now()` do banco
+    devolve o mesmo instante, e a ordem "criada por último" viraria desempate
+    por id."""
+    sess = ReconciliationSession(
+        client_id=client.id,
+        created_by=creator.id,
+        omie_conta_id=42,
+        reference_month=reference_month,
+        date_tolerance_days=0,
+        status=status,
+        balance_start=Decimal("0.00"),
+        created_at=created_at,
+        deleted_at=deleted_at,
+    )
+    session.add(sess)
+    await session.flush()
+    return sess
+
+
+class TestLatestReconciliation:
+    """86e3w9v8m: a coluna "Última conciliação" sai do MESMO SELECT da linha.
+
+    Critério do painel (`ClientSummaryRepository.latest_session`): a sessão
+    ativa CRIADA por último, de qualquer mês, nunca a de competência maior.
+    O cliente nasce sem origem para o detalhe não ir ao provedor (S9).
+    """
+
+    async def _seed(self, db_session: AsyncSession) -> tuple[User, Client]:
+        admin = await _seed_user(db_session, email=ADMIN_EMAIL, role=UserRole.ADMIN)
+        client = Client(name="Com conciliações", active=True, created_by=admin.id)
+        db_session.add(client)
+        await db_session.flush()
+        return admin, client
+
+    async def test_lista_e_detalhe_trazem_a_criada_por_ultimo(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin, client = await self._seed(db_session)
+        await _seed_session(
+            db_session,
+            client=client,
+            creator=admin,
+            reference_month=date(2026, 9, 1),
+            created_at=datetime(2026, 10, 1, 12, 0, tzinfo=UTC),
+        )
+        agosto = await _seed_session(
+            db_session,
+            client=client,
+            creator=admin,
+            reference_month=date(2026, 8, 1),
+            created_at=datetime(2026, 10, 14, 9, 30, tzinfo=UTC),
+            status="processing",
+        )
+        # Descartada depois das duas: não conta, mesmo sendo a mais nova.
+        await _seed_session(
+            db_session,
+            client=client,
+            creator=admin,
+            reference_month=date(2026, 7, 1),
+            created_at=datetime(2026, 10, 20, 9, 0, tzinfo=UTC),
+            deleted_at=datetime(2026, 10, 21, 9, 0, tzinfo=UTC),
+        )
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        lista = await client_with_db.get("/api/v1/clients")
+        assert lista.status_code == 200, lista.text
+        (row,) = lista.json()["data"]
+        latest = row["latest_reconciliation"]
+        assert latest == {
+            "id": str(agosto.id),
+            "reference_month": "2026-08-01",
+            "status": "processing",
+            "created_at": latest["created_at"],
+        }
+        assert datetime.fromisoformat(latest["created_at"]) == datetime(
+            2026, 10, 14, 9, 30, tzinfo=UTC
+        )
+        # A descartada também fica fora da contagem, como sempre.
+        assert row["reconciliation_count"] == 2
+
+        detalhe = await client_with_db.get(f"/api/v1/clients/{client.id}")
+        assert detalhe.status_code == 200, detalhe.text
+        assert detalhe.json()["latest_reconciliation"] == latest
+
+    async def test_cliente_sem_sessao_devolve_null(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        _admin, client = await self._seed(db_session)
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        lista = await client_with_db.get("/api/v1/clients")
+        assert lista.status_code == 200, lista.text
+        assert lista.json()["data"][0]["latest_reconciliation"] is None
+        detalhe = await client_with_db.get(f"/api/v1/clients/{client.id}")
+        assert detalhe.json()["latest_reconciliation"] is None
+
+    async def test_so_sessao_descartada_devolve_null(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        admin, client = await self._seed(db_session)
+        await _seed_session(
+            db_session,
+            client=client,
+            creator=admin,
+            reference_month=date(2026, 9, 1),
+            created_at=datetime(2026, 10, 1, 12, 0, tzinfo=UTC),
+            deleted_at=datetime(2026, 10, 2, 12, 0, tzinfo=UTC),
+        )
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        lista = await client_with_db.get("/api/v1/clients")
+        assert lista.json()["data"][0]["latest_reconciliation"] is None
+
+    async def test_uma_linha_por_cliente_com_varias_sessoes(
+        self, client_with_db: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """O LATERAL com LIMIT 1 não multiplica a linha nem o total da paginação."""
+        admin, client = await self._seed(db_session)
+        outro = Client(name="Sem conciliação", active=True, created_by=admin.id)
+        db_session.add(outro)
+        await db_session.flush()
+        for mes in (6, 7, 8):
+            await _seed_session(
+                db_session,
+                client=client,
+                creator=admin,
+                reference_month=date(2026, mes, 1),
+                created_at=datetime(2026, 10, mes, 12, 0, tzinfo=UTC),
+            )
+        await _login_as(client_with_db, ADMIN_EMAIL)
+
+        resp = await client_with_db.get("/api/v1/clients")
+        body = resp.json()
+        assert body["pagination"]["total"] == 2
+        por_nome = {c["name"]: c for c in body["data"]}
+        assert len(body["data"]) == 2
+        assert por_nome["Com conciliações"]["latest_reconciliation"]["reference_month"] == (
+            "2026-08-01"
+        )
+        assert por_nome["Sem conciliação"]["latest_reconciliation"] is None
 
 
 # ----------------------------------------------------------------------

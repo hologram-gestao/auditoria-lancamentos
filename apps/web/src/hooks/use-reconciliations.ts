@@ -119,6 +119,8 @@ export function useReprocessReconciliation(sessionId: string, clientId?: string)
           queryKey: clientsKeys.reconciliationsAll(clientId),
         });
       }
+      // O selo da "Última conciliação" na lista de clientes muda (86e3w9v8m).
+      void queryClient.invalidateQueries({ queryKey: clientsKeys.lists });
     },
   });
 }
@@ -162,6 +164,8 @@ export function useCancelReconciliation(sessionId: string, clientId: string) {
         queryKey: clientsKeys.reconciliationsAll(clientId),
       });
       void queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+      // O selo da "Última conciliação" na lista de clientes muda (86e3w9v8m).
+      void queryClient.invalidateQueries({ queryKey: clientsKeys.lists });
       invalidateClientSummary(queryClient, clientId);
     },
   });
