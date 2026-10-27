@@ -14,13 +14,18 @@ concurrency:
 permissions:
   contents: read
 
+# Imagem FIXA, nunca `ubuntu-latest`: em 27/10/2026 o GitHub passou o `latest` para o
+# Ubuntu 26.04 e o Playwright 1.59.1 não tem Chromium para ele ("Playwright does not
+# support chromium on ubuntu26.04-x64"), o que derrubou os três jobs de a11y na `main`
+# com a MESMA árvore que tinha passado no PR horas antes. Subir a imagem é decisão
+# explícita, junto com a versão do Playwright que a suporta.
 jobs:
   # ============================================================
   # Path filtering: decide quais jobs rodam baseado no diff
   # ============================================================
   changes:
     name: Detect changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       api: ${{ steps.filter.outputs.api }}
       web: ${{ steps.filter.outputs.web }}
@@ -52,7 +57,7 @@ jobs:
     name: API (lint · type · test)
     needs: changes
     if: ${{ needs.changes.outputs.api == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: apps/api
@@ -121,7 +126,7 @@ jobs:
     name: Web (lint · type · test)
     needs: changes
     if: ${{ needs.changes.outputs.web == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
@@ -170,7 +175,7 @@ jobs:
     name: Web (a11y · axe-core · ${{ matrix.theme }})
     needs: changes
     if: ${{ needs.changes.outputs.web == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Build até 9 min + suíte de 636 cenários em ~12 min + instalação (medido no run 36773705921, 30/09/2026).
     timeout-minutes: 35
 
@@ -324,7 +329,7 @@ jobs:
     name: CI
     if: always()
     needs: [changes, api, web, web_a11y]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Summary
         run: |
