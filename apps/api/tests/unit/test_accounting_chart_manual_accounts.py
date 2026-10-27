@@ -259,7 +259,14 @@ class TestCriar:
             {"client_id": client.id, "account_id": account.id, "operacao": "criada", "campos": []}
         ]
         assert _SECRET_NAME not in repr(logs)
-        assert "663" not in repr(logs)
+        # O código da conta não vai para o log. A conferência é campo a campo e pula os
+        # ids: são UUIDs aleatórios e podem conter "663" por acaso (um em cada ~100 runs;
+        # foi o que derrubou o CI da `main` em 27/10/2026 com `account_id` ...3926633b...).
+        for entry in logs:
+            for key, value in entry.items():
+                if key.endswith("_id"):
+                    continue
+                assert "663" not in str(value), (key, value)
 
     async def test_codigo_existente_e_409_com_codigo_e_sem_gravar(self) -> None:
         repo, events = _FakeRepo(), _Events()
