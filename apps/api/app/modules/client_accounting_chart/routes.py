@@ -206,7 +206,7 @@ async def list_accounting_chart(
         "reason}]` com `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, "
         "`codigo_repetido`, `nome_vazio`, `nome_longo`, `tipo_invalido`, "
         "`classificacao_longa` e, no export do Domínio, também `codigo_ausente`, "
-        "`classificacao_ausente`, `classificacao_repetida`, `grau_ausente`, "
+        "`classificacao_ausente`, `grau_ausente`, "
         "`grau_divergente`, `linha_irreconhecivel` e `conta_fora_do_bloco` (linha com "
         "cara de conta depois do fim das contas: o arquivo inteiro é recusado), e "
         "`details.total`) — a resposta nunca traz o conteúdo de uma célula."
