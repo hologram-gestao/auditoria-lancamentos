@@ -31,6 +31,7 @@
  *     pela primeira vez, mas mantemos a tela renderizando.
  */
 
+import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ArrowLeft, Check, Loader2, RefreshCw, XOctagon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -38,6 +39,7 @@ import { toast } from 'sonner';
 
 import { reconciliationsPath } from '@/components/features/navigation/nav-items';
 import { Button } from '@/components/ui/button';
+import { clientsKeys } from '@/hooks/use-clients';
 import { useSessionStatus } from '@/hooks/use-reconciliations';
 import { ApiError } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
@@ -76,6 +78,7 @@ const STEPS: readonly StepDef[] = [
 
 export function ProcessingScreen({ clientId, sessionId }: ProcessingScreenProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [timedOut, setTimedOut] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const startedAtRef = useRef<number>(Date.now());
@@ -108,9 +111,12 @@ export function ProcessingScreen({ clientId, sessionId }: ProcessingScreenProps)
   useEffect(() => {
     const status = statusQuery.data?.status;
     if (status === 'reviewing' || status === 'done') {
+      // O selo da "Última conciliação" na lista de clientes deixa de ser
+      // "Em processamento" (86e3w9v8m).
+      void queryClient.invalidateQueries({ queryKey: clientsKeys.lists });
       router.replace(`/clientes/${clientId}/conciliacao/${sessionId}`);
     }
-  }, [statusQuery.data?.status, router, clientId, sessionId]);
+  }, [statusQuery.data?.status, router, clientId, sessionId, queryClient]);
 
   // Toast informativo em erro de fetch (rede caiu, 5xx, etc). NÃO desmonta
   // a tela — o último `data` segue válido. Reset da flag quando o próximo
