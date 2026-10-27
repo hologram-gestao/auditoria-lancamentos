@@ -128,3 +128,36 @@ def test_parcela_esta_na_tool_no_prompt_e_no_schema() -> None:
     assert "installment_number" in regra_9
     assert "preserve esse texto na descrição" in regra_9
     assert "omita" in regra_9
+
+
+def test_nota_de_bloco_nao_autoriza_pular_pagina_nem_linha_86e3w4k20() -> None:
+    """86e3w4k20 — a fatura do Inter da 4S (8 páginas, 4 blocos) saía com 7 de 22
+    linhas: no bloco das páginas 3 e 4 o modelo pulava a página 3 inteira, e o bloco
+    da página 5 (um cartão com UMA linha e o "Total CARTÃO") voltava vazio. Medido com
+    o bloco isolado e a tool forçada: sem a nota de bloco, 21 linhas e a linha da
+    página 5 em 4 de 4; com a nota antiga, 7 e 0. Saíram dela o "cabeçalho se repete
+    em todos os blocos", o "Extraia apenas" e o exemplo de bloco vazio "(só totais,
+    avisos, saldos ou rodapé)": a lista de um cartão termina num total, e a página que
+    abre o bloco repete o cabeçalho da fatura. Ficam o "sem completar com linhas de
+    outros blocos" e a lista vazia sem inventar (D4)."""
+    from app.integrations.anthropic.prompts import PART_NOTE_TEMPLATE
+
+    assert "todas as movimentações listadas nas páginas deste bloco" in PART_NOTE_TEMPLATE
+    assert "sem completar com linhas de outros blocos" in PART_NOTE_TEMPLATE
+    assert "lista vazia" in PART_NOTE_TEMPLATE
+    assert "nunca invente linhas" in PART_NOTE_TEMPLATE
+    for removido in ("cabeçalho", "Extraia apenas", "só totais", "rodapé"):
+        assert removido not in PART_NOTE_TEMPLATE, removido
+
+
+def test_regra_10_o_sinal_impresso_e_o_total_do_cartao_decidem_86e3w4k20() -> None:
+    """86e3w4k20 — "REV CR COMPRA INTERNAC - R$ 150,00" (reversão de um crédito) é
+    cobrança, mas a regra 10 ("estornos são crédito") a fazia sair +150 em 8 de 8
+    rodadas. Mandar só obedecer ao sinal impresso acertou 2 de 8; conferir pelo
+    "Total CARTÃO" daquele cartão acertou 8 de 8."""
+    regra_10 = SYSTEM_PROMPT.split("10. **")[1].split("11. **")[0]
+    assert "Estornos são crédito" in regra_10
+    assert "`REV CR`" in regra_10
+    assert "cobrança, `amount` negativo" in regra_10
+    assert '"Total CARTÃO"' in regra_10
+    assert "sem o pagamento" in regra_10

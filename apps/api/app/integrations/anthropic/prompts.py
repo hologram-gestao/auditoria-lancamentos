@@ -62,7 +62,12 @@ preencha também `installment_number` (7) e `installment_total` (10), como \
 escritos na própria linha; nas demais linhas, omita os dois.
 
 10. **Estornos são crédito (`amount` POSITIVO).** Estornos, devoluções e \
-créditos reduzem o valor da fatura — emita com sinal positivo.
+créditos reduzem o valor da fatura — emita com sinal positivo. A reversão de um \
+CRÉDITO (`REV CR`, "estorno de crédito") é o contrário: cobrança, `amount` \
+negativo. Quando a fatura imprime o sinal em cada linha (`- R$` débito, `+ R$` \
+crédito), é esse sinal que decide, nunca a descrição. Em fatura com total por \
+cartão ("Total CARTÃO"), as linhas de cada cartão, sem o pagamento, somam esse \
+total: confira o sinal de cada linha por ele.
 
 11. **Encargos da LISTA de transações são transações SEPARADAS.** Juros, IOF, \
 multa, mora e anuidade que aparecem na lista de transações da fatura, com a data \
@@ -135,13 +140,17 @@ inventado, nada filtrado.\
 # inclusive no bloco que tem a lista. A regra do resumo mora só na regra 12 do
 # system prompt, e sem exigir "data impressa ao lado da linha": no Nubank a data
 # é o cabeçalho do dia acima do grupo, e essa exigência também esvaziava blocos.
+# ⚠️ 86e3w4k20: a nota também NÃO diz que "o cabeçalho se repete", não diz
+# "Extraia apenas" nem dá "só totais" como exemplo de bloco vazio. Com essas
+# frases, na fatura do Inter (uma lista por cartão, cada uma fechada por "Total
+# CARTÃO", e o cabeçalho da fatura no topo de toda página) o modelo pulava a
+# primeira página do bloco e devolvia vazio o bloco de um cartão com uma linha só:
+# 7 de 22 linhas. Medido com o bloco isolado; mudança aqui se mede do mesmo jeito.
 PART_NOTE_TEMPLATE = """ \
 Este é o bloco {index} de {total} do MESMO documento, dividido só para \
-processamento: o cabeçalho se repete em todos os blocos ou aparece só no \
-primeiro. Extraia apenas as movimentações listadas neste bloco, sem completar \
-com linhas de outros blocos. Se este bloco não tiver nenhuma movimentação (só \
-totais, avisos, saldos ou rodapé), devolva `transactions` como lista vazia; \
-nunca invente linhas.\
+processamento. Extraia todas as movimentações listadas nas páginas deste bloco, \
+sem completar com linhas de outros blocos. Se este bloco não tiver nenhuma \
+movimentação, devolva `transactions` como lista vazia; nunca invente linhas.\
 """
 
 # Documento já identificado numa chamada curta com a primeira página (86e3ff8xd,

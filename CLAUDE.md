@@ -701,7 +701,16 @@
      "Multa", "Total de compras") são totalizadores e não são extraídas (regra 11 do
      prompt, 86e3tpu7r): extraída, a da Cora virava uma compra a mais com o ano
      inventado e, por ser a mais antiga, tirava o vencimento errado do alcance da
-     correção. Encargo só vira linha na LISTA de transações. Todo
+     correção. Encargo só vira linha na LISTA de transações. **A nota de cada bloco
+     manda extrair TODAS as movimentações das páginas dele e não fala de cabeçalho,
+     de "apenas" nem de bloco "só com totais"** (86e3w4k20): com essas frases, na
+     fatura do Inter (cabeçalho da fatura no topo de toda página, uma lista por
+     cartão fechada pelo "Total CARTÃO") o modelo pulava a primeira página do bloco e
+     esvaziava o bloco de um cartão com uma linha só, e a fatura da 4S saía com 7 de
+     22 linhas. E o **sinal da linha da fatura se confere pelo total do cartão**
+     (regra 10): a reversão de um crédito (`REV CR`) é cobrança, e o sinal impresso
+     decide, nunca a palavra "estorno". Mudança na nota de bloco se mede com o bloco
+     isolado e a tool forçada, além do arquivo inteiro. Todo
      `/parse` loga `parse_checksum` (`applicable`, `ok`, `expected`, `computed`,
      `difference` como texto de 2 casas, `blocks`, `account_type`): o próximo "não
      fecha" se lê no log de dev, sem print.
@@ -1946,6 +1955,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.113, 27/10/2026. **A fatura do Inter dividida em blocos deixou de perder compras (86e3w4k20, subtask 2 do épico 86e3uyzc9, implantação da Contribute).** A fatura da 4S (8 páginas, 4 blocos, três cartões) saía com 7 de 22 linhas e "os saldos não fecham" (diferença 2.679,26 = página 3 + página 5). Medido na mesma sessão contra o PDF real: baseline 5 de 5 rodadas com 7 linhas (`[0, 7, 0, 0]` por bloco); o PDF inteiro sem dividir trazia as 22 linhas mas a de R$ 150,00 do cartão 4400 (`REV CR COMPRA INTERNAC - R$ 150,00`) como crédito, 3 de 3. A causa da perda foi isolada com o bloco sozinho e a tool forçada: sem a nota de bloco, 21 linhas e a linha da página 5 em 4 de 4; com ela, 7 e 0. Uma regra nova no system prompt sobre "a lista inteira, de todos os cartões" acertou 4 de 5 e depois 1 de 5 e foi descartada; tirar só a frase do cabeçalho não mudou nada. A nota perdeu "o cabeçalho se repete", "Extraia apenas" e o exemplo "(só totais, avisos, saldos ou rodapé)" e ganhou "todas as movimentações listadas nas páginas deste bloco". O sinal: a regra 10 sem mudança deu +150 em 8 de 8; "o sinal impresso decide" sozinho, 2 de 8; com a conferência pelo "Total CARTÃO" de cada cartão, sem o pagamento, 8 de 8. Aceite: 10 de 10 rodadas com 22 linhas, 1 pagamento, 5.697,97 = 5.697,97 e a linha de −150,00. Não-regressão antes e depois, iguais: fatura Cora 5 + 5 (5 compras, ok, vencimento 2026-10-13, parcela 3/6, nenhum IOF do resumo), extrato Cora 3 + 3 (13 linhas) e um CSV SINTÉTICO de 320 linhas dividido em 4 blocos, 2 + 2 (320, ok), porque nenhuma planilha real da máquina passa do limiar. A fatura Nubank da DM, onde a nota antiga nasceu, não está na máquina. Tool sem mudança. Dois unitários novos em `test_tool_schema_consistency.py`. Endpoints sensíveis (**137**), matriz (**29**) e pares de AAD (**18**) iguais, sem migration._
 
 _Versão 1.112, 26/10/2026. **O plano exportado do Domínio deixou de recusar classificação repetida (86e3uyzcf, subtask 1 do épico 86e3uyzc9, implantação da Contribute).** Na reunião de 22/10 o plano da 4S (`.xls`, 896 contas) foi recusado inteiro por uma linha: 114 EDIFÍCIOS e 115 CONSTRUÇÕES com a mesma classificação `1.2.3.01.002`, que o próprio Domínio aceita. A regra "classificação repetida recusa" nasceu da amostra única da 86e3gkd7y e era o único lugar do sistema que tratava a classificação como única (o modelo, a conta manual, o banco e a reimportação já casavam só pelo código). `convert_dominio` perdeu o `seen_classifications` e o motivo `classificacao_repetida` saiu do vocabulário nos seis lugares (tipo, descrição da rota, doc do modelo, contrato, rótulo e teste do front); `codigo_repetido` segue recusado pelo validador do modelo. Na lista, o empate de classificação é desempatado pelo código (`_chart_order`), então 114 vem antes de 115 mesmo com o arquivo trazendo 115 primeiro, e isso fica. O arquivo da 4S não foi versionado (banner com razão social e CNPJ): a prova é a fixture anonimizada mutada, no unitário e na integração. Endpoints sensíveis (**137**), matriz (**29**) e pares de AAD (**18**) iguais, sem migration._
 
