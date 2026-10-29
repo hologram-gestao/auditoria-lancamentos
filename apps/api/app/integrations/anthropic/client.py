@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import base64
 import time
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
 from anthropic import (
     APIConnectionError,
@@ -113,7 +113,7 @@ _IDENTIFY_MAX_OUTPUT_TOKENS = 256
 # identificação) e é cobrado como saída. Esta é a PONTE para o Sonnet 5: o
 # claude-sonnet-5-5 recusa `disabled` com 400, e a migração definitiva troca
 # por `between_tools` junto com o fim do tool_choice forçado.
-THINKING_DISABLED: dict[str, str] = {"type": "disabled"}
+THINKING_DISABLED: Final[dict[str, str]] = {"type": "disabled"}
 
 
 class _RetryableAnthropicError(Exception):
@@ -227,7 +227,7 @@ class AnthropicClient:
             document_kind: descrição curta usada no user prompt. Ex:
                 `"extrato bancário em PDF"`, `"fatura de cartão CSV"`.
             model: override opcional do modelo. `None` usa o default do
-                construtor (ex. `claude-sonnet-4-5`).
+                construtor (`ANTHROPIC_MODEL_DEFAULT`, hoje `claude-sonnet-5`).
             part: `(índice, total)` quando `content` é um bloco de um arquivo
                 dividido (`parse_chunking`, `parse_pdf_pages`); entra como nota
                 no user prompt, e em modo bloco a validação aceita
