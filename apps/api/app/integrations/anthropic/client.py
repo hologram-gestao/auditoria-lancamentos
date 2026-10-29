@@ -106,6 +106,15 @@ _MAX_OUTPUT_TOKENS = 32768
 # barata e rápida (~5 s) antes dos blocos.
 _IDENTIFY_MAX_OUTPUT_TOKENS = 256
 
+# Pensamento DESLIGADO de forma explícita nas chamadas com tool_choice forçado
+# (extração, identificação e qualificação). No claude-sonnet-4-5 omitir o
+# parâmetro já rodava sem pensamento; no claude-sonnet-5, omitir passa a rodar
+# pensamento adaptativo, que conta dentro do `max_tokens` (comeria os 256 da
+# identificação) e é cobrado como saída. Esta é a PONTE para o Sonnet 5: o
+# claude-sonnet-5-5 recusa `disabled` com 400, e a migração definitiva troca
+# por `between_tools` junto com o fim do tool_choice forçado.
+THINKING_DISABLED: dict[str, str] = {"type": "disabled"}
+
 
 class _RetryableAnthropicError(Exception):
     """Erro transitório (5xx, 429 ou conexão) — sinaliza para Tenacity reagendar."""
@@ -489,6 +498,7 @@ class AnthropicClient:
                 system=system_blocks,
                 tools=tools,
                 tool_choice={"type": "tool", "name": tool_name},
+                thinking=THINKING_DISABLED,
                 messages=[{"role": "user", "content": user_content}],
             )
         except APITimeoutError as exc:

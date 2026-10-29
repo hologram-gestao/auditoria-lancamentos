@@ -45,6 +45,11 @@ class TestValidateParseOutputConfig:
     async def test_at_cap_exactly_passes(self) -> None:
         await validate_parse_output_config(_settings_stub(configured=64_000))  # type: ignore[arg-type]
 
+    async def test_claude_sonnet_5_aceita_acima_do_teto_do_4_5(self) -> None:
+        # 100.000 recusaria a subida no 4.5 (64.000) e cabe no 5 (128.000).
+        stub = _settings_stub(configured=100_000, model="claude-sonnet-5")
+        await validate_parse_output_config(stub)  # type: ignore[arg-type]
+
     async def test_unknown_model_without_key_does_not_block(self) -> None:
         # Modelo fora da tabela + sem chave → cap desconhecido → não bloqueia.
         stub = _settings_stub(configured=999_999, model="modelo-inexistente-xyz")
@@ -55,6 +60,25 @@ class TestResolveModelOutputCap:
     async def test_known_model_uses_static_table(self) -> None:
         cap = await resolve_model_output_cap("claude-sonnet-4-5", _settings_stub(configured=1))  # type: ignore[arg-type]
         assert cap == KNOWN_MODEL_OUTPUT_CAPS["claude-sonnet-4-5"] == 64_000
+
+    async def test_claude_sonnet_5_resolve_sem_rede(self) -> None:
+        # Sem chave no stub: se o modelo não estivesse na tabela, a resposta
+        # seria None (a Models API nem é tentada sem chave).
+        cap = await resolve_model_output_cap("claude-sonnet-5", _settings_stub(configured=1))  # type: ignore[arg-type]
+        assert cap == KNOWN_MODEL_OUTPUT_CAPS["claude-sonnet-5"] == 128_000
+
+    def test_modelo_padrao_do_settings_esta_na_tabela(self) -> None:
+        # O padrão do código (claude-sonnet-5 desde 86e3wg8ek) valida offline na
+        # subida; um padrão fora da tabela dependeria da Models API para isso.
+        from app.core.config import Settings
+
+        default = Settings.model_fields["ANTHROPIC_MODEL_DEFAULT"].default
+        assert default == "claude-sonnet-5"
+        assert default in KNOWN_MODEL_OUTPUT_CAPS
+
+    async def test_claude_sonnet_4_5_continua_na_tabela(self) -> None:
+        # Voltar pela variável de ambiente segue offline até a retirada.
+        assert KNOWN_MODEL_OUTPUT_CAPS["claude-sonnet-4-5"] == 64_000
 
     async def test_unknown_model_without_key_returns_none(self) -> None:
         cap = await resolve_model_output_cap("modelo-xyz", _settings_stub(configured=1))  # type: ignore[arg-type]

@@ -32,7 +32,7 @@ from app.db.models import (
     GlossaryEntryKind,
     SessionAccountType,
 )
-from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.anthropic.client import THINKING_DISABLED, AnthropicClient
 from app.modules.glossary.schemas import GlossaryEntryPlain, GlossarySnapshot
 from app.modules.reconciliations.qualification.schemas import (
     QualificationPair,
@@ -423,6 +423,9 @@ async def _analyze_batch(
         system=system_blocks,
         tools=[_QUALIFY_TOOL],
         tool_choice={"type": "tool", "name": QUALIFY_TOOL_NAME},
+        # Mesma ponte da extração (client.THINKING_DISABLED): sem pensamento,
+        # como no claude-sonnet-4-5, para não dividir os 8192 com o pensamento.
+        thinking=THINKING_DISABLED,
         messages=[
             {
                 "role": "user",
