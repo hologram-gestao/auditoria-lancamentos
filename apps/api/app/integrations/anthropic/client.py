@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import base64
 import time
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
 from anthropic import (
     APIConnectionError,
@@ -105,6 +105,15 @@ _MAX_OUTPUT_TOKENS = 32768
 # curtos (banco e tipo de conta). Pequeno de propósito — é o que torna a chamada
 # barata e rápida (~5 s) antes dos blocos.
 _IDENTIFY_MAX_OUTPUT_TOKENS = 256
+
+# Pensamento DESLIGADO de forma explícita nas chamadas com tool_choice forçado
+# (extração, identificação e qualificação). No claude-sonnet-4-5 omitir o
+# parâmetro já rodava sem pensamento; no claude-sonnet-5, omitir passa a rodar
+# pensamento adaptativo, que conta dentro do `max_tokens` (comeria os 256 da
+# identificação) e é cobrado como saída. Esta é a PONTE para o Sonnet 5: o
+# claude-sonnet-5-5 recusa `disabled` com 400, e a migração definitiva troca
+# por `between_tools` junto com o fim do tool_choice forçado.
+THINKING_DISABLED: Final[dict[str, str]] = {"type": "disabled"}
 
 
 class _RetryableAnthropicError(Exception):
@@ -218,7 +227,7 @@ class AnthropicClient:
             document_kind: descrição curta usada no user prompt. Ex:
                 `"extrato bancário em PDF"`, `"fatura de cartão CSV"`.
             model: override opcional do modelo. `None` usa o default do
-                construtor (ex. `claude-sonnet-4-5`).
+                construtor (`ANTHROPIC_MODEL_DEFAULT`, hoje `claude-sonnet-5`).
             part: `(índice, total)` quando `content` é um bloco de um arquivo
                 dividido (`parse_chunking`, `parse_pdf_pages`); entra como nota
                 no user prompt, e em modo bloco a validação aceita
@@ -489,6 +498,7 @@ class AnthropicClient:
                 system=system_blocks,
                 tools=tools,
                 tool_choice={"type": "tool", "name": tool_name},
+                thinking=THINKING_DISABLED,
                 messages=[{"role": "user", "content": user_content}],
             )
         except APITimeoutError as exc:

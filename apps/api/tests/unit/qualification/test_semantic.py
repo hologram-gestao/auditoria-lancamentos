@@ -237,6 +237,26 @@ async def test_analyze_pairs_uses_max_output_tokens_8192() -> None:
     assert _MAX_OUTPUT_TOKENS == 8192
 
 
+async def test_analyze_pairs_desliga_pensamento_e_mantem_tool_forcada() -> None:
+    # Ponte para o claude-sonnet-5 (86e3wg8ek): sem `thinking` explícito o
+    # modelo rodaria pensamento adaptativo dentro dos 8192 do lote.
+    p1 = _pair()
+    fake = _FakeAnthropic(
+        side_effect=[_tool_response([{"pair_id": p1.pair_id, "status": "ok", "motivo": "ok"}])]
+    )
+    client = AnthropicClient(
+        api_key=SecretStr("fake"),
+        model="claude-sonnet-5",
+        timeout=10.0,
+        anthropic_client=fake,
+    )
+    await analyze_pairs([p1], anthropic_client=client)
+    call = fake.messages.calls[0]
+    assert call["thinking"] == {"type": "disabled"}
+    assert call["tool_choice"] == {"type": "tool", "name": QUALIFY_TOOL_NAME}
+    assert call["model"] == "claude-sonnet-5"
+
+
 async def test_investment_account_injects_aplicacao_rule() -> None:
     """Report #2: conta aplicação injeta o bloco de semântica invertida no
     system prompt (APLICACAO=entrada, RESGATE=saída) como 2º bloco."""

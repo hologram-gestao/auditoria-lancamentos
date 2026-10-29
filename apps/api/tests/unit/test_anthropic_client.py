@@ -323,6 +323,25 @@ class TestExtractMovementsHappyPath:
         }
         assert kwargs["model"] == "claude-test"
 
+    async def test_pensamento_desligado_explicito(self) -> None:
+        # Ponte para o claude-sonnet-5 (86e3wg8ek): omitir `thinking` passaria a
+        # rodar pensamento adaptativo, que divide o `max_tokens` com a resposta.
+        # O literal fica no teste de propósito: é o contrato com a API.
+        fake = _FakeAnthropic(side_effect=_ok_message())
+        client = _make_client(fake)
+
+        await client.extract_movements(
+            content=b"%PDF-1.7\n...",
+            mime_type="application/pdf",
+            document_kind="extrato em PDF",
+        )
+
+        assert fake.messages.calls[0]["thinking"] == {"type": "disabled"}
+        assert fake.messages.calls[0]["tool_choice"] == {
+            "type": "tool",
+            "name": EXTRACT_MOVEMENTS_TOOL_NAME,
+        }
+
     async def test_pdf_sent_as_base64_document(self) -> None:
         fake = _FakeAnthropic(side_effect=_ok_message())
         client = _make_client(fake)
@@ -662,6 +681,9 @@ class TestIdentifyDocument:
         assert call["tools"] == [IDENTIFY_DOCUMENT_TOOL]
         assert call["tool_choice"] == {"type": "tool", "name": IDENTIFY_DOCUMENT_TOOL_NAME}
         assert call["max_tokens"] <= 1024
+        # Sem pensamento: com os 256 tokens da identificação, o pensamento
+        # adaptativo do claude-sonnet-5 truncaria a resposta (86e3wg8ek).
+        assert call["thinking"] == {"type": "disabled"}
         assert "identify_document" in call["system"][0]["text"]
         assert call["system"][0]["text"] != SYSTEM_PROMPT
         content = call["messages"][0]["content"]

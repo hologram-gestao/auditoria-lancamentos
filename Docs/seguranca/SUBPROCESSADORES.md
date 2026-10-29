@@ -51,10 +51,15 @@ cruzamento com o ERP é código determinístico, sem IA (CLAUDE.md §5.6).
 **Para quê.** Transformar o arquivo do banco em linhas estruturadas, e apontar
 classificação suspeita para uma pessoa revisar. A IA não decide match nem classificação.
 
-**Modelo.** O padrão do código é `claude-sonnet-4-5`, com `claude-opus-4-6` como
-alternativa (`apps/api/app/core/config.py:122-123`). O pipeline de deploy não sobrescreve
-essas variáveis, mas uma variável de ambiente no Cloud Run sobrescreveria:
-**a confirmar** no serviço, se algum dia alguém mudou o modelo à mão.
+**Modelo.** O padrão do código é `claude-sonnet-5` desde 29/10/2026 (antes,
+`claude-sonnet-4-5`, que a Anthropic retira da API em 30/11/2026), com `claude-opus-4-6`
+declarado como alternativa e sem uso no código (`apps/api/app/core/config.py:122-123`). As
+três chamadas (extração, identificação do PDF dividido e qualificação) vão com pensamento
+desligado. O pipeline de deploy não sobrescreve essas variáveis, mas uma variável
+`ANTHROPIC_MODEL_DEFAULT` no serviço ou nos jobs do Cloud Run sobrescreveria. Na conferência
+de 29/10/2026 o `gcloud` desta máquina estava sem autenticação válida, então segue **a
+confirmar** se ela existe no `auditoria-api-dev` e nos cinco jobs; o log da API na subida
+mostra o modelo em uso (`parse_output_cap_ok`, campo `model`).
 
 **Termos, conferidos em 05/10/2026:**
 
@@ -87,8 +92,9 @@ essas variáveis, mas uma variável de ambiente no Cloud Run sobrescreveria:
   [Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
 - **Onde roda.** Dado em repouso: "Currently, `"us"` is the only available workspace
   geo." Inferência: o padrão é `"global"`, que pode rodar em qualquer geografia; a única
-  restrição oferecida é `"us"`, e o parâmetro só existe nos modelos 4.6 em diante (o
-  `claude-sonnet-4-5` responde 400 se recebê-lo). O código não passa `inference_geo`.
+  restrição oferecida é `"us"`, e o parâmetro só existe nos modelos 4.6 em diante: o
+  `claude-sonnet-5`, modelo em uso, o aceita (o `claude-sonnet-4-5`, padrão anterior,
+  respondia 400). O código continua sem passar `inference_geo`.
   Não há região na América do Sul. Fonte:
   [Data residency](https://platform.claude.com/docs/en/manage-claude/data-residency).
   Para a LGPD, isso é transferência internacional de dados.
