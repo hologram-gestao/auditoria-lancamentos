@@ -28,11 +28,14 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 # Cap de SAÍDA (`max_tokens` da Models API) dos modelos que o produto usa.
-# `claude-sonnet-4-5` (ANTHROPIC_MODEL_DEFAULT) → 64.000 (doc oficial do
-# modelo). Atualizar esta tabela ao trocar de modelo — é a mesma informação
-# que a Models API expõe em `.max_tokens`.
+# `claude-sonnet-5` (ANTHROPIC_MODEL_DEFAULT desde 86e3wg8ek) → 128.000 e
+# `claude-sonnet-4-5` (o padrão anterior, mantido para voltar pela variável de
+# ambiente até a retirada em 30/11/2026) → 64.000, pela doc oficial de cada
+# modelo. Atualizar esta tabela ao trocar de modelo — é a mesma informação que
+# a Models API expõe em `.max_tokens`.
 KNOWN_MODEL_OUTPUT_CAPS: dict[str, int] = {
     "claude-sonnet-4-5": 64_000,
+    "claude-sonnet-5": 128_000,
 }
 
 

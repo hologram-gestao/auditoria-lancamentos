@@ -119,7 +119,7 @@ class Settings(BaseSettings):
 
     # ---------- Integrações ----------
     ANTHROPIC_API_KEY: SecretStr = Field(default=SecretStr(""))
-    ANTHROPIC_MODEL_DEFAULT: str = "claude-sonnet-4-5"
+    ANTHROPIC_MODEL_DEFAULT: str = "claude-sonnet-5"
     ANTHROPIC_MODEL_FALLBACK: str = "claude-opus-4-6"
     # Timeout total para o parsing IA (S9). Subido de 60s → 150s: extratos reais
     # grandes (ex.: 143 transações) levam ~75s na extração via Claude e estouravam
