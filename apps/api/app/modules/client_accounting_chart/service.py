@@ -77,6 +77,7 @@ from app.modules.client_accounting_chart.parties import (
     parse_typed_document,
     raise_party_lines,
 )
+from app.modules.client_accounting_chart.recognizer import ColumnMapping
 from app.modules.client_accounting_chart.repository import (
     AccountingChartFilters,
     AccountingChartRepository,
@@ -156,6 +157,8 @@ class ChartPreview:
     diff: ChartDiff
     names: DecryptedNames
     absent_in_use: frozenset[UUID]
+    #: Só com o tipo pela hierarquia (mapeamento, 86e3ydjz4): (sintéticas, analíticas).
+    derived_types: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -422,7 +425,12 @@ class AccountingChartService:
     # ------------------------------------------------------------------ escrita
 
     async def import_sheet(
-        self, client: Client, *, actor: CurrentUser, content: bytes
+        self,
+        client: Client,
+        *,
+        actor: CurrentUser,
+        content: bytes,
+        mapping: ColumnMapping | None = None,
     ) -> ChartImportResult:
         """Importa (ou reimporta) o plano do cliente — tudo ou nada.
 
@@ -437,7 +445,7 @@ class AccountingChartService:
         """
         _require_open(client)
         # CPU síncrona fora do event loop (limites do leitor checados antes de iterar).
-        parsed = await run_in_threadpool(parse_chart_sheet, content)
+        parsed = await run_in_threadpool(parse_chart_sheet, content, mapping=mapping)
         rows = parsed.rows
 
         await self._repo.lock_client_chart(client.id)
@@ -489,7 +497,9 @@ class AccountingChartService:
         await self._emit_imported(client, result)
         return result
 
-    async def preview_sheet(self, client: Client, *, content: bytes) -> ChartPreview:
+    async def preview_sheet(
+        self, client: Client, *, content: bytes, mapping: ColumnMapping | None = None
+    ) -> ChartPreview:
         """O que `import_sheet` faria com esta planilha — SEM GRAVAR (86e3qhhrm).
 
         O MESMO leitor (os dois layouts e as mesmas recusas 422) e a MESMA diferença
@@ -498,7 +508,7 @@ class AccountingChartService:
         (navegação no próprio tenant, §4.7).
         """
         _require_open(client)
-        parsed = await run_in_threadpool(parse_chart_sheet, content)
+        parsed = await run_in_threadpool(parse_chart_sheet, content, mapping=mapping)
         existing = await self._repo.list_all(client.id)
         current = await self.decrypt_names(client, existing)
         diff = diff_chart(parsed.rows, existing, names=current.names, failed=current.failed)
@@ -523,6 +533,7 @@ class AccountingChartService:
             diff=diff,
             names=current,
             absent_in_use=frozenset(in_use),
+            derived_types=parsed.derived_types,
         )
 
     async def export_csv(self, client: Client) -> tuple[bytes, int]:

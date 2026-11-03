@@ -21,13 +21,20 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from openpyxl import Workbook, load_workbook
+from pydantic import ValidationError as PydanticValidationError
 
-from app.core.exceptions import FileHeaderMismatchError, FileLinesInvalidError
+from app.core.exceptions import (
+    ChartMappingRequiredError,
+    FileHeaderMismatchError,
+    FileLinesInvalidError,
+    ValidationAppError,
+)
 from app.db.models.client_accounting_account import AccountingAccountType
 from app.modules.client_accounting_chart import recognizer
 from app.modules.client_accounting_chart.recognizer import (
     MIN_FILL_RATIO,
     MIN_FORM_RATIO,
+    ColumnMapping,
     as_classification,
     as_integer,
     convert_by_columns,
@@ -35,6 +42,7 @@ from app.modules.client_accounting_chart.recognizer import (
     is_document_like,
     recognize_columns,
 )
+from app.modules.client_accounting_chart.schemas import ChartColumnMappingRequest
 from app.modules.client_accounting_chart.sheet import (
     MODEL_COLUMNS,
     parse_chart_sheet,
@@ -185,9 +193,12 @@ class TestGeneralidadeDominio:
 
 
 class TestRecusaQueNomeiaPapeis:
+    """Desde a 86e3ydjz4, bloco de contas que o conteúdo não decide pede MAPEAMENTO (a
+    frase do que foi reconhecido e do que falta segue a mesma)."""
+
     def test_so_codigo_e_nome_diz_o_que_reconheceu_e_o_que_falta(self) -> None:
         content = _xlsx([["Código", "Nome"], [1, "ATIVO"], [2, "CAIXA"], [3, "BANCO"]])
-        with pytest.raises(FileHeaderMismatchError) as caught:
+        with pytest.raises(ChartMappingRequiredError) as caught:
             parse_chart_sheet(content)
         error = caught.value
         assert error.details["recognizedRoles"] == ["codigo", "nome"]
@@ -199,7 +210,7 @@ class TestRecusaQueNomeiaPapeis:
 
     def test_duas_colunas_de_texto_empatadas_sem_cabecalho_ficam_em_aberto(self) -> None:
         content = _xlsx([[1, "ATIVO X", "Alfa", "S"], [2, "CAIXA Y", "Beta", "A"]])
-        with pytest.raises(FileHeaderMismatchError) as caught:
+        with pytest.raises(ChartMappingRequiredError) as caught:
             parse_chart_sheet(content)
         error = caught.value
         assert error.details["recognizedRoles"] == ["codigo", "tipo"]
@@ -356,3 +367,115 @@ class TestPredicados:
         recognition = recognize_columns(rows)
         assert recognition is not None
         assert "codigo" in recognition.missing
+
+
+def _tract_without_type() -> bytes:
+    """A fixture da Tract sem a coluna de tipo e sem o cabeçalho: o conteúdo não decide."""
+    wb = load_workbook(io.BytesIO(_TRACT.read_bytes()))
+    ws = wb.worksheets[0]
+    ws.delete_cols(3)
+    ws.delete_rows(5)
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+class TestMapeamento:
+    """A etapa de mapeamento (86e3ydjz4): o perfil das colunas e a leitura pela escolha."""
+
+    def test_sem_cabecalho_as_duas_colunas_de_texto_vem_sem_papel(self) -> None:
+        content = _xlsx([[i, f"CONTA {i}", f"FANTASIA {i}"] for i in range(1, 21)])
+        with pytest.raises(ChartMappingRequiredError) as caught:
+            parse_chart_sheet(content)
+        error = caught.value
+        assert error.status_code == 422
+        columns = error.details["colunas"]
+        assert [(c["indice"], c["formaDetectada"], c["papelSugerido"]) for c in columns] == [
+            (0, "inteiro", "codigo"),
+            (1, "texto", None),
+            (2, "texto", None),
+        ]
+        assert all(c["cabecalho"] is None and c["preenchimento"] == 100 for c in columns)
+        assert error.user_message.endswith("Diga o que é cada coluna para continuar.")
+        assert "CONTA" not in repr(error.details)
+        assert "FANTASIA" not in repr(error.details)
+
+    def test_o_cabecalho_sai_mas_nenhum_valor_de_celula(self) -> None:
+        with pytest.raises(ChartMappingRequiredError) as caught:
+            parse_chart_sheet(_tract_without_type())
+        rendered = repr(caught.value.details)
+        assert "de exemplo" not in rendered
+        assert "99.999" not in rendered
+        headers = [c["cabecalho"] for c in caught.value.details["colunas"]]
+        # O cabeçalho foi apagado: logo acima do bloco ficou a linha em branco e, acima
+        # dela, o BANNER (no original, a razão social). Linha de uma célula só nunca é
+        # cabeçalho, então nenhum texto sai.
+        assert headers == [None] * len(headers)
+        assert caught.value.details["missingRoles"] == ["tipo"]
+
+    def test_tipo_pela_hierarquia_so_por_escolha_e_com_a_contagem(self) -> None:
+        mapping = ColumnMapping(
+            roles={"codigo": 0, "classificacao": 1, "grau": 2, "nome": 4},
+            type_by_hierarchy=True,
+        )
+        parsed = parse_chart_sheet(_tract_without_type(), mapping=mapping)
+        assert parsed.layout == "mapeado"
+        assert len(parsed.rows) == 1850
+        # A hierarquia NÃO devolve as 180 do arquivo: 28 grupos sintéticos da Tract não
+        # têm conta abaixo e viram analíticas. É por isso que o tipo nunca é inferido
+        # em silêncio.
+        assert parsed.derived_types == (152, 1698)
+        by_file = {r.code: r.account_type for r in parse_chart_sheet(_TRACT.read_bytes()).rows}
+        changed = [r for r in parsed.rows if r.account_type is not by_file[r.code]]
+        assert len(changed) == 28
+        assert all(by_file[r.code] is AccountingAccountType.SINTETICA for r in changed)
+
+    def test_o_mapeamento_vence_o_reconhecimento(self) -> None:
+        mapping = ColumnMapping(roles={"codigo": 0, "classificacao": 1, "tipo": 2, "nome": 5})
+        parsed = parse_chart_sheet(_TRACT.read_bytes(), mapping=mapping)
+        assert parsed.layout == "mapeado"
+        assert parsed.derived_types is None
+        assert _got(parsed.rows) == _expected(_TRACT_EXPECTED)
+
+    def test_indice_fora_das_colunas_do_bloco_e_400(self) -> None:
+        mapping = ColumnMapping(roles={"codigo": 0, "tipo": 2, "nome": 40})
+        with pytest.raises(ValidationAppError):
+            parse_chart_sheet(_TRACT.read_bytes(), mapping=mapping)
+
+    def test_mapeamento_em_csv_e_400(self) -> None:
+        mapping = ColumnMapping(roles={"codigo": 0, "tipo": 2, "nome": 1})
+        with pytest.raises(ValidationAppError):
+            parse_chart_sheet(b"codigo_reduzido;nome;tipo\n1;ATIVO;S\n", mapping=mapping)
+
+    def test_mapeamento_errado_cai_nas_linhas(self) -> None:
+        # Nome no lugar do código: todo código é inválido, e a recusa é por linha.
+        mapping = ColumnMapping(roles={"codigo": 5, "classificacao": 1, "tipo": 2, "nome": 0})
+        with pytest.raises(FileLinesInvalidError):
+            parse_chart_sheet(_TRACT.read_bytes(), mapping=mapping)
+
+
+class TestPedidoDeMapeamento:
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            '{"colunas": {"codigo": 0, "nome": 0, "tipo": 1}}',
+            '{"colunas": {"codigo": 0, "nome": 2}}',
+            '{"colunas": {"codigo": 0, "nome": 2, "tipo": 1}, "tipoPelaHierarquia": true}',
+            '{"colunas": {"codigo": 0, "nome": 2}, "tipoPelaHierarquia": true}',
+            '{"colunas": {"codigo": 0, "nome": 2, "tipo": 1, "natureza": 3}}',
+            '{"colunas": {"codigo": 0, "nome": 2, "tipo": 99}}',
+            '{"colunas": {"codigo": -1, "nome": 2, "tipo": 1}}',
+            '{"colunas": {"codigo": 0, "nome": 2, "tipo": 1}, "outro": 1}',
+        ],
+    )
+    def test_forma_invalida(self, raw: str) -> None:
+        with pytest.raises(PydanticValidationError):
+            ChartColumnMappingRequest.model_validate_json(raw)
+
+    def test_forma_valida(self) -> None:
+        request = ChartColumnMappingRequest.model_validate_json(
+            '{"colunas": {"codigo": 0, "classificacao": 1, "nome": 2}, "tipoPelaHierarquia": true}'
+        )
+        mapping = request.to_mapping()
+        assert mapping.type_by_hierarchy is True
+        assert dict(mapping.roles) == {"codigo": 0, "classificacao": 1, "nome": 2}

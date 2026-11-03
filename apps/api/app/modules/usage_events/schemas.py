@@ -691,7 +691,7 @@ class FechamentoProduzidoProps(_StrictProps):
 #: De onde veio a planilha do plano contábil (86e3gkd7y). Espelho de
 #: `client_accounting_chart.sheet.ChartLayout` (o teste da métrica compara os dois):
 #: importar de lá puxaria o leitor de planilha para dentro do módulo de eventos.
-ChartImportLayout = Literal["modelo", "dominio", "reconhecido"]
+ChartImportLayout = Literal["modelo", "dominio", "reconhecido", "mapeado"]
 
 
 class PlanoContabilImportadoProps(_StrictProps):
@@ -702,7 +702,8 @@ class PlanoContabilImportadoProps(_StrictProps):
     cliente que não vieram na planilha; desde a 86e3qhhrm a reimportação não inativa,
     e a `contas_inativadas` das linhas anteriores virou estas duas), e `layout` (86e3gkd7y):
     de onde veio a planilha, `modelo` da plataforma, export nativo do `dominio` ou
-    planilha lida pelo conteúdo das colunas (`reconhecido`, 86e3ydjyq), em
+    planilha lida pelo conteúdo das colunas (`reconhecido`, 86e3ydjyq) ou pelo
+    mapeamento escolhido na tela (`mapeado`, 86e3ydjz4), em
     vocabulário FECHADO (é o que mede quanto o export nativo é usado). Nenhum `str`
     livre: código e nome de conta não têm onde caber (o guardrail anti-PII trava).
     """

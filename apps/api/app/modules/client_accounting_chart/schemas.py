@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.db.models.client_accounting_account import (
     MAX_ACCOUNTING_ACCOUNT_CLASSIFICATION_CHARS,
@@ -22,11 +22,13 @@ from app.db.models.client_accounting_account import (
 )
 from app.modules.client_accounting_chart.omie_sheet import problems_details
 from app.modules.client_accounting_chart.parties import PartyLineProblem
+from app.modules.client_accounting_chart.recognizer import AccountRole, ColumnMapping
 from app.modules.client_accounting_chart.service import (
     ACCOUNTING_ACCOUNT_UNDECIPHERABLE,
     AccountPatch,
     not_postable_reason,
 )
+from app.modules.client_file_ingestion.reader import MAX_FILE_COLUMNS
 from app.modules.users.schemas import PaginationMeta
 
 if TYPE_CHECKING:
@@ -228,14 +230,67 @@ class ChartPreviewAbsentAccount(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+#: De onde veio a planilha (espelho de `sheet.ChartLayout`; o teste compara os dois).
+ChartLayoutName = Literal["modelo", "dominio", "reconhecido", "mapeado"]
+
+#: Teto do campo `mapeamento` (JSON) no multipart: cinco papéis e um booleano cabem
+#: com folga; acima disso não é um mapeamento.
+MAX_CHART_MAPPING_CHARS = 1000
+
+
+class ChartColumnMappingRequest(BaseModel):
+    """O mapeamento das colunas que a pessoa escolheu na tela (campo `mapeamento`).
+
+    Uma coluna por papel e um papel por coluna; `codigo` e `nome` obrigatórios; `tipo`
+    obrigatório salvo com `tipoPelaHierarquia`, que exige a `classificacao` (a conta que
+    tem outra abaixo é sintética) e não convive com uma coluna de tipo. Forma inválida é
+    o 400 genérico.
+    """
+
+    colunas: dict[AccountRole, int] = Field(
+        description="Papel → índice da coluna (0 = primeira coluna da planilha)."
+    )
+    tipo_pela_hierarquia: bool = Field(default=False, alias="tipoPelaHierarquia")
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    @model_validator(mode="after")
+    def _coherent(self) -> ChartColumnMappingRequest:
+        columns = self.colunas
+        if any(not 0 <= col < MAX_FILE_COLUMNS for col in columns.values()):
+            raise ValueError("índice de coluna fora do limite")
+        if len(set(columns.values())) != len(columns):
+            raise ValueError("a mesma coluna em dois papéis")
+        if "codigo" not in columns or "nome" not in columns:
+            raise ValueError("código e nome são obrigatórios")
+        if self.tipo_pela_hierarquia:
+            if "classificacao" not in columns or "tipo" in columns:
+                raise ValueError(
+                    "tipo pela hierarquia exige classificação e nenhuma coluna de tipo"
+                )
+        elif "tipo" not in columns:
+            raise ValueError("tipo obrigatório")
+        return self
+
+    def to_mapping(self) -> ColumnMapping:
+        return ColumnMapping(roles=self.colunas, type_by_hierarchy=self.tipo_pela_hierarquia)
+
+
+class ChartDerivedTypes(BaseModel):
+    """Quantas contas o tipo pela hierarquia marcou como sintéticas e como analíticas."""
+
+    sinteticas: int = Field(ge=0)
+    analiticas: int = Field(ge=0)
+
+
 class ChartImportPreviewPayload(BaseModel):
     """O que a importação desta planilha faria — nada é gravado."""
 
-    layout: Literal["modelo", "dominio", "reconhecido"] = Field(
+    layout: ChartLayoutName = Field(
         description=(
-            "`modelo` da plataforma, o plano exportado do `dominio` ou `reconhecido`: a "
-            "planilha lida pelo CONTEÚDO das colunas (código, classificação, tipo, grau e "
-            "nome), com as colunas que a plataforma não usa ignoradas."
+            "`modelo` da plataforma, o plano exportado do `dominio`, `reconhecido` (a "
+            "planilha lida pelo CONTEÚDO das colunas, com as que a plataforma não usa "
+            "ignoradas) ou `mapeado` (lida pelo mapeamento escolhido na tela)."
         )
     )
     contas: int = Field(ge=0, description="Contas na planilha.")
@@ -279,6 +334,14 @@ class ChartImportPreviewPayload(BaseModel):
     list_limit: int = Field(
         alias="listLimit", description="O teto de cada lista; as contagens são as reais."
     )
+    tipo_derivado: ChartDerivedTypes | None = Field(
+        alias="tipoDerivado",
+        description=(
+            "Só quando o mapeamento pediu o tipo pela hierarquia (`tipoPelaHierarquia`): "
+            "quantas contas ficaram sintéticas (têm conta abaixo) e quantas analíticas. "
+            "`null` nos outros casos."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -288,8 +351,14 @@ class ChartImportPreviewPayload(BaseModel):
         names = preview.names
         limit = CHART_PREVIEW_LIST_LIMIT
         absent = sorted(diff.absent, key=lambda a: a.id not in preview.absent_in_use)
+        derived = preview.derived_types
         return cls(
             layout=preview.layout,
+            tipo_derivado=(
+                ChartDerivedTypes(sinteticas=derived[0], analiticas=derived[1])
+                if derived is not None
+                else None
+            ),
             contas=preview.accounts,
             contas_novas=len(diff.new_rows),
             contas_alteradas=len(diff.changed),

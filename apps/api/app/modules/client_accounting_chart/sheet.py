@@ -49,9 +49,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NoReturn
 
 from app.core.exceptions import (
+    ChartMappingRequiredError,
     FileHeaderMismatchError,
     FileInvalidError,
     FileLinesInvalidError,
+    ValidationAppError,
 )
 from app.db.models.client_accounting_account import (
     MAX_ACCOUNTING_ACCOUNT_CLASSIFICATION_CHARS,
@@ -67,6 +69,7 @@ from app.modules.client_accounting_chart.dominio import (
     find_dominio_header,
 )
 from app.modules.client_accounting_chart.recognizer import (
+    ColumnMapping,
     ColumnRecognition,
     ColumnRole,
     convert_by_columns,
@@ -96,8 +99,9 @@ OPTIONAL_COLUMNS: tuple[str, ...] = (COLUMN_CLASSIFICATION,)
 MODEL_COLUMNS: tuple[str, ...] = (COLUMN_CODE, COLUMN_NAME, COLUMN_TYPE, COLUMN_CLASSIFICATION)
 
 #: De onde veio a planilha — vocabulário FECHADO, vai para a métrica da importação.
-#: `reconhecido` é a planilha lida pelo CONTEÚDO das colunas (86e3ydjyq).
-type ChartLayout = Literal["modelo", "dominio", "reconhecido"]
+#: `reconhecido` é a planilha lida pelo CONTEÚDO das colunas (86e3ydjyq); `mapeado`, a
+#: lida pelo mapeamento que a pessoa escolheu na tela (86e3ydjz4).
+type ChartLayout = Literal["modelo", "dominio", "reconhecido", "mapeado"]
 
 #: CSV do modelo: `;` e UTF-8 (o `-sig` aceita o BOM que o Excel grava). DECLARADOS,
 #: nunca farejados (mesma regra do mapeamento de entrada da S14).
@@ -423,6 +427,9 @@ class ParsedChartSheet:
     rows: list[ChartSheetRow]
     layout: ChartLayout
     recognition: ColumnRecognition | None = None
+    #: Só com o tipo derivado da hierarquia (escolha explícita no mapeamento): quantas
+    #: contas ficaram sintéticas e quantas analíticas, para a prévia mostrar ANTES.
+    derived_types: tuple[int, int] | None = None
 
     def __repr__(self) -> str:
         return f"<ParsedChartSheet rows={len(self.rows)} layout={self.layout}>"
@@ -525,7 +532,11 @@ def recognition_message(recognition: ColumnRecognition) -> str:
 def recognition_details(recognition: ColumnRecognition | None) -> dict[str, Any]:
     """Os papéis reconhecidos e os em aberto — vocabulário NOSSO, nunca o arquivo."""
     if recognition is None:
-        return {"recognizedRoles": [], "missingRoles": list(REQUIRED_ROLES_OPEN)}
+        return {
+            "recognizedRoles": [],
+            "missingRoles": list(REQUIRED_ROLES_OPEN),
+            "ambiguousRoles": [],
+        }
     return {
         "recognizedRoles": recognition.recognized_roles,
         "missingRoles": recognition.open_roles,
@@ -537,28 +548,90 @@ def recognition_details(recognition: ColumnRecognition | None) -> dict[str, Any]
 REQUIRED_ROLES_OPEN: tuple[ColumnRole, ...] = ("codigo", "nome", "tipo")
 
 
-def _parse_recognized(
-    content: bytes, file_format: InputFileFormat, refusal: FileHeaderMismatchError
+_MAPPING_TAIL = " Diga o que é cada coluna para continuar."
+_MAPPING_SHAPE_MESSAGE = (
+    "O mapeamento das colunas não cabe nesta planilha. Escolha de novo o que é cada coluna."
+)
+
+
+def mapping_details(recognition: ColumnRecognition) -> dict[str, Any]:
+    """O perfil das colunas para a etapa de mapeamento — a exceção DECLARADA (86e3ydjz4).
+
+    `cabecalho` é o texto do cabeçalho acima do bloco (a pessoa precisa dele para
+    escolher); NENHUM valor de célula do bloco sai: forma e preenchimento são contagens.
+    """
+    return {
+        **recognition_details(recognition),
+        "colunas": [
+            {
+                "indice": column.index,
+                "cabecalho": column.header,
+                "formaDetectada": column.form,
+                "preenchimento": column.fill_percent,
+                "papelSugerido": column.suggested_role,
+            }
+            for column in recognition.columns
+        ],
+    }
+
+
+def _recognized(
+    content: bytes,
+    file_format: InputFileFormat,
+    refusal: FileHeaderMismatchError,
+    mapping: ColumnMapping | None,
 ) -> ParsedChartSheet:
-    """O terceiro caminho: a planilha lida pelo conteúdo das colunas (86e3ydjyq).
+    """O terceiro caminho: a planilha lida pelo CONTEÚDO (86e3ydjyq) ou pelo MAPEAMENTO
+    que a pessoa escolheu (86e3ydjz4).
 
     Sem bloco de contas, a recusa de cabeçalho do modelo, como sempre, com os papéis em
-    `details`. Com bloco e sem código, nome ou tipo resolvidos, a mesma recusa com a
-    frase do que foi reconhecido e do que falta.
+    `details`. Com bloco e sem código, nome ou tipo resolvidos, 422
+    `MAPEAMENTO_NECESSARIO` com o perfil das colunas: a tela pergunta, nunca beco sem
+    saída. Com o mapeamento, o reconhecimento só acha o bloco e a pessoa decide os papéis.
     """
     if file_format is not InputFileFormat.XLSX:
+        if mapping is not None:
+            raise ValidationAppError("mapeamento do plano em arquivo CSV") from None
         raise _with_roles(refusal, None) from None
     raw = _raw_rows(content)
     recognition = recognize_columns(raw)
-    if recognition is None:
+    # Sem bloco, ou um bloco sem nenhuma coluna de texto (onde estaria o nome?), não há
+    # o que mapear: é a recusa de cabeçalho, nunca uma pergunta sem resposta.
+    if recognition is None or not any(c.form == "texto" for c in recognition.columns):
         raise _with_roles(refusal, None) from None
+    if mapping is not None:
+        return _mapped(raw, recognition, mapping)
     if not recognition.resolved:
-        raise _with_roles(
-            refusal, recognition, user_message=recognition_message(recognition) + _RECOGNITION_TAIL
+        raise ChartMappingRequiredError(
+            f"plano contábil: mapeamento necessário ({len(recognition.open_roles)} papéis)",
+            user_message=recognition_message(recognition) + _MAPPING_TAIL,
+            details=mapping_details(recognition),
         ) from None
     conversion = convert_by_columns(raw, recognition, recognition.roles)
     rows = _validated(conversion, user_message=_LINES_MESSAGE)
     return ParsedChartSheet(rows=rows, layout="reconhecido", recognition=recognition)
+
+
+def _mapped(
+    raw: list[tuple[int, list[Any]]], recognition: ColumnRecognition, mapping: ColumnMapping
+) -> ParsedChartSheet:
+    width = len(recognition.columns)
+    if any(col >= width for col in mapping.roles.values()):
+        raise ValidationAppError(
+            "mapeamento do plano fora das colunas", user_message=_MAPPING_SHAPE_MESSAGE
+        )
+    roles: dict[ColumnRole, tuple[int, ...]] = {role: (col,) for role, col in mapping.roles.items()}
+    conversion = convert_by_columns(
+        raw, recognition, roles, type_by_hierarchy=mapping.type_by_hierarchy
+    )
+    rows = _validated(conversion, user_message=_LINES_MESSAGE)
+    derived: tuple[int, int] | None = None
+    if mapping.type_by_hierarchy:
+        synthetic = sum(r.account_type is AccountingAccountType.SINTETICA for r in rows)
+        derived = (synthetic, len(rows) - synthetic)
+    return ParsedChartSheet(
+        rows=rows, layout="mapeado", recognition=recognition, derived_types=derived
+    )
 
 
 def _with_roles(
@@ -574,7 +647,7 @@ def _with_roles(
     )
 
 
-def parse_chart_sheet(content: bytes) -> ParsedChartSheet:
+def parse_chart_sheet(content: bytes, *, mapping: ColumnMapping | None = None) -> ParsedChartSheet:
     """Lê e valida a planilha INTEIRA; devolve as contas ou levanta a recusa tipada.
 
     Ordem das recusas (todas 422, nenhuma grava nada): formato pelo conteúdo
@@ -585,12 +658,21 @@ def parse_chart_sheet(content: bytes) -> ParsedChartSheet:
 
     Layout, em três caminhos: o cabeçalho exato do Domínio nas primeiras linhas vai
     pelo conversor (`dominio.py`); o cabeçalho exato do modelo, pelo modelo; o resto,
-    pelo RECONHECEDOR por conteúdo (`recognizer.py`, 86e3ydjyq). O que nenhum dos três
-    lê recebe a recusa de cabeçalho com os papéis reconhecidos e os que faltam.
+    pelo RECONHECEDOR por conteúdo (`recognizer.py`, 86e3ydjyq). Bloco de contas que o
+    reconhecedor não decide é 422 `MAPEAMENTO_NECESSARIO` (86e3ydjz4), e com `mapping` (a
+    escolha da pessoa) o bloco é lido pelos papéis que ela deu. Sem bloco de contas, a
+    recusa de cabeçalho com os papéis reconhecidos e os que faltam.
     """
     # CSV ou planilha (XLSX ou XLS) pelo CONTEÚDO; PDF, HTML e o resto viram
     # `FORMATO_NAO_SUPORTADO`.
     file_format = detect_format(content)
+    if mapping is not None:
+        # A escolha da pessoa vale sobre qualquer reconhecimento: o arquivo que pediu
+        # mapeamento é lido pelo mapeamento, nunca por um caminho que ela não viu.
+        refusal = FileHeaderMismatchError(
+            "plano contábil lido pelo mapeamento", user_message=_HEADER_MESSAGE
+        )
+        return _recognized(content, file_format, refusal, mapping)
     header_line = _dominio_header_line(content, file_format)
     if header_line is not None:
         return ParsedChartSheet(rows=_parse_dominio(content, header_line), layout="dominio")
@@ -603,7 +685,7 @@ def parse_chart_sheet(content: bytes) -> ParsedChartSheet:
     try:
         table = read_table(content, options, on_header=check_header)
     except FileHeaderMismatchError as refusal:
-        return _parse_recognized(content, file_format, refusal)
+        return _recognized(content, file_format, refusal, mapping)
     except FileInvalidError:
         _raise_invalid_file()
 

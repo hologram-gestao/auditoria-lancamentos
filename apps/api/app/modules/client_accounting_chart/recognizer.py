@@ -48,6 +48,8 @@ if TYPE_CHECKING:
 type ColumnRole = Literal[
     "codigo", "classificacao", "tipo", "grau", "nome", "natureza", "documento", "desconhecida"
 ]
+#: Os papéis que viram campo da conta (e que a pessoa pode escolher no mapeamento).
+type AccountRole = Literal["codigo", "classificacao", "tipo", "grau", "nome"]
 #: A forma que domina uma coluna, como a etapa de mapeamento a mostra.
 type ColumnForm = Literal[
     "inteiro", "classificacao", "tipo_sa", "natureza", "documento", "texto", "vazia", "mista"
@@ -67,8 +69,11 @@ MIN_UNIQUE_RATIO = 0.95
 #: Código reduzido em texto (`"649"`) conta como inteiro até este tamanho; mais que isso
 #: tem cara de documento sem máscara.
 MAX_TEXT_INTEGER_DIGITS = 9
-#: Até onde, acima do bloco, a linha preenchida conta como cabeçalho (desempate).
-HEADER_SEARCH_GAP = 3
+#: Até onde, acima do bloco, a linha preenchida conta como cabeçalho (desempate e a
+#: etapa de mapeamento): a linha logo acima, ou a de cima de uma linha em branco.
+HEADER_SEARCH_GAP = 2
+#: Um cabeçalho tem pelo menos duas colunas nomeadas; o banner tem uma célula por linha.
+MIN_HEADER_CELLS = 2
 
 _CLASSIFICATION = re.compile(r"\d+(?:\.\d+)*")
 _DIGITS = re.compile(r"\d+")
@@ -312,6 +317,19 @@ def _form(stats: _Stats) -> ColumnForm:
 
 
 @dataclass(frozen=True, slots=True)
+class ColumnMapping:
+    """O que a PESSOA disse que é cada coluna (a etapa de mapeamento, 86e3ydjz4).
+
+    `roles` usa os papéis de conta (`ACCOUNT_ROLES`), uma coluna por papel. Com
+    `type_by_hierarchy`, não há coluna de tipo: a conta que tem outra abaixo é sintética
+    (escolha EXPLÍCITA, nunca inferida em silêncio).
+    """
+
+    roles: Mapping[AccountRole, int]
+    type_by_hierarchy: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class ColumnRecognition:
     """O que o reconhecimento decidiu sobre a planilha.
 
@@ -358,10 +376,20 @@ class ColumnRecognition:
 
 
 def _header_line(rows: Sequence[tuple[int, Sequence[Any]]], first_position: int) -> int | None:
-    """A posição da linha preenchida logo acima do bloco (até `HEADER_SEARCH_GAP`)."""
+    """A posição do cabeçalho logo acima do bloco, ou `None`.
+
+    É a linha preenchida mais próxima acima do bloco (até `HEADER_SEARCH_GAP` linhas),
+    e só conta se TEM CARA DE CABEÇALHO: duas células ou mais, todas texto. Uma linha de
+    banner (razão social, CNPJ, título) tem uma célula só e nunca vira cabeçalho, porque
+    o cabeçalho é o único texto do arquivo que a etapa de mapeamento mostra.
+    """
     for position in range(first_position - 1, max(first_position - 1 - HEADER_SEARCH_GAP, -1), -1):
-        if _filled(rows[position][1]) > 0:
+        cells = [cell for cell in rows[position][1] if cell is not None]
+        if not cells:
+            continue
+        if len(cells) >= MIN_HEADER_CELLS and all(isinstance(cell, str) for cell in cells):
             return position
+        return None
     return None
 
 
@@ -603,10 +631,12 @@ def convert_by_columns(
         derived = derive_type_by_hierarchy([as_classification(k) for _, _, _, k, _ in pending])
         types = [t.value if t is not None else None for t in derived]
     else:
+        empty_is_analytic = type_col is not None and not any(
+            type_mark(_cell(cells, type_col)) is AccountingAccountType.ANALITICA
+            for *_, cells in pending
+        )
         types = [
-            _type_value(_cell(cells, type_col), recognition.empty_type_is_analytic)
-            if type_col is not None
-            else None
+            _type_value(_cell(cells, type_col), empty_is_analytic) if type_col is not None else None
             for *_, cells in pending
         ]
     for (line, code, name, classification, _), account_type in zip(pending, types, strict=True):

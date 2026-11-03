@@ -603,7 +603,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Importa (ou reimporta) o plano de contas contábil do cliente a partir de uma planilha no MODELO DA PLATAFORMA — tudo ou nada. Modelo: CSV UTF-8 separado por `;`, XLSX ou XLS (primeira aba), cabeçalho na linha 1 com as colunas `codigo_reduzido`, `nome` e `tipo` (obrigatórias) e `classificacao` (opcional), em qualquer ordem e sem outras colunas; `tipo` é `analitica` ou `sintetica`; código reduzido com letras, dígitos, `.` e `-` (até 20), nome até 200 caracteres, classificação até 40. Exemplo: `codigo_reduzido;nome;tipo` / `649;Banco conta movimento;analitica`. Também aceita o plano de contas EXPORTADO do Domínio em XLSX ou no XLS que o sistema grava, reconhecido pelo cabeçalho `Código`/`T`/`Classificação`/`Nome`/`Grau` nas 10 primeiras linhas e convertido para o modelo (código, `S` = sintética e vazio = analítica, classificação, nome e grau, que tem de ser a profundidade da classificação); o CSV nativo do Domínio não é aceito. Planilha (XLSX ou XLS) que não é nenhum dos dois é lida pelo CONTEÚDO das colunas (layout `reconhecido`): inteiro sem repetição é o código, `1.1.2` a classificação, `S`/`A` o tipo, inteiro igual à profundidade da classificação o grau e texto o nome; natureza, CNPJ e qualquer outra coluna são ignorados, e o nome da coluna só desempata. A reimportação casa por código e só adiciona e atualiza: conta nova entra ativa, conta existente atualiza nome, tipo e classificação, e a conta que não veio na planilha continua como estava (nunca é inativada nem apagada) e ganha o selo `absentSince`, que sai quando ela volta. A situação da conta não muda pela planilha. Antes de gravar, `POST …/import/preview` mostra o que muda. Responde as contagens `contas`, `contasNovas`, `contasAlteradas` e `contasAusentes`. O nome é cifrado com a chave do cliente. Requer `manage_client_accounting_chart` (plataforma, admin e gerente da carteira; usuários do cliente recebem 403 e a negação fica na trilha). Cliente encerrado: 409. Recusas, todas 422 e sem gravar nada: `FORMATO_NAO_SUPORTADO` (não é CSV nem XLSX pelo CONTEÚDO), `ARQUIVO_INVALIDO` (não abre, ou planilha sem nenhuma conta com `details.reason=sem_contas`), `CABECALHO_DIVERGENTE` (`details.missingColumns`/`repeatedColumns` — só colunas do MODELO — mais `details.unexpectedColumnCount`/`foundColumnCount` e, do reconhecimento por conteúdo, `recognizedRoles`/`missingRoles`/`ambiguousRoles` em papéis `codigo`, `classificacao`, `tipo`, `grau` e `nome`) e `LINHAS_INVALIDAS` (`details.lines=[{line, reason}]` com `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, `codigo_repetido`, `nome_vazio`, `nome_longo`, `tipo_invalido`, `classificacao_longa` e, no export do Domínio, também `codigo_ausente`, `classificacao_ausente`, `grau_ausente`, `grau_divergente`, `linha_irreconhecivel` e `conta_fora_do_bloco` (linha com cara de conta depois do fim das contas: o arquivo inteiro é recusado), e `details.total`) — a resposta nunca traz o conteúdo de uma célula. */
+        /** Importa (ou reimporta) o plano de contas contábil do cliente a partir de uma planilha no MODELO DA PLATAFORMA — tudo ou nada. Modelo: CSV UTF-8 separado por `;`, XLSX ou XLS (primeira aba), cabeçalho na linha 1 com as colunas `codigo_reduzido`, `nome` e `tipo` (obrigatórias) e `classificacao` (opcional), em qualquer ordem e sem outras colunas; `tipo` é `analitica` ou `sintetica`; código reduzido com letras, dígitos, `.` e `-` (até 20), nome até 200 caracteres, classificação até 40. Exemplo: `codigo_reduzido;nome;tipo` / `649;Banco conta movimento;analitica`. Também aceita o plano de contas EXPORTADO do Domínio em XLSX ou no XLS que o sistema grava, reconhecido pelo cabeçalho `Código`/`T`/`Classificação`/`Nome`/`Grau` nas 10 primeiras linhas e convertido para o modelo (código, `S` = sintética e vazio = analítica, classificação, nome e grau, que tem de ser a profundidade da classificação); o CSV nativo do Domínio não é aceito. Planilha (XLSX ou XLS) que não é nenhum dos dois é lida pelo CONTEÚDO das colunas (layout `reconhecido`): inteiro sem repetição é o código, `1.1.2` a classificação, `S`/`A` o tipo, inteiro igual à profundidade da classificação o grau e texto o nome; natureza, CNPJ e qualquer outra coluna são ignorados, e o nome da coluna só desempata. Quando o conteúdo não decide código, nome ou tipo, a resposta é 422 `MAPEAMENTO_NECESSARIO` com `details.colunas` (`indice`, `cabecalho`, `formaDetectada`, `preenchimento`, `papelSugerido`: o cabeçalho é o único texto do arquivo que sai, nunca um valor de célula) e o pedido seguinte manda o campo `mapeamento`. A reimportação casa por código e só adiciona e atualiza: conta nova entra ativa, conta existente atualiza nome, tipo e classificação, e a conta que não veio na planilha continua como estava (nunca é inativada nem apagada) e ganha o selo `absentSince`, que sai quando ela volta. A situação da conta não muda pela planilha. Antes de gravar, `POST …/import/preview` mostra o que muda. Responde as contagens `contas`, `contasNovas`, `contasAlteradas` e `contasAusentes`. O nome é cifrado com a chave do cliente. Requer `manage_client_accounting_chart` (plataforma, admin e gerente da carteira; usuários do cliente recebem 403 e a negação fica na trilha). Cliente encerrado: 409. Recusas, todas 422 e sem gravar nada: `FORMATO_NAO_SUPORTADO` (não é CSV nem XLSX pelo CONTEÚDO), `ARQUIVO_INVALIDO` (não abre, ou planilha sem nenhuma conta com `details.reason=sem_contas`), `CABECALHO_DIVERGENTE` (`details.missingColumns`/`repeatedColumns` — só colunas do MODELO — mais `details.unexpectedColumnCount`/`foundColumnCount` e, do reconhecimento por conteúdo, `recognizedRoles`/`missingRoles`/`ambiguousRoles` em papéis `codigo`, `classificacao`, `tipo`, `grau` e `nome`) e `LINHAS_INVALIDAS` (`details.lines=[{line, reason}]` com `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, `codigo_repetido`, `nome_vazio`, `nome_longo`, `tipo_invalido`, `classificacao_longa` e, no export do Domínio, também `codigo_ausente`, `classificacao_ausente`, `grau_ausente`, `grau_divergente`, `linha_irreconhecivel` e `conta_fora_do_bloco` (linha com cara de conta depois do fim das contas: o arquivo inteiro é recusado), e `details.total`) — a resposta nunca traz o conteúdo de uma célula. */
         post: operations["import_accounting_chart_api_v1_clients__client_id__accounting_chart_import_post"];
         delete?: never;
         options?: never;
@@ -620,7 +620,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Mostra o que a importação desta planilha faria, SEM GRAVAR nada: o mesmo leitor e as mesmas recusas 422 de `POST …/import` (modelo da plataforma, plano exportado do Domínio e planilha lida pelo conteúdo das colunas). Devolve as contagens (`contasNovas`, `contasAlteradas`, `contasSemMudanca`, `contasAusentes`, `contasAusentesEmUso` — as ausentes que decisões do de-para, de qualquer vigência, ou a conta do banco usam —, `contasQueVoltaram` e `contasInativasNaPlanilha`), `temMudancas` e as listas `novas` (como na planilha), `alteradas` (o nome novo e os campos que mudam: `nome`, `tipo`, `classificacao`) e `ausentes` (o nome atual, a situação, `inUse` e `absentSince`), cada uma com até `listLimit` itens. Mesma permissão da importação (`manage_client_accounting_chart`; a negação fica na trilha); cliente encerrado 409. */
+        /** Mostra o que a importação desta planilha faria, SEM GRAVAR nada: o mesmo leitor e as mesmas recusas 422 de `POST …/import` (modelo da plataforma, plano exportado do Domínio, planilha lida pelo conteúdo das colunas e o 422 `MAPEAMENTO_NECESSARIO`), e o mesmo campo `mapeamento`; com o tipo pela hierarquia, `tipoDerivado` diz quantas ficaram sintéticas. Devolve as contagens (`contasNovas`, `contasAlteradas`, `contasSemMudanca`, `contasAusentes`, `contasAusentesEmUso` — as ausentes que decisões do de-para, de qualquer vigência, ou a conta do banco usam —, `contasQueVoltaram` e `contasInativasNaPlanilha`), `temMudancas` e as listas `novas` (como na planilha), `alteradas` (o nome novo e os campos que mudam: `nome`, `tipo`, `classificacao`) e `ausentes` (o nome atual, a situação, `inUse` e `absentSince`), cada uma com até `listLimit` itens. Mesma permissão da importação (`manage_client_accounting_chart`; a negação fica na trilha); cliente encerrado 409. */
         post: operations["preview_accounting_chart_import_api_v1_clients__client_id__accounting_chart_import_preview_post"];
         delete?: never;
         options?: never;
@@ -3048,6 +3048,11 @@ export interface components {
              * @description CSV (`;`, UTF-8), XLSX ou XLS no modelo, ou o plano exportado do Domínio.
              */
             file: string;
+            /**
+             * Mapeamento
+             * @description Opcional. O que é cada coluna, quando a planilha pediu (`MAPEAMENTO_NECESSARIO`): JSON `{"colunas": {"codigo": 0, "classificacao": 1, "tipo": 2, "grau": 3, "nome": 5}, "tipoPelaHierarquia": false}` (índice 0 = primeira coluna). `codigo` e `nome` são obrigatórios; `tipo` também, salvo com `tipoPelaHierarquia: true`, que exige a `classificacao` e marca como sintética a conta que tem outra abaixo. Com ele, a planilha é lida pelos papéis escolhidos (layout `mapeado`). Forma inválida: 400.
+             */
+            mapeamento?: string | null;
         };
         /** Body_import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post */
         Body_import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post: {
@@ -3088,6 +3093,11 @@ export interface components {
              * @description CSV (`;`, UTF-8), XLSX ou XLS no modelo, ou o plano exportado do Domínio.
              */
             file: string;
+            /**
+             * Mapeamento
+             * @description Opcional. O que é cada coluna, quando a planilha pediu (`MAPEAMENTO_NECESSARIO`): JSON `{"colunas": {"codigo": 0, "classificacao": 1, "tipo": 2, "grau": 3, "nome": 5}, "tipoPelaHierarquia": false}` (índice 0 = primeira coluna). `codigo` e `nome` são obrigatórios; `tipo` também, salvo com `tipoPelaHierarquia: true`, que exige a `classificacao` e marca como sintética a conta que tem outra abaixo. Com ele, a planilha é lida pelos papéis escolhidos (layout `mapeado`). Forma inválida: 400.
+             */
+            mapeamento?: string | null;
         };
         /** Body_preview_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_preview_post */
         Body_preview_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_preview_post: {
@@ -3185,6 +3195,16 @@ export interface components {
          */
         CategoryMode: "coluna_categoria" | "classificacao_livre";
         /**
+         * ChartDerivedTypes
+         * @description Quantas contas o tipo pela hierarquia marcou como sintéticas e como analíticas.
+         */
+        ChartDerivedTypes: {
+            /** Sinteticas */
+            sinteticas: number;
+            /** Analiticas */
+            analiticas: number;
+        };
+        /**
          * ChartImportEnvelope
          * @description Body de `POST /clients/{client_id}/accounting-chart/import`.
          */
@@ -3231,10 +3251,10 @@ export interface components {
         ChartImportPreviewPayload: {
             /**
              * Layout
-             * @description `modelo` da plataforma, o plano exportado do `dominio` ou `reconhecido`: a planilha lida pelo CONTEÚDO das colunas (código, classificação, tipo, grau e nome), com as colunas que a plataforma não usa ignoradas.
+             * @description `modelo` da plataforma, o plano exportado do `dominio`, `reconhecido` (a planilha lida pelo CONTEÚDO das colunas, com as que a plataforma não usa ignoradas) ou `mapeado` (lida pelo mapeamento escolhido na tela).
              * @enum {string}
              */
-            layout: "modelo" | "dominio" | "reconhecido";
+            layout: "modelo" | "dominio" | "reconhecido" | "mapeado";
             /**
              * Contas
              * @description Contas na planilha.
@@ -3288,6 +3308,8 @@ export interface components {
              * @description O teto de cada lista; as contagens são as reais.
              */
             listLimit: number;
+            /** @description Só quando o mapeamento pediu o tipo pela hierarquia (`tipoPelaHierarquia`): quantas contas ficaram sintéticas (têm conta abaixo) e quantas analíticas. `null` nos outros casos. */
+            tipoDerivado: components["schemas"]["ChartDerivedTypes"] | null;
         };
         /**
          * ChartOfAccountEntryResponse

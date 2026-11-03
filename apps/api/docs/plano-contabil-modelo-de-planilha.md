@@ -98,12 +98,32 @@ garantido; o reconhecimento é o que evita reescrever um arquivo que já tem tud
   candidatas ao mesmo papel sem cabeçalho que desempate deixam o papel em aberto.
 - Uma coluna tem uma forma quando pelo menos 95% das células preenchidas a seguem: a folga
   é para as linhas com problema, que continuam listadas com motivo.
-- **Recusa:** sem código, nome ou tipo resolvidos, `CABECALHO_DIVERGENTE` com a frase do que
-  foi reconhecido e do que falta ("Reconhecemos as colunas de código e nome; não encontramos
+- **Recusa:** sem bloco de contas (ou um bloco sem coluna de texto), `CABECALHO_DIVERGENTE`
+  com a frase do que foi reconhecido e do que falta ("Reconhecemos as colunas de código e nome; não encontramos
   a coluna de tipo (S ou A)") e `details.recognizedRoles`, `missingRoles` e `ambiguousRoles`,
   em papéis da plataforma (`codigo`, `classificacao`, `tipo`, `grau`, `nome`). Nenhum texto
   do arquivo sai na resposta nem no log (o log leva só os papéis e quantas colunas foram
   ignoradas).
+- **Etapa de mapeamento (86e3ydjz4):** quando há um bloco de contas mas o reconhecimento não
+  decide código, nome ou tipo, a resposta não é recusa: é **422 `MAPEAMENTO_NECESSARIO`** com a
+  mesma frase e `details.colunas`, uma entrada por coluna do bloco: `indice` (0 = primeira),
+  `cabecalho` (o texto do cabeçalho logo acima do bloco, ou `null`), `formaDetectada` (`inteiro`,
+  `classificacao`, `tipo_sa`, `natureza`, `documento`, `texto`, `vazia` ou `mista`),
+  `preenchimento` (0 a 100) e `papelSugerido`. O cabeçalho é a **exceção declarada** (a tela
+  precisa dele para a pessoa escolher); só conta como cabeçalho uma linha com duas células ou
+  mais, todas texto, logo acima do bloco (um banner de uma célula, com a razão social, nunca
+  sai). Valor de célula do bloco nunca sai. A tela pergunta o papel de cada coluna e manda,
+  na prévia e na importação, o campo multipart **`mapeamento`**:
+  `{"colunas": {"codigo": 0, "classificacao": 1, "tipo": 2, "grau": 3, "nome": 5},
+"tipoPelaHierarquia": false}`. Regras: uma coluna por papel e um papel por coluna; `codigo` e
+  `nome` obrigatórios; `tipo` obrigatório salvo com `tipoPelaHierarquia: true`, que exige a
+  `classificacao`, não convive com coluna de tipo e marca como sintética a conta que tem outra
+  abaixo (só por essa escolha; a prévia devolve `tipoDerivado: {sinteticas, analiticas}`).
+  Mapeamento de forma inválida, fora das colunas da planilha ou num CSV é 400. Com ele, o
+  reconhecimento só acha o bloco e a planilha é lida pela escolha (layout `mapeado`). O
+  mapeamento não é guardado. Na Tract, a hierarquia daria 152 sintéticas contra as 180 do
+  arquivo: 28 grupos sintéticos não têm conta abaixo, que é o motivo de o tipo nunca ser
+  derivado sem a pessoa pedir.
 - **Só planilha:** o CSV continua só no modelo (ler um CSV cru pediria mudar o leitor
   compartilhado, e nenhum arquivo real chegou assim).
 - **Regra de processo:** todo arquivo de cliente novo vira fixture anonimizada ANTES de uma

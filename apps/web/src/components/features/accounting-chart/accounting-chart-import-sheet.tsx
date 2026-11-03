@@ -23,6 +23,12 @@
  * `code` (`AccountingChartRefusalNotice`). Só código desconhecido cai no toast
  * (ADR-047-FE). Planilha que não muda nada não oferece importar.
  *
+ * **Etapa de mapeamento** (86e3ydjz4): quando a prévia responde 422
+ * `MAPEAMENTO_NECESSARIO`, a gaveta abre "Diga o que é cada coluna"
+ * (`AccountingChartMappingStep`) no lugar do modelo; "Continuar" pede a prévia de novo
+ * com o `mapeamento`, e "Confirmar" manda o MESMO mapeamento para a importação. O
+ * mapeamento vive só nesta gaveta (não persiste).
+ *
  * Remontada por `key` a cada abertura: estado limpo, sem arquivo, prévia nem
  * recusa da vez anterior.
  */
@@ -57,15 +63,27 @@ import {
   useImportAccountingChart,
   usePreviewAccountingChartImport,
 } from '@/hooks/use-client-accounting-chart';
-import { readAccountingChartRefusal } from '@/lib/accounting-chart-errors';
+import {
+  readAccountingChartRefusal,
+  readChartMappingRequired,
+  type ChartMappingRequired,
+} from '@/lib/accounting-chart-errors';
 import { ApiError } from '@/lib/api/client';
 import type { AccountingChartImportPreview, AccountingChartImportResult } from '@/lib/contracts';
 import {
   accountingChartImportSchema,
   type AccountingChartImportValues,
 } from '@/lib/validation/accounting-chart';
+import {
+  accountingChartMappingSchema,
+  suggestedRole,
+  toMappingPayload,
+  type AccountingChartMappingPayload,
+  type AccountingChartMappingValues,
+} from '@/lib/validation/accounting-chart-mapping';
 
 import { AccountingChartImportPreviewPanel } from './accounting-chart-import-preview';
+import { AccountingChartMappingStep } from './accounting-chart-mapping-step';
 import { AccountingChartModel } from './accounting-chart-model';
 import { AccountingChartRefusalNotice } from './accounting-chart-refusal-notice';
 
@@ -112,21 +130,43 @@ export function AccountingChartImportSheet({
     if (preview !== null) previewRef.current?.scrollIntoView?.({ block: 'start' });
   }, [preview]);
 
+  // A etapa de mapeamento (86e3ydjz4): o perfil das colunas que o servidor mandou e o
+  // mapeamento que valeu na prévia (o mesmo vai na importação).
+  const [mappingStep, setMappingStep] = useState<ChartMappingRequired | null>(null);
+  const [mapping, setMapping] = useState<AccountingChartMappingPayload | null>(null);
+
   const form = useForm<AccountingChartImportValues>({
     resolver: zodResolver(accountingChartImportSchema),
     defaultValues: { file: null },
+    mode: 'onSubmit',
+  });
+  const mappingForm = useForm<AccountingChartMappingValues>({
+    resolver: zodResolver(accountingChartMappingSchema),
+    defaultValues: { roles: [], tipoPelaHierarquia: false },
     mode: 'onSubmit',
   });
 
   const isPending = importMutation.isPending || previewMutation.isPending;
 
   function onSubmit(values: AccountingChartImportValues) {
-    if (!(values.file instanceof File)) return;
-    if (preview === null) {
-      void review(values.file);
+    const file = values.file;
+    if (!(file instanceof File)) return;
+    if (preview !== null) {
+      void send(file);
       return;
     }
-    void send(values.file);
+    if (mappingStep !== null) {
+      void mappingForm.handleSubmit((mapped) => review(file, toMappingPayload(mapped)))();
+      return;
+    }
+    void review(file, null);
+  }
+
+  function resetSteps() {
+    setRefusal(null);
+    setPreview(null);
+    setMappingStep(null);
+    setMapping(null);
   }
 
   function handleFailure(err: unknown, fallback: string) {
@@ -137,11 +177,22 @@ export function AccountingChartImportSheet({
     toast.error(err instanceof ApiError ? err.userMessage : fallback);
   }
 
-  async function review(file: File) {
+  async function review(file: File, nextMapping: AccountingChartMappingPayload | null) {
     setRefusal(null);
     try {
-      setPreview(await previewMutation.mutateAsync(file));
+      const result = await previewMutation.mutateAsync({ file, mapping: nextMapping });
+      setMapping(nextMapping);
+      setPreview(result);
     } catch (err) {
+      const required = readChartMappingRequired(err);
+      if (required !== null) {
+        const roles = Array.from({ length: required.columns.length }, () => suggestedRole(null));
+        for (const column of required.columns)
+          roles[column.indice] = suggestedRole(column.papelSugerido);
+        mappingForm.reset({ roles, tipoPelaHierarquia: false });
+        setMappingStep(required);
+        return;
+      }
       handleFailure(err, 'Não foi possível ler a planilha do plano contábil.');
     }
   }
@@ -149,7 +200,7 @@ export function AccountingChartImportSheet({
   async function send(file: File) {
     setRefusal(null);
     try {
-      const result = await importMutation.mutateAsync(file);
+      const result = await importMutation.mutateAsync({ file, mapping });
       toast.success(importSuccessMessage(result));
       onImported(result);
       onOpenChange(false);
@@ -179,7 +230,7 @@ export function AccountingChartImportSheet({
             noValidate
           >
             <SheetBody className="space-y-5">
-              {preview === null && (
+              {preview === null && mappingStep === null && (
                 <AccountingChartModel headingId="accounting-chart-import-model" />
               )}
 
@@ -199,8 +250,7 @@ export function AccountingChartImportSheet({
                         value={field.value}
                         onChange={(file) => {
                           field.onChange(file);
-                          setRefusal(null);
-                          setPreview(null);
+                          resetSteps();
                         }}
                       />
                     </FormControl>
@@ -209,7 +259,16 @@ export function AccountingChartImportSheet({
                 )}
               />
 
-              {hasPlan && preview === null && (
+              {preview === null && mappingStep !== null && (
+                <AccountingChartMappingStep
+                  columns={mappingStep.columns}
+                  message={mappingStep.userMessage}
+                  form={mappingForm}
+                  disabled={isPending}
+                />
+              )}
+
+              {hasPlan && preview === null && mappingStep === null && (
                 <p
                   role="note"
                   data-testid="accounting-chart-reimport-note"
@@ -273,7 +332,11 @@ export function AccountingChartImportSheet({
                     ) : (
                       <Eye className="h-4 w-4" aria-hidden="true" />
                     )}
-                    {isPending ? 'Lendo a planilha…' : 'Revisar mudanças'}
+                    {isPending
+                      ? 'Lendo a planilha…'
+                      : mappingStep !== null
+                        ? 'Continuar'
+                        : 'Revisar mudanças'}
                   </Button>
                 </>
               )}

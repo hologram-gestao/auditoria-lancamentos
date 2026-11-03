@@ -707,6 +707,37 @@ async def test_busca_de_fornecedor_por_codigo_nega_os_tres_atacantes(
     assert resp.status_code in {403, 404}, resp.text
 
 
+#: Épico 86e3ydjy9: os campos novos das rotas do plano contábil (o `mapeamento` da
+#: 86e3ydjz4). A bateria acima manda só o arquivo; esta prova que a negação vem do
+#: `client_id`, ANTES de qualquer campo novo ser lido, para os três atacantes.
+_CHART_IMPORT_FIELDS: dict[str, str] = {
+    "mapeamento": ('{"colunas": {"codigo": 0, "nome": 1, "tipo": 2}, "tipoPelaHierarquia": false}'),
+}
+
+
+@pytest.mark.parametrize("attacker", sorted(ATTACKERS))
+@pytest.mark.parametrize("route", ["import", "import/preview"])
+async def test_campos_novos_do_plano_contabil_negam_os_tres_atacantes(
+    attacker: str,
+    route: str,
+    client_with_db: AsyncClient,
+    tenants: dict[str, Any],
+) -> None:
+    login = await client_with_db.post(
+        "/api/v1/auth/login",
+        json={"email": ATTACKERS[attacker], "password": PLAIN_PASSWORD},
+    )
+    assert login.status_code == 200, login.text
+
+    resp = await client_with_db.post(
+        f"/api/v1/clients/{tenants['cli_b'].id}/accounting-chart/{route}",
+        files={"file": ("plano.csv", _PLANO_DA_BATERIA, "text/csv")},
+        data=_CHART_IMPORT_FIELDS,
+    )
+    assert SECRET_NAME_B not in resp.text
+    assert resp.status_code in {403, 404}, resp.text
+
+
 async def test_notificacoes_do_outro_tenant_nao_aparecem(
     client_with_db: AsyncClient, tenants: dict[str, Any]
 ) -> None:

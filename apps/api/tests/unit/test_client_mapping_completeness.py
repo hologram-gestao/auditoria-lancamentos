@@ -25,6 +25,7 @@ from app.core.crypto_service import new_client_dek
 from app.core.exceptions import FileLinesInvalidError
 from app.db.models import UserRole, UserScope
 from app.db.models.usage_event import DEDUPED_EVENT_NAMES
+from app.modules.client_accounting_chart.schemas import ChartLayoutName
 from app.modules.client_accounting_chart.service import AccountingChartService
 from app.modules.client_accounting_chart.sheet import ChartLayout
 from app.modules.client_mapping import completeness as completeness_module
@@ -121,6 +122,8 @@ class TestEventoProps:
         # Duas listas (a da métrica e a do leitor) só não envelhecem separadas se
         # um teste as amarrar.
         assert get_args(ChartImportLayout) == get_args(ChartLayout.__value__)
+        # O payload da prévia (86e3ydjz4) também espelha o leitor.
+        assert get_args(ChartLayoutName) == get_args(ChartLayout.__value__)
 
     def test_layout_fora_do_vocabulario_e_recusado(self) -> None:
         with pytest.raises(ValidationError):

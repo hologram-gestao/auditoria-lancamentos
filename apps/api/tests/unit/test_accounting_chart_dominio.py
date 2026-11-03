@@ -274,8 +274,8 @@ class TestDeteccao:
         with pytest.raises(FileHeaderMismatchError) as caught:
             parse_chart_sheet(_xlsx([["Empresa:", "X"], ["foo", "bar"], [1, 2]]))
         # O que a recusa do modelo já dizia continua igual; desde a 86e3ydjyq ela
-        # também diz o que o conteúdo reconheceu (nada: duas colunas de inteiros
-        # empatadas para o código, sem nome nem tipo).
+        # também diz o que o conteúdo reconheceu: nada (a linha `1;2` não tem coluna de
+        # texto para ser o nome, então não há bloco de contas para mapear).
         assert caught.value.details == {
             "missingColumns": ["codigo_reduzido", "nome", "tipo"],
             "repeatedColumns": [],
@@ -283,8 +283,8 @@ class TestDeteccao:
             "foundColumnCount": 2,
             "expectedColumns": ["codigo_reduzido", "nome", "tipo", "classificacao"],
             "recognizedRoles": [],
-            "missingRoles": ["codigo", "tipo", "nome"],
-            "ambiguousRoles": ["codigo"],
+            "missingRoles": ["codigo", "nome", "tipo"],
+            "ambiguousRoles": [],
         }
 
     def test_dominio_so_com_cabecalho_e_sem_contas(self) -> None:

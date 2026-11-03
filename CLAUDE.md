@@ -643,10 +643,15 @@
      nome recuado do Domínio); natureza, CNPJ e o resto são IGNORADOS (coluna a mais nunca
      recusa), e o nome da coluna só desempata. Cada limiar é constante nomeada
      (`MIN_FILL_RATIO` 0,9, `MIN_FORM_RATIO` 0,95, `MIN_UNIQUE_RATIO` 0,95). As linhas
-     convertidas passam pelo MESMO `validate_rows`. Papel obrigatório ausente ou empatado é
-     a recusa `CABECALHO_DIVERGENTE` com `details.recognizedRoles`/`missingRoles`/
-     `ambiguousRoles` (papéis nossos, nunca texto do arquivo) e a frase "Reconhecemos…; não
-     encontramos…". Só planilha: o CSV segue só no modelo. **Arquivo de cliente novo vira
+     convertidas passam pelo MESMO `validate_rows`. Bloco de contas com papel obrigatório
+     ausente ou empatado NÃO é beco sem saída: é 422 `MAPEAMENTO_NECESSARIO` (86e3ydjz4) com a
+     frase "Reconhecemos…; não encontramos…", os papéis e o perfil das colunas, e a tela
+     pergunta o que é cada coluna; a prévia e a importação levam o campo `mapeamento` (layout
+     `mapeado`, não persiste). **O tipo pela hierarquia só por escolha explícita**
+     (`tipoPelaHierarquia`, com a contagem na prévia): na Tract daria 152 sintéticas contra
+     180, porque grupo sintético sem filho existe. Sem bloco, `CABECALHO_DIVERGENTE` com
+     `details.recognizedRoles`/`missingRoles`/`ambiguousRoles` (papéis nossos). Só planilha:
+     o CSV segue só no modelo. **Arquivo de cliente novo vira
      fixture anonimizada ANTES de regra mudar** (`tests/fixtures/accounting_chart_tract/`,
      `scripts/anonymize_tract_chart_sample.py`), e as duas fixtures do Domínio chegam ao
      MESMO plano pelo conteúdo, sem o cabeçalho (teste de generalidade).
@@ -1187,7 +1192,11 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
     descrição de lançamento — que nascem cifrados (§4.1/§4.5). Filtrar por heurística
     ("parece cabeçalho": sem dígito, curto) não resolve, porque nome de conta passa no
     teste. A exceção é `SEM_MAPEAMENTO`, onde mostrar as colunas É a função da resposta
-    (a tela constrói o mapeamento a partir delas) — exceção declarada, não esquecimento;
+    (a tela constrói o mapeamento a partir delas) — exceção declarada, não esquecimento; a
+    segunda é o `MAPEAMENTO_NECESSARIO` do plano contábil (86e3ydjz4), que devolve o
+    `cabecalho` de cada coluna e NUNCA um valor de célula, e só aceita como cabeçalho uma
+    linha de duas células de texto ou mais logo acima do bloco (a linha do banner, com a
+    razão social, nunca sai);
   - **coluna com tamanho fixo derivado de uma constante usa a CONSTANTE, nunca um
     literal** (86e3g9v0j): `title_contexts.text_iv` nasceu `String(32)` na migration da
     S15 enquanto o modelo e as outras 16 colunas `_iv` diziam `IV_HEX_LENGTH = 24`. Não

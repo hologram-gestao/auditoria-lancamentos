@@ -688,7 +688,7 @@ const FILE_REFUSALS: Record<'cabecalho' | 'linhas', Record<string, unknown>> = {
  * cenário "sem plano" e o desfecho da importação são trocados por teste.
  */
 let accountingChartEmpty = false;
-let accountingImportOutcome: 'sucesso' | 'linhas' | 'dominio' = 'sucesso';
+let accountingImportOutcome: 'sucesso' | 'linhas' | 'dominio' | 'mapeamento' = 'sucesso';
 /** 86e3qhhrn — a importação da relação de clientes/fornecedores: sucesso ou recusa. */
 let partiesImportOutcome: 'sucesso' | 'linhas' = 'sucesso';
 /** 86e3qhhrr — a prévia da planilha da Omie: pronta (com aviso de cadastro) ou com problemas. */
@@ -794,6 +794,60 @@ const ACCOUNTING_PREVIEW_REIMPORT = {
     },
   ],
   listLimit: 200,
+};
+
+/**
+ * 86e3ydjz4 — a etapa de mapeamento: o 422 `MAPEAMENTO_NECESSARIO` com o perfil das
+ * colunas (o cabeçalho é a exceção declarada; nenhum valor de célula) e a prévia
+ * depois do mapeamento, com o tipo pela hierarquia.
+ */
+const ACCOUNTING_MAPPING_REQUIRED = {
+  code: 'MAPEAMENTO_NECESSARIO',
+  message: 'x',
+  userMessage:
+    'Reconhecemos as colunas de código e classificação; não encontramos a coluna de tipo (S ou A); há mais de uma coluna que pode ser nome. Diga o que é cada coluna para continuar.',
+  details: {
+    recognizedRoles: ['codigo', 'classificacao'],
+    missingRoles: ['tipo', 'nome'],
+    ambiguousRoles: ['nome'],
+    colunas: [
+      {
+        indice: 0,
+        cabecalho: 'Código',
+        formaDetectada: 'inteiro',
+        preenchimento: 100,
+        papelSugerido: 'codigo',
+      },
+      {
+        indice: 1,
+        cabecalho: 'Classificação',
+        formaDetectada: 'classificacao',
+        preenchimento: 100,
+        papelSugerido: 'classificacao',
+      },
+      {
+        indice: 2,
+        cabecalho: 'Nome',
+        formaDetectada: 'texto',
+        preenchimento: 100,
+        papelSugerido: null,
+      },
+      {
+        indice: 3,
+        cabecalho: 'Nome fantasia',
+        formaDetectada: 'texto',
+        preenchimento: 96,
+        papelSugerido: null,
+      },
+      {
+        indice: 4,
+        cabecalho: 'CNPJ',
+        formaDetectada: 'documento',
+        preenchimento: 14,
+        papelSugerido: 'documento',
+      },
+    ],
+  },
 };
 
 /** 86e3nb816 — as duas recusas da gaveta de conta manual, no formato do servidor. */
@@ -2699,6 +2753,20 @@ async function fulfillApi(route: Route): Promise<void> {
   }
   if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/import/preview`) {
     if (enviouXls(route)) return recusarXls(route);
+    if (accountingImportOutcome === 'mapeamento') {
+      if (!(route.request().postData() ?? '').includes('name="mapeamento"')) {
+        return route.fulfill({
+          status: 422,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: ACCOUNTING_MAPPING_REQUIRED }),
+        });
+      }
+      return json({
+        ...ACCOUNTING_PREVIEW_FIRST,
+        layout: 'mapeado',
+        tipoDerivado: { sinteticas: 2, analiticas: 3 },
+      });
+    }
     if (accountingImportOutcome === 'linhas' || accountingImportOutcome === 'dominio') {
       const error =
         accountingImportOutcome === 'dominio'
@@ -12121,6 +12189,64 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByRole('button', { name: 'Nova conta' })).toHaveCount(0);
       await expect(page.getByRole('button', { name: /^Editar conta / })).toHaveCount(0);
       await analyze(page, `plano contábil — gerente do cliente sem conta manual (${vp.label})`);
+    });
+  });
+}
+
+/**
+ * Épico 86e3ydjy9 — importar o plano contábil de qualquer cliente sem conserto por
+ * cliente (Tract, 03/11/2026): a etapa de mapeamento (86e3ydjz4), a importação sem as
+ * linhas com problema e o selo "plano não está 100%" (86e3ydjze) e a relação de
+ * fornecedores sem título (86e3ydjzy), nos três temas e nos dois viewports.
+ *
+ * Bloco próprio no FIM do arquivo, pelo motivo do bloco 86e3f55bc.
+ */
+for (const vp of VIEWPORTS) {
+  const slugPC = vp.label.replace(/\s+/g, '-');
+  test.describe(`Plano contábil por conteúdo (86e3ydjy9) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('etapa "Diga o que é cada coluna": cabeçalho, forma, papel e a hierarquia (86e3ydjz4)', async ({
+      page,
+    }) => {
+      accountingChartEmpty = true;
+      accountingImportOutcome = 'mapeamento';
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+
+      await page.getByRole('button', { name: 'Importar planilha' }).click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      await gaveta.getByLabel('Planilha (.csv, .xlsx ou .xls)').setInputFiles(PLANILHA_PLANO);
+      await gaveta.getByRole('button', { name: 'Revisar mudanças', exact: true }).click();
+
+      const etapa = gaveta.getByTestId('accounting-chart-mapping-step');
+      await expect(etapa.getByRole('heading', { name: 'Diga o que é cada coluna' })).toBeVisible();
+      await expect(etapa.getByRole('listitem')).toHaveCount(5);
+      await expect(etapa.getByRole('listitem').nth(3)).toContainText('Coluna 4 · Nome fantasia');
+      await expect(etapa.getByRole('combobox', { name: 'Papel da coluna 3' })).toHaveText(
+        'Ignorar',
+      );
+      // Nenhuma recusa: é uma pergunta.
+      await expect(gaveta.locator('[data-refusal-code]')).toHaveCount(0);
+      const continuar = gaveta.getByRole('button', { name: 'Continuar', exact: true });
+      await exigirDentroDaViewport(page, continuar, `${vp.label}: "Continuar" da etapa`);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        `${vp.label}: sem rolagem horizontal`,
+      ).toBe(true);
+      await shot(page, `plano-contabil-mapeamento-${slugPC}`);
+      await analyze(page, `plano contábil — etapa de mapeamento (${vp.label})`);
+
+      await etapa.getByRole('combobox', { name: 'Papel da coluna 3' }).click();
+      await page.getByRole('option', { name: 'Nome' }).click();
+      await etapa.getByRole('switch').click();
+      await continuar.click();
+
+      const derivado = gaveta.getByTestId('accounting-chart-preview-derived-types');
+      await expect(derivado).toContainText('2 contas marcadas como sintéticas pela hierarquia');
+      await shot(page, `plano-contabil-mapeamento-previa-${slugPC}`);
+      await analyze(page, `plano contábil — prévia do mapeamento (${vp.label})`);
     });
   });
 }

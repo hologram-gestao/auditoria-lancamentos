@@ -227,6 +227,7 @@ function preview(
     alteradas: [{ accountId: 'acc-10', code: '10', name: 'Ativo circulante', changes: ['nome'] }],
     ausentes: [],
     listLimit: 200,
+    tipoDerivado: null,
     ...overrides,
   };
 }
@@ -896,6 +897,187 @@ describe('importação', () => {
       within(notice).queryByRole('list', { name: 'Colunas obrigatórias que faltam' }),
     ).not.toBeInTheDocument();
     expect(within(notice).queryByTestId('accounting-header-counts')).not.toBeInTheDocument();
+  });
+
+  describe('etapa de mapeamento (86e3ydjz4)', () => {
+    const columns = [
+      {
+        indice: 0,
+        cabecalho: 'Código',
+        formaDetectada: 'inteiro',
+        preenchimento: 100,
+        papelSugerido: 'codigo',
+      },
+      {
+        indice: 1,
+        cabecalho: 'Classificação',
+        formaDetectada: 'classificacao',
+        preenchimento: 100,
+        papelSugerido: 'classificacao',
+      },
+      {
+        indice: 2,
+        cabecalho: null,
+        formaDetectada: 'texto',
+        preenchimento: 100,
+        papelSugerido: null,
+      },
+      {
+        indice: 3,
+        cabecalho: null,
+        formaDetectada: 'texto',
+        preenchimento: 100,
+        papelSugerido: null,
+      },
+    ];
+
+    function mappingRequired() {
+      return refusal('MAPEAMENTO_NECESSARIO', {
+        colunas: columns,
+        recognizedRoles: ['codigo', 'classificacao'],
+        missingRoles: ['tipo', 'nome'],
+        ambiguousRoles: ['nome'],
+      });
+    }
+
+    async function chooseRole(
+      user: ReturnType<typeof userEvent.setup>,
+      dialog: HTMLElement,
+      column: number,
+      role: string,
+    ) {
+      await user.click(within(dialog).getByRole('combobox', { name: `Papel da coluna ${column}` }));
+      await user.click(await screen.findByRole('option', { name: role }));
+    }
+
+    it('abre a etapa com o cabeçalho, a forma e o papel sugerido, sem valor de célula', async () => {
+      withoutPlan();
+      previewState.mutateAsync = vi.fn().mockRejectedValue(mappingRequired());
+      render(<AccountingChartScreen clientId="c1" />);
+      const { user, dialog } = await openAndPick(/Importar planilha/);
+      await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+
+      const step = await within(dialog).findByTestId('accounting-chart-mapping-step');
+      expect(within(step).getByText('Diga o que é cada coluna')).toBeInTheDocument();
+      expect(
+        within(step).getByText('Mensagem tipada de MAPEAMENTO_NECESSARIO.'),
+      ).toBeInTheDocument();
+      // O cabeçalho da coluna (a exceção declarada) aparece ao lado do número dela.
+      const items = within(
+        within(step).getByRole('list', { name: 'Colunas da planilha' }),
+      ).getAllByRole('listitem');
+      expect(items[0]).toHaveTextContent('Coluna 1 · Código');
+      expect(items[2]).toHaveTextContent(/^Coluna 3texto/);
+      expect(within(step).getAllByText('texto · 100% preenchida')).toHaveLength(2);
+      expect(within(step).getByRole('combobox', { name: 'Papel da coluna 1' })).toHaveTextContent(
+        'Código',
+      );
+      // As duas colunas de texto chegam sem papel: ignorar até a pessoa escolher.
+      expect(within(step).getByRole('combobox', { name: 'Papel da coluna 3' })).toHaveTextContent(
+        'Ignorar',
+      );
+      expect(within(dialog).getByRole('button', { name: 'Continuar' })).toBeInTheDocument();
+      // A recusa não aparece: é uma pergunta, não um erro.
+      expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('a regra do servidor: sem tipo e sem a hierarquia, não continua', async () => {
+      withoutPlan();
+      previewState.mutateAsync = vi.fn().mockRejectedValueOnce(mappingRequired());
+      render(<AccountingChartScreen clientId="c1" />);
+      const { user, dialog } = await openAndPick(/Importar planilha/);
+      await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+      await within(dialog).findByTestId('accounting-chart-mapping-step');
+      await chooseRole(user, dialog, 3, 'Nome');
+      await user.click(within(dialog).getByRole('button', { name: 'Continuar' }));
+
+      expect(
+        await within(dialog).findByText(
+          'Escolha a coluna de tipo (S ou A), ou marque que o arquivo não tem coluna de tipo.',
+        ),
+      ).toBeInTheDocument();
+      expect(previewState.mutateAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it('a mesma coluna em dois papéis é recusada antes de enviar', async () => {
+      withoutPlan();
+      previewState.mutateAsync = vi.fn().mockRejectedValueOnce(mappingRequired());
+      render(<AccountingChartScreen clientId="c1" />);
+      const { user, dialog } = await openAndPick(/Importar planilha/);
+      await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+      await within(dialog).findByTestId('accounting-chart-mapping-step');
+      await chooseRole(user, dialog, 3, 'Nome');
+      await chooseRole(user, dialog, 4, 'Nome');
+      await user.click(within(dialog).getByRole('button', { name: 'Continuar' }));
+
+      expect(await within(dialog).findByText('Só uma coluna pode ser nome.')).toBeInTheDocument();
+      expect(previewState.mutateAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it('com a hierarquia, a prévia diz quantas ficaram sintéticas e a importação leva o mesmo mapeamento', async () => {
+      withoutPlan();
+      previewState.mutateAsync = vi
+        .fn()
+        .mockRejectedValueOnce(mappingRequired())
+        .mockResolvedValueOnce(
+          preview({
+            layout: 'mapeado',
+            contas: 7,
+            contasNovas: 7,
+            contasAlteradas: 0,
+            contasSemMudanca: 0,
+            tipoDerivado: { sinteticas: 3, analiticas: 4 },
+          }),
+        );
+      importState.mutateAsync = vi.fn().mockResolvedValue({
+        contas: 7,
+        contasNovas: 7,
+        contasAlteradas: 0,
+        contasAusentes: 0,
+      });
+      render(<AccountingChartScreen clientId="c1" />);
+      const { user, dialog } = await openAndPick(/Importar planilha/);
+      await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+      await within(dialog).findByTestId('accounting-chart-mapping-step');
+
+      const hierarchy = within(dialog).getByRole('switch');
+      // Sem nome escolhido ainda a hierarquia já pode: classificação marcada, sem tipo.
+      expect(hierarchy).toBeEnabled();
+      await chooseRole(user, dialog, 3, 'Nome');
+      await user.click(hierarchy);
+      await user.click(within(dialog).getByRole('button', { name: 'Continuar' }));
+
+      const expected = {
+        colunas: { codigo: 0, classificacao: 1, nome: 2 },
+        tipoPelaHierarquia: true,
+      };
+      await waitFor(() =>
+        expect(previewState.mutateAsync).toHaveBeenLastCalledWith(
+          expect.objectContaining({ mapping: expected }),
+        ),
+      );
+      expect(
+        await within(dialog).findByTestId('accounting-chart-preview-derived-types'),
+      ).toHaveTextContent('3 contas marcadas como sintéticas pela hierarquia');
+
+      await user.click(within(dialog).getByRole('button', { name: 'Confirmar importação' }));
+      await waitFor(() =>
+        expect(importState.mutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({ mapping: expected }),
+        ),
+      );
+    });
+
+    it('com uma coluna de tipo escolhida, o interruptor da hierarquia fica desabilitado', async () => {
+      withoutPlan();
+      previewState.mutateAsync = vi.fn().mockRejectedValueOnce(mappingRequired());
+      render(<AccountingChartScreen clientId="c1" />);
+      const { user, dialog } = await openAndPick(/Importar planilha/);
+      await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+      await within(dialog).findByTestId('accounting-chart-mapping-step');
+      await chooseRole(user, dialog, 4, 'Tipo (S ou A)');
+      expect(within(dialog).getByRole('switch')).toBeDisabled();
+    });
   });
 
   it('CABECALHO_DIVERGENTE por coluna REPETIDA nomeia a repetida (é do modelo)', async () => {

@@ -47,7 +47,8 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
+from pydantic import ValidationError
 
 from app.core.audit import AccessAction, record_access
 from app.core.dependencies import (
@@ -59,6 +60,7 @@ from app.core.dependencies import (
     OpenClientDep,
     SettingsDep,
 )
+from app.core.exceptions import ValidationAppError
 from app.db.models.client_accounting_account import (
     MAX_ACCOUNTING_ACCOUNT_CODE_CHARS,
     AccountingAccountType,
@@ -73,14 +75,17 @@ from app.modules.client_accounting_chart.omie_sheet import (
     OMIE_EXPORT_MEDIA_TYPE,
     omie_export_filename,
 )
+from app.modules.client_accounting_chart.recognizer import ColumnMapping
 from app.modules.client_accounting_chart.repository import AccountingChartFilters
 from app.modules.client_accounting_chart.schemas import (
+    MAX_CHART_MAPPING_CHARS,
     AccountingAccountCreateRequest,
     AccountingAccountEnvelope,
     AccountingAccountResponse,
     AccountingAccountStatusFilter,
     AccountingAccountUpdateRequest,
     AccountingChartListResponse,
+    ChartColumnMappingRequest,
     ChartImportEnvelope,
     ChartImportPayload,
     ChartImportPreviewEnvelope,
@@ -174,6 +179,31 @@ async def list_accounting_chart(
     )
 
 
+#: O campo `mapeamento` das duas rotas (86e3ydjz4): o JSON do mapeamento das colunas.
+_MAPPING_FORM_DESCRIPTION = (
+    "Opcional. O que é cada coluna, quando a planilha pediu (`MAPEAMENTO_NECESSARIO`): JSON "
+    '`{"colunas": {"codigo": 0, "classificacao": 1, "tipo": 2, "grau": 3, "nome": 5}, '
+    '"tipoPelaHierarquia": false}` (índice 0 = primeira coluna). `codigo` e `nome` são '
+    "obrigatórios; `tipo` também, salvo com `tipoPelaHierarquia: true`, que exige a "
+    "`classificacao` e marca como sintética a conta que tem outra abaixo. Com ele, a "
+    "planilha é lida pelos papéis escolhidos (layout `mapeado`). Forma inválida: 400."
+)
+MappingForm = Annotated[
+    str | None,
+    Form(max_length=MAX_CHART_MAPPING_CHARS, description=_MAPPING_FORM_DESCRIPTION),
+]
+
+
+def _mapping_from_form(raw: str | None) -> ColumnMapping | None:
+    """O mapeamento do multipart, validado; forma inválida é o 400 genérico."""
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return ChartColumnMappingRequest.model_validate_json(raw).to_mapping()
+    except ValidationError:
+        raise ValidationAppError("mapeamento do plano contábil inválido") from None
+
+
 @router.post(
     "/import",
     summary=(
@@ -193,7 +223,11 @@ async def list_accounting_chart(
         "(layout `reconhecido`): inteiro sem repetição é o código, `1.1.2` a classificação, "
         "`S`/`A` o tipo, inteiro igual à profundidade da classificação o grau e texto o nome; "
         "natureza, CNPJ e qualquer outra coluna são ignorados, e o nome da coluna só "
-        "desempata. "
+        "desempata. Quando o conteúdo não decide código, nome ou tipo, a resposta é 422 "
+        "`MAPEAMENTO_NECESSARIO` com `details.colunas` (`indice`, `cabecalho`, "
+        "`formaDetectada`, `preenchimento`, `papelSugerido`: o cabeçalho é o único texto do "
+        "arquivo que sai, nunca um valor de célula) e o pedido seguinte manda o campo "
+        "`mapeamento`. "
         "A reimportação casa por código e só adiciona e atualiza: conta "
         "nova entra ativa, conta existente atualiza nome, tipo e classificação, e a "
         "conta que não veio na planilha continua como estava (nunca é inativada nem "
@@ -231,13 +265,15 @@ async def import_accounting_chart(
             description="CSV (`;`, UTF-8), XLSX ou XLS no modelo, ou o plano exportado do Domínio."
         ),
     ],
+    mapeamento: MappingForm = None,
 ) -> ChartImportEnvelope:
+    mapping = _mapping_from_form(mapeamento)
     content = await read_upload_within_limit(
         file,
         declared_content_length=parse_content_length(request.headers.get("content-length")),
         max_bytes=settings.max_upload_bytes,
     )
-    result = await service.import_sheet(client, actor=actor, content=content)
+    result = await service.import_sheet(client, actor=actor, content=content, mapping=mapping)
     return ChartImportEnvelope(data=ChartImportPayload.from_result(result))
 
 
@@ -246,7 +282,9 @@ async def import_accounting_chart(
     summary=(
         "Mostra o que a importação desta planilha faria, SEM GRAVAR nada: o mesmo leitor "
         "e as mesmas recusas 422 de `POST …/import` (modelo da plataforma, plano "
-        "exportado do Domínio e planilha lida pelo conteúdo das colunas). Devolve as contagens (`contasNovas`, `contasAlteradas`, "
+        "exportado do Domínio, planilha lida pelo conteúdo das colunas e o 422 "
+        "`MAPEAMENTO_NECESSARIO`), e o mesmo campo `mapeamento`; com o tipo pela "
+        "hierarquia, `tipoDerivado` diz quantas ficaram sintéticas. Devolve as contagens (`contasNovas`, `contasAlteradas`, "
         "`contasSemMudanca`, `contasAusentes`, `contasAusentesEmUso` — as ausentes que "
         "decisões do de-para, de qualquer vigência, ou a conta do banco usam —, "
         "`contasQueVoltaram` e `contasInativasNaPlanilha`), `temMudancas` e as listas "
@@ -269,13 +307,15 @@ async def preview_accounting_chart_import(
             description="CSV (`;`, UTF-8), XLSX ou XLS no modelo, ou o plano exportado do Domínio."
         ),
     ],
+    mapeamento: MappingForm = None,
 ) -> ChartImportPreviewEnvelope:
+    mapping = _mapping_from_form(mapeamento)
     content = await read_upload_within_limit(
         file,
         declared_content_length=parse_content_length(request.headers.get("content-length")),
         max_bytes=settings.max_upload_bytes,
     )
-    preview = await service.preview_sheet(client, content=content)
+    preview = await service.preview_sheet(client, content=content, mapping=mapping)
     return ChartImportPreviewEnvelope(data=ChartImportPreviewPayload.from_preview(preview))
 
 

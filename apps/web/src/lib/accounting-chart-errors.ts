@@ -169,6 +169,49 @@ export function readAccountingChartRefusal(error: unknown): AccountingChartRefus
   }
 }
 
+/** Uma coluna do bloco de contas, como a etapa de mapeamento a mostra (86e3ydjz4). */
+export interface ChartMappingColumn {
+  indice: number;
+  /** O texto do cabeçalho acima do bloco (exceção declarada), ou `null`. */
+  cabecalho: string | null;
+  formaDetectada: string;
+  preenchimento: number;
+  papelSugerido: string | null;
+}
+
+export interface ChartMappingRequired {
+  userMessage: string;
+  columns: ChartMappingColumn[];
+}
+
+/**
+ * O 422 `MAPEAMENTO_NECESSARIO` (86e3ydjz4): o servidor achou o bloco de contas mas não
+ * decidiu código, nome ou tipo. Não é recusa: a gaveta abre a etapa "Diga o que é cada
+ * coluna". Coluna fora da forma é descartada; sem coluna legível → `null`.
+ */
+export function readChartMappingRequired(error: unknown): ChartMappingRequired | null {
+  if (!(error instanceof ApiError) || error.code !== 'MAPEAMENTO_NECESSARIO') return null;
+  const raw = error.details.colunas;
+  if (!Array.isArray(raw)) return null;
+  const columns: ChartMappingColumn[] = [];
+  for (const item of raw as unknown[]) {
+    if (typeof item !== 'object' || item === null) continue;
+    const { indice, cabecalho, formaDetectada, preenchimento, papelSugerido } = item as Record<
+      string,
+      unknown
+    >;
+    if (typeof indice !== 'number' || typeof formaDetectada !== 'string') continue;
+    columns.push({
+      indice,
+      cabecalho: typeof cabecalho === 'string' ? cabecalho : null,
+      formaDetectada,
+      preenchimento: typeof preenchimento === 'number' ? preenchimento : 0,
+      papelSugerido: typeof papelSugerido === 'string' ? papelSugerido : null,
+    });
+  }
+  return columns.length > 0 ? { userMessage: error.userMessage, columns } : null;
+}
+
 /**
  * O 422 do validador ÚNICO de conta (BACK 16.1): sintética ou inativa não
  * recebe decisão nova nem vira conta do banco. Devolve a mensagem para o

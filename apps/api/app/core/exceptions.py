@@ -86,6 +86,10 @@ class ErrorCode(StrEnum):
     FORMATO_NAO_SUPORTADO = "FORMATO_NAO_SUPORTADO"
     ARQUIVO_INVALIDO = "ARQUIVO_INVALIDO"
     CABECALHO_DIVERGENTE = "CABECALHO_DIVERGENTE"
+    #: 86e3ydjz4 — a planilha do plano contábil tem um bloco de contas, mas o
+    #: reconhecimento por conteúdo não decidiu código, nome ou tipo: em vez de recusa,
+    #: a tela pergunta o que é cada coluna (422, com o perfil das colunas).
+    MAPEAMENTO_NECESSARIO = "MAPEAMENTO_NECESSARIO"
     LINHAS_INVALIDAS = "LINHAS_INVALIDAS"
     TOTAL_DIVERGENTE = "TOTAL_DIVERGENTE"
     # Sprint 16 — plano de contas contábil do cliente (BACK 16.1). A importação reusa
@@ -924,6 +928,22 @@ class FileHeaderMismatchError(AppError):
         "O cabeçalho do arquivo não tem as colunas do mapeamento. Revise o mapeamento ou "
         "envie o arquivo com as colunas esperadas."
     )
+
+
+class ChartMappingRequiredError(AppError):
+    """422 — a planilha do plano contábil precisa que a pessoa diga o que é cada coluna.
+
+    `details.colunas` = `[{indice, cabecalho, formaDetectada, preenchimento,
+    papelSugerido}]`, mais `recognizedRoles`/`missingRoles`/`ambiguousRoles`. **Exceção
+    DECLARADA** à regra de que a recusa não ecoa o arquivo (§7 Backend, 86e3fvffy, no
+    molde da `SEM_MAPEAMENTO` da S14): o `cabecalho` é texto do arquivo e sai porque a
+    função desta resposta é a pessoa escolher o papel de cada coluna. Valor de célula do
+    bloco de contas NUNCA sai: a forma e o preenchimento são contagens.
+    """
+
+    code = ErrorCode.MAPEAMENTO_NECESSARIO
+    status_code = 422
+    default_user_message = "Diga o que é cada coluna para continuar."
 
 
 class FileLinesInvalidError(AppError):

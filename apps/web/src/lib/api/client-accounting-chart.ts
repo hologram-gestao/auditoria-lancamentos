@@ -54,6 +54,7 @@ import type {
   SourceAccountEntry,
 } from '@/lib/contracts';
 import type { components } from '@/lib/contracts/schema';
+import type { AccountingChartMappingPayload } from '@/lib/validation/accounting-chart-mapping';
 
 import {
   apiDelete,
@@ -76,9 +77,30 @@ type PartiesBody =
   components['schemas']['Body_import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post'];
 
 /** Nome do campo do multipart — travado no contrato pelo `satisfies` (as três rotas). */
-const IMPORT_FIELD = { file: 'file' } as const satisfies Record<keyof ImportBody, string> &
-  Record<keyof PreviewBody, string> &
+const IMPORT_FIELD = { file: 'file' } as const satisfies Partial<Record<keyof ImportBody, string>> &
+  Partial<Record<keyof PreviewBody, string>> &
   Record<keyof PartiesBody, string>;
+
+/** Os campos opcionais da importação do plano, travados no contrato (épico 86e3ydjy9). */
+const IMPORT_OPTION_FIELDS = {
+  mapping: 'mapeamento',
+} as const satisfies Record<string, keyof ImportBody & keyof PreviewBody>;
+
+/** O que vai junto do arquivo na prévia e na importação do plano (épico 86e3ydjy9). */
+export interface AccountingChartImportRequest {
+  file: File;
+  /** A etapa "Diga o que é cada coluna" (86e3ydjz4), quando o servidor pediu. */
+  mapping?: AccountingChartMappingPayload | null;
+}
+
+function importForm(request: AccountingChartImportRequest): FormData {
+  const form = new FormData();
+  form.append(IMPORT_FIELD.file, request.file);
+  if (request.mapping) {
+    form.append(IMPORT_OPTION_FIELDS.mapping, JSON.stringify(request.mapping));
+  }
+  return form;
+}
 
 /** Teto do `pageSize` no servidor (`le=100`); acima dele a rota responde 422. */
 export const ACCOUNTING_CHART_MAX_PAGE_SIZE = 100;
@@ -118,13 +140,11 @@ export async function listAccountingChart(
  */
 export async function importAccountingChart(
   clientId: string,
-  file: File,
+  request: AccountingChartImportRequest,
 ): Promise<AccountingChartImportResult> {
-  const form = new FormData();
-  form.append(IMPORT_FIELD.file, file);
   return apiPostMultipart<AccountingChartImportResult>(
     `${clientBase(clientId)}/accounting-chart/import`,
-    form,
+    importForm(request),
   );
 }
 
@@ -134,13 +154,11 @@ export async function importAccountingChart(
  */
 export async function previewAccountingChartImport(
   clientId: string,
-  file: File,
+  request: AccountingChartImportRequest,
 ): Promise<AccountingChartImportPreview> {
-  const form = new FormData();
-  form.append(IMPORT_FIELD.file, file);
   return apiPostMultipart<AccountingChartImportPreview>(
     `${clientBase(clientId)}/accounting-chart/import/preview`,
-    form,
+    importForm(request),
   );
 }
 

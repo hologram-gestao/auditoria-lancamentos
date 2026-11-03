@@ -66,6 +66,25 @@ export function AccountingChartImportPreviewPanel({
         <PreviewStat label="Não vieram" value={preview.contasAusentes} />
       </dl>
 
+      {preview.tipoDerivado && (
+        <p
+          data-testid="accounting-chart-preview-derived-types"
+          className="bg-info-muted text-info ring-info/30 flex items-start gap-2 rounded-lg p-3 text-sm ring-1 ring-inset"
+        >
+          <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>
+            {plural(
+              preview.tipoDerivado.sinteticas,
+              'conta marcada como sintética',
+              'contas marcadas como sintéticas',
+            )}{' '}
+            pela hierarquia (têm contas abaixo); as outras{' '}
+            {plural(preview.tipoDerivado.analiticas, 'é analítica', 'são analíticas')}. Confira
+            antes de confirmar: um grupo sem conta abaixo fica analítico.
+          </span>
+        </p>
+      )}
+
       {!preview.temMudancas && (
         <p role="status" className="bg-muted text-foreground rounded-lg p-3 text-sm">
           Esta planilha não muda nada no plano contábil: todas as contas já estão como nela.
