@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -85,6 +85,7 @@ from app.modules.client_accounting_chart.sheet import (
     REASON_FIELD,
     ChartLayout,
     ChartSheetRow,
+    ParsedChartSheet,
     parse_chart_sheet,
     validate_account,
 )
@@ -477,6 +478,7 @@ class AccountingChartService:
             "accounting_chart_imported",
             client_id=str(client.id),
             layout=result.layout,
+            **_recognition_log(parsed),
             accounts=result.accounts,
             new=result.new,
             updated=result.updated,
@@ -507,6 +509,7 @@ class AccountingChartService:
             "accounting_chart_import_previewed",
             client_id=str(client.id),
             layout=parsed.layout,
+            **_recognition_log(parsed),
             accounts=len(parsed.rows),
             new=len(diff.new_rows),
             updated=len(diff.changed),
@@ -1324,6 +1327,17 @@ def _effective_nature(account: ClientAccountingAccount) -> AccountingAccountNatu
 
 def _digits(value: str) -> str:
     return "".join(ch for ch in value if ch.isdigit())
+
+
+def _recognition_log(parsed: ParsedChartSheet) -> dict[str, Any]:
+    """Só CONTAGENS do reconhecimento por conteúdo (86e3ydjyq): os papéis reconhecidos e
+    quantas colunas foram ignoradas. Nenhum texto do arquivo (§4.5)."""
+    if parsed.recognition is None:
+        return {}
+    return {
+        "recognized_roles": parsed.recognition.recognized_roles,
+        "ignored_columns": parsed.recognition.ignored_columns,
+    }
 
 
 def _require_open(client: Client) -> None:

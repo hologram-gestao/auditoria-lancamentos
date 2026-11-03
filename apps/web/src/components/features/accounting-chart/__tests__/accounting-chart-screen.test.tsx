@@ -866,6 +866,38 @@ describe('importação', () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
+  it('CABECALHO_DIVERGENTE com papéis reconhecidos diz o que achou e o que falta (86e3ydjyq)', async () => {
+    withoutPlan();
+    previewState.mutateAsync = vi.fn().mockRejectedValue(
+      refusal('CABECALHO_DIVERGENTE', {
+        missingColumns: ['codigo_reduzido', 'tipo'],
+        repeatedColumns: [],
+        unexpectedColumnCount: 1,
+        foundColumnCount: 2,
+        recognizedRoles: ['codigo', 'nome'],
+        missingRoles: ['tipo'],
+        ambiguousRoles: [],
+      }),
+    );
+    render(<AccountingChartScreen clientId="c1" />);
+    const { user, dialog } = await openAndPick(/Importar planilha/);
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+
+    const notice = await within(dialog).findByRole('alert');
+    expect(within(notice).getByRole('list', { name: 'Reconhecemos' })).toHaveTextContent(
+      'CódigoNome',
+    );
+    expect(within(notice).getByRole('list', { name: 'Não encontramos' })).toHaveTextContent(
+      'Tipo (S ou A)',
+    );
+    // Com o reconhecimento, a lista de colunas do MODELO sai: ela mandaria a pessoa
+    // renomear colunas que a plataforma já entendeu.
+    expect(
+      within(notice).queryByRole('list', { name: 'Colunas obrigatórias que faltam' }),
+    ).not.toBeInTheDocument();
+    expect(within(notice).queryByTestId('accounting-header-counts')).not.toBeInTheDocument();
+  });
+
   it('CABECALHO_DIVERGENTE por coluna REPETIDA nomeia a repetida (é do modelo)', async () => {
     withoutPlan();
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);

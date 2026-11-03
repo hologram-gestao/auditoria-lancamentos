@@ -632,6 +632,24 @@
      categoria). O código do fornecedor padrão não é conferido no Omie ao gravar: quem o
      escolhe é a busca por CNPJ da tela, e um código que sumir falha no título com a
      mensagem da Omie.
+   - **A planilha do plano contábil é lida pelo CONTEÚDO das colunas quando não é o modelo
+     nem o export do Domínio** (épico 86e3ydjy9, Tract em 03/11/2026): a pergunta deixou de
+     ser "qual layout é este?" e passou a ser "qual coluna é o quê?". Três caminhos, nesta
+     ordem: cabeçalho exato do Domínio, cabeçalho exato do modelo, e o RECONHECEDOR
+     (`client_accounting_chart/recognizer.py::recognize_columns`, função pura, sem IA,
+     layout `reconhecido`): inteiro sem repetição é o código, `1.1.2` a classificação, só
+     `S`/`A` o tipo (vazio é analítica só quando a coluna nunca traz `A`), inteiro igual à
+     profundidade o grau, texto o nome (colunas vizinhas que nunca dividem uma linha são o
+     nome recuado do Domínio); natureza, CNPJ e o resto são IGNORADOS (coluna a mais nunca
+     recusa), e o nome da coluna só desempata. Cada limiar é constante nomeada
+     (`MIN_FILL_RATIO` 0,9, `MIN_FORM_RATIO` 0,95, `MIN_UNIQUE_RATIO` 0,95). As linhas
+     convertidas passam pelo MESMO `validate_rows`. Papel obrigatório ausente ou empatado é
+     a recusa `CABECALHO_DIVERGENTE` com `details.recognizedRoles`/`missingRoles`/
+     `ambiguousRoles` (papéis nossos, nunca texto do arquivo) e a frase "Reconhecemos…; não
+     encontramos…". Só planilha: o CSV segue só no modelo. **Arquivo de cliente novo vira
+     fixture anonimizada ANTES de regra mudar** (`tests/fixtures/accounting_chart_tract/`,
+     `scripts/anonymize_tract_chart_sample.py`), e as duas fixtures do Domínio chegam ao
+     MESMO plano pelo conteúdo, sem o cabeçalho (teste de generalidade).
    - **O vínculo conta contábil ↔ cliente/fornecedor vem das relações do Domínio, por
      arquivo e tudo ou nada** (86e3qhhrn): `POST …/accounting-chart/parties/import` lê a
      "RELAÇÃO DE CLIENTES" ou a "RELAÇÃO DE FORNECEDORES" (`.xls` com o mesmo defeito dos
@@ -1611,7 +1629,8 @@ que vale como lei:
   importado por planilha no modelo da plataforma (`codigo_reduzido;nome;tipo[;classificacao]`)
   ou pelo plano EXPORTADO do Domínio em `.xlsx`, reconhecido pelo cabeçalho e convertido
   para o modelo (`client_accounting_chart/dominio.py`, 86e3gkd7y; o CSV nativo do Domínio
-  não entra), tudo ou nada; o Domínio aceita duas contas com a MESMA classificação e a
+  não entra), ou por qualquer planilha lida pelo CONTEÚDO das colunas (épico 86e3ydjy9,
+  §4.8); o Domínio aceita duas contas com a MESMA classificação e a
   chave da conta é o código reduzido, então classificação repetida entra (86e3uyzcf,
   amostra da 4S) e só código repetido recusa; **reimportar só adiciona e atualiza** (86e3qhhrm, decisão do
   Pedro de 14/10): casa por código, a conta que não veio fica como estava (nunca

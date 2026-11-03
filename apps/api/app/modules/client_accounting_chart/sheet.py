@@ -62,8 +62,15 @@ from app.db.models.client_accounting_account import (
 from app.db.models.client_input_mapping import InputFileFormat
 from app.modules.client_accounting_chart.dominio import (
     DOMINIO_HEADER_SEARCH_ROWS,
+    DominioConversion,
     convert_dominio,
     find_dominio_header,
+)
+from app.modules.client_accounting_chart.recognizer import (
+    ColumnRecognition,
+    ColumnRole,
+    convert_by_columns,
+    recognize_columns,
 )
 from app.modules.client_file_ingestion.reader import (
     MAX_INVALID_LINES_REPORTED,
@@ -89,7 +96,8 @@ OPTIONAL_COLUMNS: tuple[str, ...] = (COLUMN_CLASSIFICATION,)
 MODEL_COLUMNS: tuple[str, ...] = (COLUMN_CODE, COLUMN_NAME, COLUMN_TYPE, COLUMN_CLASSIFICATION)
 
 #: De onde veio a planilha — vocabulário FECHADO, vai para a métrica da importação.
-type ChartLayout = Literal["modelo", "dominio"]
+#: `reconhecido` é a planilha lida pelo CONTEÚDO das colunas (86e3ydjyq).
+type ChartLayout = Literal["modelo", "dominio", "reconhecido"]
 
 #: CSV do modelo: `;` e UTF-8 (o `-sig` aceita o BOM que o Excel grava). DECLARADOS,
 #: nunca farejados (mesma regra do mapeamento de entrada da S14).
@@ -126,6 +134,21 @@ _HEADER_MESSAGE = (
     "O cabeçalho da planilha não segue o modelo do plano de contas: as colunas são "
     "codigo_reduzido, nome e tipo (obrigatórias) e classificacao (opcional). Maiúsculas, "
     "acentos, espaços e hífens não importam; outros nomes não são aceitos."
+)
+#: Como a recusa nomeia cada papel (o vocabulário NOSSO, nunca um texto do arquivo).
+ROLE_LABELS: dict[ColumnRole, str] = {
+    "codigo": "código",
+    "classificacao": "classificação",
+    "tipo": "tipo (S ou A)",
+    "grau": "grau",
+    "nome": "nome",
+    "natureza": "natureza",
+    "documento": "CNPJ/CPF",
+    "desconhecida": "outra",
+}
+_RECOGNITION_TAIL = (
+    " Envie no modelo da plataforma (codigo_reduzido, nome, tipo e classificacao) ou com "
+    "uma coluna de código, uma de nome e uma de tipo."
 )
 _LINES_MESSAGE = (
     "A planilha tem linhas inválidas. Corrija as linhas apontadas e envie de novo — "
@@ -391,10 +414,15 @@ def validate_rows(
 
 @dataclass(frozen=True, slots=True)
 class ParsedChartSheet:
-    """As contas válidas e o layout reconhecido (`modelo` ou `dominio`)."""
+    """As contas válidas e o layout reconhecido (`modelo`, `dominio` ou `reconhecido`).
+
+    `recognition` só existe quando a planilha foi lida pelo conteúdo: é dele que saem
+    as contagens do log (papéis reconhecidos e colunas ignoradas, nunca um texto).
+    """
 
     rows: list[ChartSheetRow]
     layout: ChartLayout
+    recognition: ColumnRecognition | None = None
 
     def __repr__(self) -> str:
         return f"<ParsedChartSheet rows={len(self.rows)} layout={self.layout}>"
@@ -447,18 +475,103 @@ def _dominio_header_line(content: bytes, file_format: InputFileFormat) -> int | 
     return find_dominio_header(peek)
 
 
-def _parse_dominio(content: bytes, header_line: int) -> list[ChartSheetRow]:
+def _raw_rows(content: bytes) -> list[tuple[int, list[Any]]]:
     try:
-        raw = read_sheet_raw_rows(content)
+        return read_sheet_raw_rows(content)
     except FileInvalidError:
         _raise_invalid_file()
-    conversion = convert_dominio(raw, header_line)
+
+
+def _validated(conversion: DominioConversion, *, user_message: str) -> list[ChartSheetRow]:
+    """As linhas convertidas pelo MESMO `validate_rows` do modelo; problema recusa tudo."""
     valid, problems = validate_rows(MODEL_COLUMNS, conversion.rows)
     all_problems: list[tuple[int, str]] = [(p.line, p.reason) for p in problems]
     all_problems += [(p.line, p.reason) for p in conversion.problems]
     if all_problems:
-        _raise_lines(all_problems, user_message=_DOMINIO_LINES_MESSAGE)
+        _raise_lines(all_problems, user_message=user_message)
     return _require_accounts(valid)
+
+
+def _parse_dominio(content: bytes, header_line: int) -> list[ChartSheetRow]:
+    conversion = convert_dominio(_raw_rows(content), header_line)
+    return _validated(conversion, user_message=_DOMINIO_LINES_MESSAGE)
+
+
+def _labels(roles: Sequence[ColumnRole]) -> str:
+    labels = [ROLE_LABELS[role] for role in roles]
+    if len(labels) <= 1:
+        return "".join(labels)
+    return ", ".join(labels[:-1]) + " e " + labels[-1]
+
+
+def recognition_message(recognition: ColumnRecognition) -> str:
+    """A frase da recusa a partir dos PAPÉIS — nenhum texto do arquivo entra nela."""
+    parts: list[str] = []
+    recognized = recognition.recognized_roles
+    if recognized:
+        noun = "a coluna" if len(recognized) == 1 else "as colunas"
+        parts.append(f"Reconhecemos {noun} de {_labels(recognized)}")
+    missing = [r for r in recognition.open_roles if r in recognition.missing]
+    if missing:
+        noun = "a coluna" if len(missing) == 1 else "as colunas"
+        parts.append(f"não encontramos {noun} de {_labels(missing)}")
+    ambiguous = [r for r in recognition.open_roles if r in recognition.ambiguous]
+    if ambiguous:
+        parts.append(f"há mais de uma coluna que pode ser {_labels(ambiguous)}")
+    sentence = "; ".join(parts)
+    return sentence[:1].upper() + sentence[1:] + "."
+
+
+def recognition_details(recognition: ColumnRecognition | None) -> dict[str, Any]:
+    """Os papéis reconhecidos e os em aberto — vocabulário NOSSO, nunca o arquivo."""
+    if recognition is None:
+        return {"recognizedRoles": [], "missingRoles": list(REQUIRED_ROLES_OPEN)}
+    return {
+        "recognizedRoles": recognition.recognized_roles,
+        "missingRoles": recognition.open_roles,
+        "ambiguousRoles": [r for r in recognition.open_roles if r in recognition.ambiguous],
+    }
+
+
+#: Sem bloco de contas, nada foi reconhecido e os três obrigatórios faltam.
+REQUIRED_ROLES_OPEN: tuple[ColumnRole, ...] = ("codigo", "nome", "tipo")
+
+
+def _parse_recognized(
+    content: bytes, file_format: InputFileFormat, refusal: FileHeaderMismatchError
+) -> ParsedChartSheet:
+    """O terceiro caminho: a planilha lida pelo conteúdo das colunas (86e3ydjyq).
+
+    Sem bloco de contas, a recusa de cabeçalho do modelo, como sempre, com os papéis em
+    `details`. Com bloco e sem código, nome ou tipo resolvidos, a mesma recusa com a
+    frase do que foi reconhecido e do que falta.
+    """
+    if file_format is not InputFileFormat.XLSX:
+        raise _with_roles(refusal, None) from None
+    raw = _raw_rows(content)
+    recognition = recognize_columns(raw)
+    if recognition is None:
+        raise _with_roles(refusal, None) from None
+    if not recognition.resolved:
+        raise _with_roles(
+            refusal, recognition, user_message=recognition_message(recognition) + _RECOGNITION_TAIL
+        ) from None
+    conversion = convert_by_columns(raw, recognition, recognition.roles)
+    rows = _validated(conversion, user_message=_LINES_MESSAGE)
+    return ParsedChartSheet(rows=rows, layout="reconhecido", recognition=recognition)
+
+
+def _with_roles(
+    refusal: FileHeaderMismatchError,
+    recognition: ColumnRecognition | None,
+    *,
+    user_message: str | None = None,
+) -> FileHeaderMismatchError:
+    return FileHeaderMismatchError(
+        refusal.message,
+        user_message=user_message or refusal.user_message,
+        details={**(refusal.details or {}), **recognition_details(recognition)},
+    )
 
 
 def parse_chart_sheet(content: bytes) -> ParsedChartSheet:
@@ -470,9 +583,10 @@ def parse_chart_sheet(content: bytes) -> ParsedChartSheet:
     (`LINHAS_INVALIDAS`, `details.lines=[{line, reason}]` limitado + `total`) →
     planilha sem nenhuma conta (`ARQUIVO_INVALIDO`, `details.reason=sem_contas`).
 
-    Layout: planilha com o cabeçalho do Domínio nas primeiras linhas vai pelo conversor
-    (`dominio.py`); todo o resto é o modelo da plataforma, e o que não é nenhum dos
-    dois recebe a recusa de cabeçalho DO MODELO, como sempre.
+    Layout, em três caminhos: o cabeçalho exato do Domínio nas primeiras linhas vai
+    pelo conversor (`dominio.py`); o cabeçalho exato do modelo, pelo modelo; o resto,
+    pelo RECONHECEDOR por conteúdo (`recognizer.py`, 86e3ydjyq). O que nenhum dos três
+    lê recebe a recusa de cabeçalho com os papéis reconhecidos e os que faltam.
     """
     # CSV ou planilha (XLSX ou XLS) pelo CONTEÚDO; PDF, HTML e o resto viram
     # `FORMATO_NAO_SUPORTADO`.
@@ -488,6 +602,8 @@ def parse_chart_sheet(content: bytes) -> ParsedChartSheet:
     )
     try:
         table = read_table(content, options, on_header=check_header)
+    except FileHeaderMismatchError as refusal:
+        return _parse_recognized(content, file_format, refusal)
     except FileInvalidError:
         _raise_invalid_file()
 

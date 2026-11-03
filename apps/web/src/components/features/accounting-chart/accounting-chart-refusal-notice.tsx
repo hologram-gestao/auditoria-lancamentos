@@ -6,7 +6,10 @@
  *
  * Ramificado por `code` (`lib/accounting-chart-errors.ts`), no padrão do
  * `FileRefusalNotice` da S14 (ADR-047-FE):
- *   - `CABECALHO_DIVERGENTE` → as colunas que FALTAM e as que se REPETEM,
+ *   - `CABECALHO_DIVERGENTE` com papéis reconhecidos (86e3ydjyq) → o que o
+ *     reconhecimento por CONTEÚDO achou ("Reconhecemos") e o que falta ("Não
+ *     encontramos"), em papéis nossos (código, nome, tipo…), nunca texto do arquivo;
+ *   - `CABECALHO_DIVERGENTE` sem nada reconhecido → as colunas que FALTAM e as que se REPETEM,
  *     nomeadas (são do MODELO), mais quantas colunas a planilha tinha e quantas
  *     estavam fora do modelo — contra o modelo documentado logo acima. O nome de
  *     coluna que veio do ARQUIVO não aparece: numa planilha enviada sem
@@ -33,10 +36,12 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
+  accountingColumnRoleLabel,
   accountingLineReasonLabel,
   readAccountingChartRefusal,
   type AccountingChartRefusal,
 } from '@/lib/accounting-chart-errors';
+import { cn } from '@/lib/utils';
 
 const TITLES: Record<AccountingChartRefusal['code'], string> = {
   FORMATO_NAO_SUPORTADO: 'Formato de arquivo não suportado',
@@ -70,6 +75,9 @@ export function AccountingChartRefusalNotice({
 function RefusalBody({ refusal }: { refusal: AccountingChartRefusal }) {
   switch (refusal.code) {
     case 'CABECALHO_DIVERGENTE':
+      if (refusal.recognizedRoles.length > 0 || refusal.ambiguousRoles.length > 0) {
+        return <RecognizedRoles refusal={refusal} />;
+      }
       return (
         <div className="space-y-3">
           <p>{refusal.userMessage}</p>
@@ -134,6 +142,36 @@ function RefusalBody({ refusal }: { refusal: AccountingChartRefusal }) {
 }
 
 /**
+ * O que o reconhecimento por conteúdo achou e o que faltou (86e3ydjyq). Os papéis
+ * são vocabulário da plataforma; a frase do servidor já os diz em português, e as
+ * listas deixam a leitura rápida.
+ */
+function RecognizedRoles({
+  refusal,
+}: {
+  refusal: Extract<AccountingChartRefusal, { code: 'CABECALHO_DIVERGENTE' }>;
+}) {
+  return (
+    <div className="space-y-3">
+      <p>{refusal.userMessage}</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <ColumnList
+          heading="Reconhecemos"
+          columns={refusal.recognizedRoles.map(accountingColumnRoleLabel)}
+          plain
+        />
+        <ColumnList
+          heading="Não encontramos"
+          columns={refusal.missingRoles.map(accountingColumnRoleLabel)}
+          emphasized
+          plain
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
  * O tamanho do cabeçalho lido, em números. Substitui a lista de "colunas
  * encontradas": os nomes vinham crus do arquivo, e numa planilha sem cabeçalho
  * a linha 1 é dado do cliente. A dica sobre a linha 1 é o que aquela lista
@@ -154,10 +192,13 @@ function ColumnList({
   heading,
   columns,
   emphasized = false,
+  plain = false,
 }: {
   heading: string;
   columns: string[];
   emphasized?: boolean;
+  /** Rótulo em português (papel), não nome de coluna do modelo em `mono`. */
+  plain?: boolean;
 }) {
   // Lista vazia não aparece: "Colunas repetidas: —" numa recusa por coluna
   // faltante só atrapalha a leitura do que de fato está errado.
@@ -171,11 +212,13 @@ function ColumnList({
         {columns.map((column, index) => (
           <li
             key={`${index}:${column}`}
-            className={
+            className={cn(
+              'bg-background rounded px-2 py-0.5 text-xs',
+              !plain && 'font-mono',
               emphasized
-                ? 'bg-background text-destructive ring-destructive/30 rounded px-2 py-0.5 font-mono text-xs font-semibold ring-1 ring-inset'
-                : 'bg-background text-foreground rounded px-2 py-0.5 font-mono text-xs'
-            }
+                ? 'text-destructive ring-destructive/30 font-semibold ring-1 ring-inset'
+                : 'text-foreground',
+            )}
           >
             {column}
           </li>

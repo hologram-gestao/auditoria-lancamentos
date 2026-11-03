@@ -63,6 +63,11 @@ def _fixture_bytes() -> bytes:
     return _FIXTURE.read_bytes()
 
 
+def _expected_rows() -> list[dict[str, str]]:
+    with _EXPECTED.open(encoding="utf-8", newline="") as fh:
+        return list(csv.DictReader(fh, delimiter=";"))
+
+
 def _mutated(**cells: Any) -> bytes:
     """A fixture com células trocadas (`P100=None`, `X100=9`…), salva em memória.
 
@@ -242,7 +247,9 @@ class TestDeteccao:
         ]
         assert find_dominio_header(rows) is None
 
-    def test_cabecalho_depois_da_linha_10_cai_na_recusa_do_modelo(self) -> None:
+    def test_cabecalho_depois_da_linha_10_nao_e_o_dominio_mas_o_conteudo_le(self) -> None:
+        """Fora das 10 primeiras linhas o cabeçalho exato não é procurado; desde a
+        86e3ydjyq o reconhecimento por CONTEÚDO lê o mesmo plano (antes era recusa)."""
         wb = load_workbook(io.BytesIO(_fixture_bytes()))
         ws = wb.worksheets[0]
         ws.insert_rows(1, amount=dominio.DOMINIO_HEADER_SEARCH_ROWS)
@@ -250,8 +257,11 @@ class TestDeteccao:
         ws["A1"] = "Relatório"
         buffer = io.BytesIO()
         wb.save(buffer)
-        with pytest.raises(FileHeaderMismatchError):
-            parse_chart_sheet(buffer.getvalue())
+        parsed = parse_chart_sheet(buffer.getvalue())
+        assert parsed.layout == "reconhecido"
+        assert [(r.code, r.name) for r in parsed.rows] == [
+            (row["codigo_reduzido"], row["nome"]) for row in _expected_rows()
+        ]
 
     def test_csv_com_o_cabecalho_do_dominio_segue_na_recusa_de_hoje(self) -> None:
         content = "Código;T;Classificação;Nome;Grau\n1;S;1;Ativo;1\n".encode()
@@ -263,12 +273,18 @@ class TestDeteccao:
     def test_planilha_irreconhecivel_segue_com_a_mesma_recusa(self) -> None:
         with pytest.raises(FileHeaderMismatchError) as caught:
             parse_chart_sheet(_xlsx([["Empresa:", "X"], ["foo", "bar"], [1, 2]]))
+        # O que a recusa do modelo já dizia continua igual; desde a 86e3ydjyq ela
+        # também diz o que o conteúdo reconheceu (nada: duas colunas de inteiros
+        # empatadas para o código, sem nome nem tipo).
         assert caught.value.details == {
             "missingColumns": ["codigo_reduzido", "nome", "tipo"],
             "repeatedColumns": [],
             "unexpectedColumnCount": 2,
             "foundColumnCount": 2,
             "expectedColumns": ["codigo_reduzido", "nome", "tipo", "classificacao"],
+            "recognizedRoles": [],
+            "missingRoles": ["codigo", "tipo", "nome"],
+            "ambiguousRoles": ["codigo"],
         }
 
     def test_dominio_so_com_cabecalho_e_sem_contas(self) -> None:

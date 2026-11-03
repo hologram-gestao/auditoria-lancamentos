@@ -231,8 +231,12 @@ class ChartPreviewAbsentAccount(BaseModel):
 class ChartImportPreviewPayload(BaseModel):
     """O que a importação desta planilha faria — nada é gravado."""
 
-    layout: Literal["modelo", "dominio"] = Field(
-        description="`modelo` da plataforma ou o plano exportado do `dominio`."
+    layout: Literal["modelo", "dominio", "reconhecido"] = Field(
+        description=(
+            "`modelo` da plataforma, o plano exportado do `dominio` ou `reconhecido`: a "
+            "planilha lida pelo CONTEÚDO das colunas (código, classificação, tipo, grau e "
+            "nome), com as colunas que a plataforma não usa ignoradas."
+        )
     )
     contas: int = Field(ge=0, description="Contas na planilha.")
     contas_novas: int = Field(ge=0, alias="contasNovas")

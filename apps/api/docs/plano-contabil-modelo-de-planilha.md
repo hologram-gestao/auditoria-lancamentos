@@ -73,6 +73,44 @@ esse tipo de registro, que não tem valor, e recusa o arquivo se houver qualquer
   recusa o arquivo **inteiro** (`conta_fora_do_bloco`), para nenhuma conta ficar de fora
   calada.
 
+## A planilha não precisa seguir o modelo (86e3ydjyq)
+
+Desde 03/11/2026 a planilha (XLSX ou XLS) que não é o modelo nem o export do Domínio é
+lida pelo **conteúdo** das colunas (layout `reconhecido`; leitor:
+`client_accounting_chart/recognizer.py`). O caso real foi a Tract: um plano "ajustado"
+com banner, cabeçalho na linha 5 e as colunas `Código`, `Classificação`, `Tipo`, `Grau`,
+`Natureza`, `Nome da conta` e o CNPJ do fornecedor. O modelo continua sendo o caminho
+garantido; o reconhecimento é o que evita reescrever um arquivo que já tem tudo.
+
+- **O bloco de contas** é o maior trecho contíguo de linhas com duas células ou mais, uma
+  delas inteira ou com classificação. Banner acima e rodapé abaixo ficam fora; linha em
+  branco no meio não corta o bloco.
+- **O que o reconhecimento exige:** uma coluna de **código** (inteiros em pelo menos 90%
+  das linhas, sem repetição), uma de **nome** (texto em pelo menos 90% das linhas; colunas
+  de texto vizinhas que nunca dividem uma linha são uma só, como o nome recuado do Domínio)
+  e uma de **tipo** (só `S`/`A`, `sintetica`/`analitica`; vazio vale analítica quando a
+  coluna nunca traz `A`, como no Domínio).
+- **Opcionais:** **classificação** (`1.1.2.01.004`) e **grau** (inteiro igual à
+  profundidade da classificação; quando existe, é conferido linha a linha).
+- **Ignorado:** natureza (`Devedora`/`Credora`), CNPJ/CPF e qualquer outra coluna. Coluna a
+  mais nunca recusa.
+- **O nome da coluna só desempata** (`Nome` contra `Fantasia`, por exemplo). Duas colunas
+  candidatas ao mesmo papel sem cabeçalho que desempate deixam o papel em aberto.
+- Uma coluna tem uma forma quando pelo menos 95% das células preenchidas a seguem: a folga
+  é para as linhas com problema, que continuam listadas com motivo.
+- **Recusa:** sem código, nome ou tipo resolvidos, `CABECALHO_DIVERGENTE` com a frase do que
+  foi reconhecido e do que falta ("Reconhecemos as colunas de código e nome; não encontramos
+  a coluna de tipo (S ou A)") e `details.recognizedRoles`, `missingRoles` e `ambiguousRoles`,
+  em papéis da plataforma (`codigo`, `classificacao`, `tipo`, `grau`, `nome`). Nenhum texto
+  do arquivo sai na resposta nem no log (o log leva só os papéis e quantas colunas foram
+  ignoradas).
+- **Só planilha:** o CSV continua só no modelo (ler um CSV cru pediria mudar o leitor
+  compartilhado, e nenhum arquivo real chegou assim).
+- **Regra de processo:** todo arquivo de cliente novo vira fixture anonimizada ANTES de uma
+  regra mudar. As fixtures: `tests/fixtures/accounting_chart_tract/` (script
+  `scripts/anonymize_tract_chart_sample.py`) e as duas do Domínio, que o teste prova que
+  chegam ao MESMO plano pelo conteúdo, sem o cabeçalho.
+
 ## Ordem da lista
 
 A lista (`GET …/accounting-chart`) sai na **ordem da classificação** (86e3n70p9): a sintética
@@ -131,13 +169,13 @@ trilha de acesso; nome que não decifra recusa com 409 `PLANO_CONTABIL_INDECIFRA
 
 ## Recusas (todas 422, nenhuma grava nada, nenhuma devolve conteúdo de célula)
 
-| `error.code`            | Quando                                                                                 | `error.details`                                                                                                        |
-| ----------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `FORMATO_NAO_SUPORTADO` | não é CSV nem planilha pelo conteúdo (PDF, HTML/XML, OLE2 que não é planilha)          | —                                                                                                                      |
-| `ARQUIVO_INVALIDO`      | não abre ou não itera (zip quebrado, fora de UTF-8, limites de tamanho/linhas/colunas) | —                                                                                                                      |
-| `ARQUIVO_INVALIDO`      | a planilha não tem nenhuma conta                                                       | `{"reason": "sem_contas"}`                                                                                             |
-| `CABECALHO_DIVERGENTE`  | falta coluna obrigatória, sobra coluna desconhecida ou coluna repetida                 | `missingColumns`, `repeatedColumns` e `expectedColumns` (nomes do MODELO), `unexpectedColumnCount`, `foundColumnCount` |
-| `LINHAS_INVALIDAS`      | uma ou mais linhas inválidas (todas listadas de uma vez, até 50)                       | `lines: [{line, reason}]`, `total`                                                                                     |
+| `error.code`            | Quando                                                                                 | `error.details`                                                                                                                                                                      |
+| ----------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `FORMATO_NAO_SUPORTADO` | não é CSV nem planilha pelo conteúdo (PDF, HTML/XML, OLE2 que não é planilha)          | —                                                                                                                                                                                    |
+| `ARQUIVO_INVALIDO`      | não abre ou não itera (zip quebrado, fora de UTF-8, limites de tamanho/linhas/colunas) | —                                                                                                                                                                                    |
+| `ARQUIVO_INVALIDO`      | a planilha não tem nenhuma conta                                                       | `{"reason": "sem_contas"}`                                                                                                                                                           |
+| `CABECALHO_DIVERGENTE`  | nem o modelo, nem o Domínio, nem o reconhecimento por conteúdo leem a planilha         | `missingColumns`, `repeatedColumns` e `expectedColumns` (nomes do MODELO), `unexpectedColumnCount`, `foundColumnCount`, `recognizedRoles`, `missingRoles`, `ambiguousRoles` (papéis) |
+| `LINHAS_INVALIDAS`      | uma ou mais linhas inválidas (todas listadas de uma vez, até 50)                       | `lines: [{line, reason}]`, `total`                                                                                                                                                   |
 
 `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, `codigo_repetido`, `nome_vazio`,
 `nome_longo`, `tipo_invalido`, `classificacao_longa`. `line` é a linha física da planilha

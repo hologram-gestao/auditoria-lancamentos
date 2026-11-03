@@ -55,6 +55,25 @@ export function accountingLineReasonLabel(reason: string): string {
   return ACCOUNTING_LINE_REASON_LABELS[reason] ?? reason;
 }
 
+/**
+ * Os papéis de coluna que o reconhecimento por CONTEÚDO usa (86e3ydjyq,
+ * `client_accounting_chart/recognizer.py::ColumnRole`), vocabulário FECHADO.
+ * Valor fora dele (backend mais novo) sai cru, nunca some.
+ */
+export const ACCOUNTING_COLUMN_ROLE_LABELS: Record<string, string> = {
+  codigo: 'Código',
+  classificacao: 'Classificação',
+  tipo: 'Tipo (S ou A)',
+  grau: 'Grau',
+  nome: 'Nome',
+  natureza: 'Natureza',
+  documento: 'CNPJ/CPF',
+};
+
+export function accountingColumnRoleLabel(role: string): string {
+  return ACCOUNTING_COLUMN_ROLE_LABELS[role] ?? role;
+}
+
 export interface AccountingInvalidLine {
   line: number;
   reason: string;
@@ -82,6 +101,14 @@ export type AccountingChartRefusal =
        */
       unexpectedColumnCount: number;
       foundColumnCount: number;
+      /**
+       * O que o reconhecimento por CONTEÚDO achou (86e3ydjyq): os papéis
+       * reconhecidos, os que faltam e, entre eles, os empatados (duas colunas que
+       * podem ser o mesmo papel). Vocabulário NOSSO, nunca texto do arquivo.
+       */
+      recognizedRoles: string[];
+      missingRoles: string[];
+      ambiguousRoles: string[];
     }
   | {
       code: 'LINHAS_INVALIDAS';
@@ -130,6 +157,9 @@ export function readAccountingChartRefusal(error: unknown): AccountingChartRefus
         repeatedColumns: readStringList(details.repeatedColumns),
         unexpectedColumnCount: readCount(details.unexpectedColumnCount),
         foundColumnCount: readCount(details.foundColumnCount),
+        recognizedRoles: readStringList(details.recognizedRoles),
+        missingRoles: readStringList(details.missingRoles),
+        ambiguousRoles: readStringList(details.ambiguousRoles),
       };
     case 'LINHAS_INVALIDAS': {
       const lines = readLines(details.lines);
