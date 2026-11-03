@@ -23,7 +23,7 @@ XML da fixture (2312 textos e 264 documentos distintos procurados, 0 encontrados
 
 ## O que foi trocado
 
-- o banner das duas abas → `EMPRESA EXEMPLO LTDA`, `C.N.P.J.: 99.999.999/9999-99`,
+- o banner das duas abas → `EMPRESA EXEMPLO LTDA`, `C.N.P.J.: 11.222.333/0001-81` (CNPJ fictício válido, para a conferência da empresa rodar),
   `PLANO DE CONTAS (exemplo)`;
 - o nome de TODA conta → `Conta de exemplo <classificação>` (analítica) ou
   `Grupo de exemplo <classificação>` (sintética), completado até o comprimento do original;

@@ -56,7 +56,7 @@ from app.modules.client_accounting_chart.sheet import MODEL_COLUMNS, parse_chart
 from app.modules.client_file_ingestion.reader import read_sheet_raw_rows
 from scripts.anonymize_dominio_parties_sample_xls import _is_valid, fake_document
 
-BANNER = ("EMPRESA EXEMPLO LTDA", "C.N.P.J.: 99.999.999/9999-99", "PLANO DE CONTAS (exemplo)")
+BANNER = ("EMPRESA EXEMPLO LTDA", "C.N.P.J.: 11.222.333/0001-81", "PLANO DE CONTAS (exemplo)")
 FILE_AUTHOR = "Hologram OS (fixture anonimizada)"
 _FILLER = " Alfa Beta Gama Delta Épsilon Zeta Eta Teta Iota Capa Lambda Ômega" * 4
 _MASK = re.compile(r"[./\-]")

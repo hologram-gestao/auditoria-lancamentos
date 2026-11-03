@@ -69,6 +69,7 @@ from app.modules.client_accounting_chart.dominio import (
     find_dominio_header,
 )
 from app.modules.client_accounting_chart.recognizer import (
+    REQUIRED_ROLES,
     ColumnMapping,
     ColumnRecognition,
     ColumnRole,
@@ -496,7 +497,10 @@ _UNCONFIRMED_MESSAGE = (
 
 
 def refuse_unconfirmed_lines(
-    problems: Sequence[tuple[int, str]], *, confirmed: Collection[int] | None
+    problems: Sequence[tuple[int, str]],
+    *,
+    confirmed: Collection[int] | None,
+    layout: ChartLayout = "modelo",
 ) -> None:
     """A importação só grava SEM as linhas com problema que a pessoa confirmou (86e3ydjze).
 
@@ -508,7 +512,8 @@ def refuse_unconfirmed_lines(
     computed = {line for line, _ in problems}
     if confirmed is None:
         if computed:
-            _raise_lines(problems, user_message=_LINES_MESSAGE)
+            message = _DOMINIO_LINES_MESSAGE if layout == "dominio" else _LINES_MESSAGE
+            _raise_lines(problems, user_message=message)
         return
     if set(confirmed) != computed:
         _raise_lines(problems, user_message=_UNCONFIRMED_MESSAGE)
@@ -619,7 +624,7 @@ def recognition_details(recognition: ColumnRecognition | None) -> dict[str, Any]
     if recognition is None:
         return {
             "recognizedRoles": [],
-            "missingRoles": list(REQUIRED_ROLES_OPEN),
+            "missingRoles": list(REQUIRED_ROLES),
             "ambiguousRoles": [],
         }
     return {
@@ -627,10 +632,6 @@ def recognition_details(recognition: ColumnRecognition | None) -> dict[str, Any]
         "missingRoles": recognition.open_roles,
         "ambiguousRoles": [r for r in recognition.open_roles if r in recognition.ambiguous],
     }
-
-
-#: Sem bloco de contas, nada foi reconhecido e os três obrigatórios faltam.
-REQUIRED_ROLES_OPEN: tuple[ColumnRole, ...] = ("codigo", "nome", "tipo")
 
 
 _MAPPING_TAIL = " Diga o que é cada coluna para continuar."
@@ -645,6 +646,10 @@ def mapping_details(recognition: ColumnRecognition) -> dict[str, Any]:
     `cabecalho` é o texto do cabeçalho acima do bloco (a pessoa precisa dele para
     escolher); NENHUM valor de célula do bloco sai: forma e preenchimento são contagens.
     """
+    # O nome recuado do Domínio ocupa várias colunas vizinhas (uma zona): a etapa sugere
+    # só a primeira, e escolher QUALQUER coluna da zona como nome lê a zona inteira
+    # (`_mapped`), já que a tela dá uma coluna por papel.
+    zone = recognition.roles.get("nome", ())
     return {
         **recognition_details(recognition),
         "colunas": [
@@ -653,7 +658,11 @@ def mapping_details(recognition: ColumnRecognition) -> dict[str, Any]:
                 "cabecalho": column.header,
                 "formaDetectada": column.form,
                 "preenchimento": column.fill_percent,
-                "papelSugerido": column.suggested_role,
+                "papelSugerido": (
+                    None
+                    if column.suggested_role == "nome" and column.index != zone[0]
+                    else column.suggested_role
+                ),
             }
             for column in recognition.columns
         ],
@@ -720,6 +729,9 @@ def _mapped(
             "mapeamento do plano fora das colunas", user_message=_MAPPING_SHAPE_MESSAGE
         )
     roles: dict[ColumnRole, tuple[int, ...]] = {role: (col,) for role, col in mapping.roles.items()}
+    zone = recognition.roles.get("nome", ())
+    if "nome" in roles and roles["nome"][0] in zone:
+        roles["nome"] = zone
     conversion = convert_by_columns(
         raw, recognition, roles, type_by_hierarchy=mapping.type_by_hierarchy
     )

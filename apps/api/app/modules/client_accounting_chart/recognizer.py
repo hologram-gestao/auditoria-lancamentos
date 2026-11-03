@@ -96,6 +96,13 @@ _HEADER_HINTS: dict[ColumnRole, frozenset[str]] = {
 }
 
 
+#: Qualquer nome de coluna conhecido: uma linha sem nenhum deles não é cabeçalho.
+_KNOWN_HEADERS: frozenset[str] = frozenset(
+    {name for names in _HEADER_HINTS.values() for name in names}
+    | {"natureza", "cnpj", "cpf", "c.n.p.j.", "documento"}
+)
+
+
 def _fold(text: str) -> str:
     decomposed = unicodedata.normalize("NFKD", text.strip().lower())
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
@@ -379,15 +386,20 @@ def _header_line(rows: Sequence[tuple[int, Sequence[Any]]], first_position: int)
     """A posição do cabeçalho logo acima do bloco, ou `None`.
 
     É a linha preenchida mais próxima acima do bloco (até `HEADER_SEARCH_GAP` linhas),
-    e só conta se TEM CARA DE CABEÇALHO: duas células ou mais, todas texto. Uma linha de
-    banner (razão social, CNPJ, título) tem uma célula só e nunca vira cabeçalho, porque
-    o cabeçalho é o único texto do arquivo que a etapa de mapeamento mostra.
+    e só conta se TEM CARA DE CABEÇALHO: duas células ou mais, todas texto, e pelo menos
+    uma delas é um nome de coluna conhecido (`Código`, `Nome`, `Tipo`…). Uma linha de
+    banner (`Empresa:` e a razão social) ou uma conta sem código não vira cabeçalho,
+    porque o cabeçalho é o único texto do arquivo que a etapa de mapeamento mostra.
     """
     for position in range(first_position - 1, max(first_position - 1 - HEADER_SEARCH_GAP, -1), -1):
         cells = [cell for cell in rows[position][1] if cell is not None]
         if not cells:
             continue
-        if len(cells) >= MIN_HEADER_CELLS and all(isinstance(cell, str) for cell in cells):
+        if (
+            len(cells) >= MIN_HEADER_CELLS
+            and all(isinstance(cell, str) for cell in cells)
+            and any(normalized_header(cell) in _KNOWN_HEADERS for cell in cells)
+        ):
             return position
         return None
     return None

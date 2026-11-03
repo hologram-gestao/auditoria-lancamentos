@@ -676,7 +676,7 @@
      o CONTEÚDO decide (`recognize_party_columns`: documento com cara de CNPJ/CPF, conta de
      inteiros que EXISTEM no plano); sem o título, o tipo é PERGUNTADO na tela (`tipoVinculo`;
      sem ele, 422 `TIPO_DE_VINCULO_NECESSARIO`), e com título o título manda (tipo
-     diferente é 422 `TIPO_DE_VINCULO_DIVERGENTE`); sem o CNPJ da empresa legível no banner,
+     diferente é 422 `TIPO_DE_VINCULO_DIVERGENTE`); sem o rótulo `C.N.P.J.:` no banner (rótulo presente com valor que não é CNPJ continua recusando),
      a relação entra SEM conferir a empresa nem tocar a impressão digital e a resposta diz
      `empresaConferida: false` (o CNPJ na mesma célula do rótulo `C.N.P.J.:` também vale).
      A coluna de CNPJ/CPF do PRÓPRIO plano (a Tract a traz) vira vínculo só por escolha:

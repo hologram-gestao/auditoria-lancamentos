@@ -248,14 +248,16 @@ class TestRecusasDoArquivo:
         with pytest.raises(PartyTypeMismatchError):
             parse_parties_report(content, party_type=AccountingPartyType.FORNECEDOR)
 
-    def test_sem_cnpj_da_empresa_entra_sem_conferir(self) -> None:
-        """Desde 86e3ydjzy: sem o CNPJ da empresa, a relação segue sem a impressão digital."""
+    def test_rotulo_do_cnpj_sem_valor_continua_recusando(self) -> None:
+        """O rótulo `C.N.P.J.:` está no banner e o valor não é um CNPJ: recusa, como
+        sempre. Só a AUSÊNCIA do rótulo entra sem conferir (86e3ydjzy, coberto em
+        `test_accounting_chart_recognizer.py`)."""
         content = build_parties_xlsx(
             "cliente", _rows("cliente", (685, VALID_CNPJS[0], "A")), company=None
         )
-        report = parse_parties_report(content)
-        assert report.company_document is None
-        assert [line.account_code for line in report.lines] == ["685"]
+        with pytest.raises(FileInvalidError) as caught:
+            parse_parties_report(content)
+        assert caught.value.details == {"reason": "empresa_nao_identificada"}
 
     def test_sem_nenhuma_pessoa_e_sem_pessoas(self) -> None:
         content = build_parties_xlsx("cliente", [])

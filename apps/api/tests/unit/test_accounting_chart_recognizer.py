@@ -26,6 +26,7 @@ from pydantic import ValidationError as PydanticValidationError
 from app.core.exceptions import (
     ChartMappingRequiredError,
     FileHeaderMismatchError,
+    FileInvalidError,
     FileLinesInvalidError,
     PartyTypeRequiredError,
     ValidationAppError,
@@ -611,8 +612,8 @@ class TestRelacaoDaTract:
             "conta_compartilhada",
             "documento_ausente",
         ]
-        # O banner da fixture tem um CNPJ inválido de propósito: a empresa não é conferida.
-        assert report.company_document is None
+        # O banner da fixture traz um CNPJ fictício válido, na MESMA célula do rótulo.
+        assert report.company_document == "11222333000181"
 
     def test_sem_cabecalho_o_conteudo_acha_conta_e_documento(self) -> None:
         wb = load_workbook(io.BytesIO(_tract_parties()))
@@ -641,3 +642,91 @@ class TestRelacaoDaTract:
         assert parsed.documents_found == 252
         assert len(parsed.documents) == 263
         assert "documents" not in repr(parsed)
+
+
+class TestAchadosDaRevisao:
+    """O que a revisão do PR #383 achou, cada um com o teste que reprovava antes."""
+
+    def test_banner_de_duas_celulas_nao_vira_cabecalho(self) -> None:
+        rows = [
+            ["Empresa:", "ACME COMERCIO LTDA"],
+            *([i, f"CONTA {i}", f"FANTASIA {i}"] for i in range(1, 21)),
+        ]
+        with pytest.raises(ChartMappingRequiredError) as caught:
+            parse_chart_sheet(_xlsx(rows))
+        assert "ACME" not in repr(caught.value.details)
+        assert all(c["cabecalho"] is None for c in caught.value.details["colunas"])
+
+    def test_cabecalho_com_nome_de_coluna_conhecido_sai(self) -> None:
+        rows = [["Código", "Descrição", "Outra"], *([i, f"C {i}", f"F {i}"] for i in range(1, 21))]
+        with pytest.raises(ChartMappingRequiredError) as caught:
+            parse_chart_sheet(_xlsx(rows))
+        assert [c["cabecalho"] for c in caught.value.details["colunas"]] == [
+            "Código",
+            "Descrição",
+            "Outra",
+        ]
+
+    def test_nome_recuado_a_etapa_sugere_uma_coluna_e_o_mapeamento_le_a_zona(self) -> None:
+        # O export do Domínio sem cabeçalho e sem a coluna `T`: pede o tipo.
+        rows = [
+            (line, [c for i, c in enumerate(cells) if i != 3])
+            for line, cells in read_sheet_raw_rows(_DOMINIO.read_bytes())
+            if line != 5
+        ]
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        for _, cells in rows:
+            ws.append(list(cells))
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        with pytest.raises(ChartMappingRequiredError) as caught:
+            parse_chart_sheet(buffer.getvalue())
+        suggested = [
+            c["indice"] for c in caught.value.details["colunas"] if c["papelSugerido"] == "nome"
+        ]
+        assert len(suggested) == 1
+        recognition = recognize_columns(read_sheet_raw_rows(buffer.getvalue()))
+        assert recognition is not None
+        zone = recognition.roles["nome"]
+        # A pessoa escolhe uma coluna da zona (até a de baixo): a zona inteira é lida.
+        mapping = ColumnMapping(
+            roles={"codigo": 0, "classificacao": 6, "grau": 22, "nome": zone[-1]},
+            type_by_hierarchy=True,
+        )
+        parsed = parse_chart_sheet(buffer.getvalue(), mapping=mapping)
+        assert len(parsed.rows) == 563
+        assert [r.name for r in parsed.rows] == [row[1] for row in _expected(_DOMINIO_EXPECTED)]
+
+    def test_rotulo_de_cnpj_ilegivel_recusa_e_sem_rotulo_entra_sem_conferir(self) -> None:
+        wb = load_workbook(io.BytesIO(_tract_parties()))
+        wb.worksheets[0]["A2"] = "C.N.P.J.: 05.482.859/0001-0"
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        with pytest.raises(FileInvalidError) as caught:
+            parse_parties_report(buffer.getvalue(), party_type=AccountingPartyType.FORNECEDOR)
+        assert caught.value.details == {"reason": "empresa_nao_identificada"}
+        wb.worksheets[0]["A2"] = None
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        report = parse_parties_report(buffer.getvalue(), party_type=AccountingPartyType.FORNECEDOR)
+        assert report.company_document is None
+
+    def test_pessoa_acima_do_bloco_pelo_conteudo_recusa(self) -> None:
+        wb = load_workbook(io.BytesIO(_tract_parties()))
+        ws = wb.worksheets[0]
+        ws.delete_rows(5)
+        # Uma linha sem cara de conta parte o bloco cedo: as pessoas acima ficariam de fora.
+        ws.insert_rows(8)
+        ws["A8"] = "Observação do escritório"
+        ws["B8"] = "sem conta"
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        known = {r.code for r in parse_chart_sheet(_TRACT.read_bytes()).rows} | {"1260"}
+        with pytest.raises(FileLinesInvalidError) as caught:
+            parse_parties_report(
+                buffer.getvalue(), party_type=AccountingPartyType.FORNECEDOR, known_codes=known
+            )
+        reasons = {line["reason"] for line in caught.value.details["lines"]}
+        assert reasons == {"linha_fora_do_bloco"}

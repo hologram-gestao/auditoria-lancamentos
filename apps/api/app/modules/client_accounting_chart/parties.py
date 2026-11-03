@@ -344,10 +344,11 @@ def _find_title(
 
 
 def _find_company(rows: Sequence[tuple[int, Sequence[Any]]], header_line: int) -> str | None:
-    """Os 14 dígitos do CNPJ da empresa no banner, ou `None`.
+    """Os 14 dígitos do CNPJ da empresa no banner, ou `None` se o banner não tem o rótulo.
 
     Ao lado de `C.N.P.J.:` (a célula seguinte, como o Domínio exporta) ou na MESMA célula,
-    depois do rótulo (`C.N.P.J.: 05.482.859/0001-06`, como a relação da Tract traz).
+    depois do rótulo (`C.N.P.J.: 05.482.859/0001-06`, como a relação da Tract traz). Rótulo
+    presente com valor que não é CNPJ recusa (`empresa_nao_identificada`).
     """
     for line, cells in rows:
         if line >= header_line:
@@ -366,7 +367,10 @@ def _find_company(rows: Sequence[tuple[int, Sequence[Any]]], header_line: int) -
                 continue
             normalized = normalize_document(value)
             if normalized is None or normalized[1] != "cnpj":
-                return None
+                # O rótulo existe e o valor não é um CNPJ: é o arquivo editado (ou de outro
+                # sistema), e importar sem conferir a empresa abriria a porta para a
+                # relação de OUTRO cliente. Só a AUSÊNCIA do rótulo entra sem conferir.
+                _raise_invalid_file("empresa_nao_identificada")
             return normalized[0]
     return None
 
@@ -592,7 +596,8 @@ def parse_parties_report(
     except FileInvalidError:
         _raise_invalid_file()
 
-    header = find_parties_header(raw) or recognize_party_columns(raw, known_codes)
+    by_name = find_parties_header(raw)
+    header = by_name or recognize_party_columns(raw, known_codes)
     if header is None:
         raise FileHeaderMismatchError(
             "relatório de terceiros sem o cabeçalho da relação",
@@ -616,8 +621,17 @@ def parse_parties_report(
     company = _find_company(raw, header_line)
 
     converted = convert_parties(raw, header_line, columns)
-    if converted.problems:
-        raise_party_lines(converted.problems)
+    problems = list(converted.problems)
+    if by_name is None:
+        # Pelo conteúdo, o "cabeçalho" é a linha acima do MAIOR bloco: uma pessoa acima
+        # dele (o bloco partido por uma linha sem cara de conta) seria pulada calada.
+        problems.extend(
+            PartyLineProblem(line, "linha_fora_do_bloco")
+            for line, cells in raw
+            if line <= header_line and _looks_like_party(cells, columns)
+        )
+    if problems:
+        raise_party_lines(problems)
     if converted.persons == 0:
         _raise_invalid_file("sem_pessoas")
     return PartiesReport(

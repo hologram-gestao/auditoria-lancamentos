@@ -242,8 +242,9 @@ caminhos (modelo, Domínio, conteúdo e mapeamento):
   fornecedores?" (dois botões, sem padrão); o reenvio leva o campo multipart `tipoVinculo`
   (`cliente` ou `fornecedor`). Com título, o título manda: `tipoVinculo` diferente é 422
   `TIPO_DE_VINCULO_DIVERGENTE`, nunca ignorado.
-- **Sem o CNPJ da empresa** legível no banner, a relação entra sem conferir a empresa e sem
-  tocar a impressão digital; a resposta diz `empresaConferida: false` e a tela avisa. O CNPJ
+- **Sem o rótulo `C.N.P.J.:`** no banner, a relação entra sem conferir a empresa e sem
+  tocar a impressão digital; a resposta diz `empresaConferida: false` e a tela avisa. Rótulo
+  presente com valor que não é CNPJ continua sendo a recusa `empresa_nao_identificada`. O CNPJ
   na mesma célula do rótulo (`C.N.P.J.: 05.482.859/0001-06`) também é lido.
 - **A coluna de CNPJ/CPF do plano** (a Tract a traz nas contas de fornecedor): a prévia devolve
   `documentosEncontrados` (contas com documento, fora o `0`) e a tela oferece "Vincular as N
@@ -253,7 +254,7 @@ caminhos (modelo, Domínio, conteúdo e mapeamento):
   (`documento_ausente`), verificador errado (`documento_invalido`), conta sintética
   (`conta_sintetica`) e o mesmo documento em duas contas (`documento_repetido`) ficam sem
   vínculo e voltam em `vinculos.naoVinculadas`. A empresa não é conferida nesse caminho.
-- Na Tract, a relação traz uma conta (`1260`) que não está no plano: a importação recusa o
+- Na Tract (o banner traz o CNPJ na mesma célula do rótulo, então a empresa é conferida), a relação traz uma conta (`1260`) que não está no plano: a importação recusa o
   arquivo inteiro nomeando o código (a regra de sempre), e depois de incluir a conta à mão
   ("Nova conta") a relação entra com 275 contas vinculadas.
 

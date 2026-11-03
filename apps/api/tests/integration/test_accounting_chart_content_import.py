@@ -50,6 +50,7 @@ from app.db.models import (
     UserRole,
     UserScope,
 )
+from app.modules.client_accounting_chart.sheet import parse_chart_sheet
 
 if TYPE_CHECKING:
     from httpx import AsyncClient, Response
@@ -532,7 +533,7 @@ async def _linked(db: AsyncSession, client_id: Any) -> int:
 
 
 class TestRelacaoSemTitulo:
-    async def test_pede_o_tipo_e_entra_sem_conferir_a_empresa(
+    async def test_pede_o_tipo_e_entra_conferindo_a_empresa(
         self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
     ) -> None:
         await _login(client_with_db, world.admin)
@@ -567,7 +568,8 @@ class TestRelacaoSemTitulo:
         data = ok.json()["data"]
         assert data["relatorio"] == "fornecedor"
         assert data["contasVinculadas"] == 275
-        assert data["empresaConferida"] is False
+        # O banner da fixture traz o CNPJ da empresa na mesma célula do rótulo: conferida.
+        assert data["empresaConferida"] is True
         assert await _linked(db_session, world.client.id) == 275
         assert "Fornecedor de exemplo" not in repr(logs)
         assert "Fornecedor de exemplo" not in ok.text
@@ -644,3 +646,64 @@ class TestVinculoPelaColunaDoPlano:
             {"vincularDocumentos": raw},
         )
         assert resp.status_code == 400, resp.text
+
+
+class TestAchadosDaRevisaoNaApi:
+    async def test_conta_que_virou_sintetica_na_mesma_importacao_nao_vincula(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        """O tipo do vínculo pelo plano vem da planilha gravada, nunca do objeto antigo."""
+        await _login(client_with_db, world.admin)
+        assert (
+            await _post_xlsx(client_with_db, f"{_url(world.client)}/import", _TRACT.read_bytes())
+        ).status_code == 200
+        parsed_docs = [
+            (line, code)
+            for line, code, raw in parse_chart_sheet(_TRACT.read_bytes()).documents
+            if str(raw) != "0"
+        ]
+        line, code = parsed_docs[0]
+        # A conta com documento vira sintética na planilha seguinte (coluna C = tipo).
+        content = _tract_with(**{f"C{line}": "S"})
+        resp = await _post_xlsx(
+            client_with_db,
+            f"{_url(world.client)}/import",
+            content,
+            {"vincularDocumentos": json.dumps({"tipo": "fornecedor"})},
+        )
+        assert resp.status_code == 200, resp.text
+        skipped = resp.json()["data"]["vinculos"]["naoVinculadas"]
+        assert {"line": line, "reason": "conta_sintetica", "accountCode": code} in skipped
+        stmt = (
+            select(ClientAccountingAccount)
+            .where(
+                ClientAccountingAccount.client_id == world.client.id,
+                ClientAccountingAccount.code == code,
+            )
+            .execution_options(populate_existing=True)
+        )
+        account = (await db_session.execute(stmt)).scalar_one()
+        assert account.account_type == "sintetica"
+        assert account.party_document_encrypted is None
+
+    async def test_relacao_sem_o_rotulo_do_cnpj_entra_sem_conferir(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        await _post_xlsx(client_with_db, f"{_url(world.client)}/import", _TRACT.read_bytes())
+        await client_with_db.post(
+            f"{_url(world.client)}/accounts",
+            json={"code": "1260", "name": "Fornecedor incluído à mão", "type": "analitica"},
+        )
+        wb = load_workbook(io.BytesIO(_tract_parties()))
+        wb.worksheets[0]["A2"] = None
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        resp = await _post_xlsx(
+            client_with_db,
+            f"{_url(world.client)}/parties/import",
+            buffer.getvalue(),
+            {"tipoVinculo": "fornecedor"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["empresaConferida"] is False

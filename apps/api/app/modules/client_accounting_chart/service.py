@@ -471,7 +471,7 @@ class AccountingChartService:
         )
         # Linha com problema só fica de fora com a lista CONFIRMADA igual (86e3ydjze),
         # antes de qualquer escrita: diferença é 422 e nada é gravado.
-        refuse_unconfirmed_lines(parsed.problems, confirmed=excluded_lines)
+        refuse_unconfirmed_lines(parsed.problems, confirmed=excluded_lines, layout=parsed.layout)
         rows = parsed.rows
 
         await self._repo.lock_client_chart(client.id)
@@ -1015,6 +1015,9 @@ class AccountingChartService:
         candidates: list[PartyLine] = []
         codes = {code for _, code, _ in parsed.documents}
         accounts = {a.code: a for a in await self._repo.get_by_codes(client.id, codes)}
+        # O tipo vem da PLANILHA que acabou de ser gravada: o objeto da sessão pode ser o
+        # de antes do UPDATE em Core desta mesma importação (conta que virou sintética).
+        types = {row.code: row.account_type for row in parsed.rows}
         for line, code, raw in parsed.documents:
             if as_integer(raw) == 0:
                 skipped.append(PartyLineProblem(line, "documento_ausente", code))
@@ -1023,8 +1026,7 @@ class AccountingChartService:
             if normalized is None:
                 skipped.append(PartyLineProblem(line, "documento_invalido", code))
                 continue
-            account = accounts.get(code)
-            if account is None or account.account_type != AccountingAccountType.ANALITICA.value:
+            if code not in accounts or types.get(code) is not AccountingAccountType.ANALITICA:
                 skipped.append(PartyLineProblem(line, "conta_sintetica", code))
                 continue
             document, kind = normalized
