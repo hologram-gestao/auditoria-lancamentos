@@ -230,6 +230,33 @@ caminhos (modelo, Domínio, conteúdo e mapeamento):
   motivo. A importação seguinte sem linha de fora faz o selo sumir. A resposta da importação
   ganhou `contasExcluidas` e o evento `plano_contabil_importado`, `contas_excluidas`.
 
+## Clientes e fornecedores: relação sem título e o CNPJ do próprio plano (86e3ydjzy)
+
+- **Relação que não é o relatório intacto do Domínio** (a aba "Fornecedores Ajustados" da
+  Tract): o cabeçalho por nome exige só `Conta` e a coluna do documento (`C.N.P.J./C.P.F.`);
+  `Código`, `Nome` e `Razão Social` são reconhecidos e ignorados, e outra coluna não recusa.
+  Sem cabeçalho, o conteúdo decide: o documento é a coluna com cara de CNPJ/CPF e a conta, a
+  de inteiros que existem como código no plano do cliente.
+- **Sem o título** ("RELAÇÃO DE CLIENTES/FORNECEDORES"), a resposta é 422
+  `TIPO_DE_VINCULO_NECESSARIO` e a tela pergunta "Esta relação é de clientes ou de
+  fornecedores?" (dois botões, sem padrão); o reenvio leva o campo multipart `tipoVinculo`
+  (`cliente` ou `fornecedor`). Com título, o título manda: `tipoVinculo` diferente é 422
+  `TIPO_DE_VINCULO_DIVERGENTE`, nunca ignorado.
+- **Sem o CNPJ da empresa** legível no banner, a relação entra sem conferir a empresa e sem
+  tocar a impressão digital; a resposta diz `empresaConferida: false` e a tela avisa. O CNPJ
+  na mesma célula do rótulo (`C.N.P.J.: 05.482.859/0001-06`) também é lido.
+- **A coluna de CNPJ/CPF do plano** (a Tract a traz nas contas de fornecedor): a prévia devolve
+  `documentosEncontrados` (contas com documento, fora o `0`) e a tela oferece "Vincular as N
+  contas ao CNPJ/CPF que vieram no arquivo", desligado, com o tipo do lote pré-marcado
+  "Fornecedores". A importação com `vincularDocumentos: {"tipo": "fornecedor"}` grava os
+  vínculos na mesma transação, pela mesma regra da relação: `0` ou vazio
+  (`documento_ausente`), verificador errado (`documento_invalido`), conta sintética
+  (`conta_sintetica`) e o mesmo documento em duas contas (`documento_repetido`) ficam sem
+  vínculo e voltam em `vinculos.naoVinculadas`. A empresa não é conferida nesse caminho.
+- Na Tract, a relação traz uma conta (`1260`) que não está no plano: a importação recusa o
+  arquivo inteiro nomeando o código (a regra de sempre), e depois de incluir a conta à mão
+  ("Nova conta") a relação entra com 275 contas vinculadas.
+
 ## Validador único de conta (consumido pelas 16.2 e 16.3)
 
 `AccountingChartService.require_postable_account(client_id, account_id)`: conta de outro

@@ -31,6 +31,8 @@ from app.core.exceptions import (
     FileHeaderMismatchError,
     FileInvalidError,
     FileLinesInvalidError,
+    PartyTypeMismatchError,
+    PartyTypeRequiredError,
 )
 from app.db.models.client_accounting_account import AccountingPartyType
 from app.modules.client_accounting_chart.parties import (
@@ -227,21 +229,33 @@ class TestPoliticaEmDuasCamadas:
 
 
 class TestRecusasDoArquivo:
-    def test_sem_titulo_e_relatorio_nao_reconhecido(self) -> None:
+    def test_sem_titulo_o_tipo_e_perguntado(self) -> None:
+        """Desde 86e3ydjzy, o relatório sem título não é recusa: o tipo é perguntado."""
         content = build_parties_xlsx(
             "cliente", _rows("cliente", (685, VALID_CNPJS[0], "A")), title=""
         )
-        with pytest.raises(FileInvalidError) as caught:
+        with pytest.raises(PartyTypeRequiredError):
             parse_parties_report(content)
-        assert caught.value.details == {"reason": "relatorio_nao_reconhecido"}
+        report = parse_parties_report(content, party_type=AccountingPartyType.FORNECEDOR)
+        assert report.party_type is AccountingPartyType.FORNECEDOR
 
-    def test_sem_cnpj_da_empresa_e_empresa_nao_identificada(self) -> None:
+    def test_com_titulo_o_titulo_manda_e_o_tipo_divergente_e_recusado(self) -> None:
+        content = build_parties_xlsx("cliente", _rows("cliente", (685, VALID_CNPJS[0], "A")))
+        assert (
+            parse_parties_report(content, party_type=AccountingPartyType.CLIENTE).party_type
+            is AccountingPartyType.CLIENTE
+        )
+        with pytest.raises(PartyTypeMismatchError):
+            parse_parties_report(content, party_type=AccountingPartyType.FORNECEDOR)
+
+    def test_sem_cnpj_da_empresa_entra_sem_conferir(self) -> None:
+        """Desde 86e3ydjzy: sem o CNPJ da empresa, a relação segue sem a impressão digital."""
         content = build_parties_xlsx(
             "cliente", _rows("cliente", (685, VALID_CNPJS[0], "A")), company=None
         )
-        with pytest.raises(FileInvalidError) as caught:
-            parse_parties_report(content)
-        assert caught.value.details == {"reason": "empresa_nao_identificada"}
+        report = parse_parties_report(content)
+        assert report.company_document is None
+        assert [line.account_code for line in report.lines] == ["685"]
 
     def test_sem_nenhuma_pessoa_e_sem_pessoas(self) -> None:
         content = build_parties_xlsx("cliente", [])
@@ -334,4 +348,7 @@ class TestEspelhos:
             "documento_ausente",
             "documento_invalido",
             "conta_compartilhada",
+            # 86e3ydjzy: só no vínculo pela coluna de documento do plano.
+            "documento_repetido",
+            "conta_sintetica",
         }

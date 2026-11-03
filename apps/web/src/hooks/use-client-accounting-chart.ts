@@ -41,6 +41,7 @@ import {
   setSourceAccountBinding,
   updateAccountingAccount,
   type AccountingChartImportRequest,
+  type AccountingPartiesImportRequest,
   type ListAccountingChartParams,
   type ListAccountingPartiesParams,
 } from '@/lib/api/client-accounting-chart';
@@ -175,8 +176,8 @@ export function useAccountingPartiesList(
 /** Importa uma relação do Domínio (86e3qhhrn): o vínculo mora na conta, então a árvore inteira invalida. */
 export function useImportAccountingParties(clientId: string) {
   const qc = useQueryClient();
-  return useMutation<AccountingPartiesImportResult, Error, File>({
-    mutationFn: (file) => importAccountingParties(clientId, file),
+  return useMutation<AccountingPartiesImportResult, Error, AccountingPartiesImportRequest>({
+    mutationFn: (request) => importAccountingParties(clientId, request),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: accountingChartKeys.all(clientId) });
     },

@@ -72,6 +72,7 @@ from app.modules.client_accounting_chart.recognizer import (
     ColumnMapping,
     ColumnRecognition,
     ColumnRole,
+    as_integer,
     convert_by_columns,
     recognize_columns,
 )
@@ -449,6 +450,17 @@ class ParsedChartSheet:
     #: ordem de linha, `(linha, motivo)` no vocabulário fechado. A importação só grava
     #: sem elas quando a pessoa confirmou exatamente esta lista.
     problems: tuple[tuple[int, str], ...] = ()
+    #: Só quando o reconhecimento achou a coluna de CNPJ/CPF (86e3ydjzy): `(linha, código
+    #: da conta, valor cru da célula)` das contas VÁLIDAS com algo nela. Em memória: é o
+    #: insumo do vínculo por escolha, nunca vai para resposta nem log.
+    documents: tuple[tuple[int, str, Any], ...] = ()
+
+    @property
+    def documents_found(self) -> int | None:
+        """Quantas contas trazem um documento (fora o `0`), ou `None` sem a coluna."""
+        if self.recognition is None or "documento" not in self.recognition.roles:
+            return None
+        return sum(1 for _, _, raw in self.documents if as_integer(raw) != 0)
 
     def __repr__(self) -> str:
         return f"<ParsedChartSheet rows={len(self.rows)} layout={self.layout}>"
@@ -687,7 +699,11 @@ def _recognized(
         conversion, user_message=_LINES_MESSAGE, allow_problems=allow_problems
     )
     return ParsedChartSheet(
-        rows=rows, layout="reconhecido", recognition=recognition, problems=problems
+        rows=rows,
+        layout="reconhecido",
+        recognition=recognition,
+        problems=problems,
+        documents=_documents(raw, recognition, rows),
     )
 
 
@@ -720,7 +736,26 @@ def _mapped(
         recognition=recognition,
         derived_types=derived,
         problems=problems,
+        documents=_documents(raw, recognition, rows),
     )
+
+
+def _documents(
+    raw: list[tuple[int, list[Any]]], recognition: ColumnRecognition, rows: list[ChartSheetRow]
+) -> tuple[tuple[int, str, Any], ...]:
+    """O valor da coluna de CNPJ/CPF de cada conta válida que tem algo nela (86e3ydjzy)."""
+    columns = recognition.roles.get("documento")
+    if not columns:
+        return ()
+    col = columns[0]
+    cells = dict(raw)
+    found: list[tuple[int, str, Any]] = []
+    for row in rows:
+        line_cells = cells.get(row.line, [])
+        value = line_cells[col] if col < len(line_cells) else None
+        if value is not None:
+            found.append((row.line, row.code, value))
+    return tuple(found)
 
 
 def _with_roles(

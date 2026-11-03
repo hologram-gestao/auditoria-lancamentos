@@ -688,7 +688,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Importa a RELAÇÃO DE CLIENTES ou a RELAÇÃO DE FORNECEDORES exportada do Domínio (XLS ou XLSX, reconhecida pelo título e pelo cabeçalho `Código`/`Conta`/`Nome`/`Razão Social`/`C.N.P.J./C.P.F.`, em qualquer ordem de colunas) e vincula cada conta do plano contábil do cliente (a coluna `Conta` é o código reduzido) ao CNPJ ou CPF da pessoa, cifrado com a chave do cliente. O tipo do vínculo (`cliente`/`fornecedor`) vem do título do relatório. Por arquivo, tudo ou nada: conta que não existe no plano ou é sintética recusa o arquivo inteiro com 422 `LINHAS_INVALIDAS` (`details.lines=[{line, reason, accountCode}]`, `reason` ∈ `conta_nao_encontrada`, `conta_sintetica`, `conta_ausente`, `conta_invalida`, `linha_fora_do_bloco`). Não recusam, mas ficam SEM vínculo e voltam em `naoVinculadas`: conta `0` (`sem_conta`), `documento_ausente`, `documento_invalido` (dígito verificador errado no Domínio) e `conta_compartilhada` (a mesma conta em mais de uma pessoa). Reimportar é idempotente; a conta vinculada que não vem no relatório fica como está. O CNPJ da empresa no cabeçalho do relatório é comparado (por impressão digital, nunca em claro) com o dos relatórios já importados: outra empresa é 422 `RELATORIO_DE_OUTRA_EMPRESA`. Arquivo que não é a relação: 422 `CABECALHO_DIVERGENTE`; sem título ou sem o CNPJ da empresa: 422 `ARQUIVO_INVALIDO` com `details.reason` (`relatorio_nao_reconhecido`, `empresa_nao_identificada`, `sem_pessoas`); CSV ou PDF: 422 `FORMATO_NAO_SUPORTADO`. Requer `manage_client_accounting_chart`; cliente encerrado 409. Nenhum documento, nome ou razão social sai na resposta nem vai para o log. */
+        /** Importa a RELAÇÃO DE CLIENTES ou a RELAÇÃO DE FORNECEDORES exportada do Domínio (XLS ou XLSX, reconhecida pelo título e pelo cabeçalho `Código`/`Conta`/`Nome`/`Razão Social`/`C.N.P.J./C.P.F.`, em qualquer ordem de colunas) e vincula cada conta do plano contábil do cliente (a coluna `Conta` é o código reduzido) ao CNPJ ou CPF da pessoa, cifrado com a chave do cliente. O tipo do vínculo (`cliente`/`fornecedor`) vem do título do relatório. Por arquivo, tudo ou nada: conta que não existe no plano ou é sintética recusa o arquivo inteiro com 422 `LINHAS_INVALIDAS` (`details.lines=[{line, reason, accountCode}]`, `reason` ∈ `conta_nao_encontrada`, `conta_sintetica`, `conta_ausente`, `conta_invalida`, `linha_fora_do_bloco`). Não recusam, mas ficam SEM vínculo e voltam em `naoVinculadas`: conta `0` (`sem_conta`), `documento_ausente`, `documento_invalido` (dígito verificador errado no Domínio) e `conta_compartilhada` (a mesma conta em mais de uma pessoa). Reimportar é idempotente; a conta vinculada que não vem no relatório fica como está. O CNPJ da empresa no cabeçalho do relatório é comparado (por impressão digital, nunca em claro) com o dos relatórios já importados: outra empresa é 422 `RELATORIO_DE_OUTRA_EMPRESA`; sem o CNPJ da empresa, a relação entra SEM conferir e a resposta diz `empresaConferida: false` (86e3ydjzy). O cabeçalho por nome só exige `Conta` e a coluna do documento (outras colunas não recusam); sem ele, o conteúdo decide (documento com cara de CNPJ/CPF, conta de inteiros que existem no plano). Arquivo que não é a relação: 422 `CABECALHO_DIVERGENTE`; sem o título do Domínio: 422 `TIPO_DE_VINCULO_NECESSARIO` (reenviar com `tipoVinculo`), e o `tipoVinculo` que contradiz o título é 422 `TIPO_DE_VINCULO_DIVERGENTE`; sem pessoas: 422 `ARQUIVO_INVALIDO` com `details.reason=sem_pessoas`; CSV ou PDF: 422 `FORMATO_NAO_SUPORTADO`. Requer `manage_client_accounting_chart`; cliente encerrado 409. Nenhum documento, nome ou razão social sai na resposta nem vai para o log. */
         post: operations["import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post"];
         delete?: never;
         options?: never;
@@ -3060,6 +3060,11 @@ export interface components {
              * @description Opcional, só na importação. As linhas que a pessoa confirmou deixar DE FORA, como a prévia as devolveu em `linhasComProblema`: JSON `[12, 40]`. O servidor recalcula as linhas com problema do MESMO arquivo e só grava se o conjunto for IGUAL; diferença é 422 `LINHAS_INVALIDAS` e nada é gravado. Forma inválida: 400.
              */
             linhasExcluidas?: string | null;
+            /**
+             * Vinculardocumentos
+             * @description Opcional, só na importação (86e3ydjzy). Quando a prévia devolveu `documentosEncontrados`, vincula cada conta ao CNPJ/CPF da coluna de documento da própria planilha, com o tipo escolhido para o lote: JSON `{"tipo": "fornecedor"}` ou `{"tipo": "cliente"}` (o tipo nunca é inferido da posição da conta). Mesma política da relação: inválido, `0`, conta sintética e documento repetido em duas contas ficam sem vínculo e voltam em `vinculos.naoVinculadas`. Forma inválida: 400.
+             */
+            vincularDocumentos?: string | null;
         };
         /** Body_import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post */
         Body_import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post: {
@@ -3068,6 +3073,8 @@ export interface components {
              * @description A RELAÇÃO DE CLIENTES ou a RELAÇÃO DE FORNECEDORES do Domínio (XLS/XLSX).
              */
             file: string;
+            /** @description Opcional (86e3ydjzy): `cliente` ou `fornecedor`, para a relação que NÃO traz o título do Domínio (sem ele, a resposta é 422 `TIPO_DE_VINCULO_NECESSARIO`). Com título, o título manda e um tipo diferente é 422 `TIPO_DE_VINCULO_DIVERGENTE`. */
+            tipoVinculo?: components["schemas"]["AccountingPartyType"] | null;
         };
         /** Body_inspect_file_api_v1_clients__client_id__file_origin_inspect_post */
         Body_inspect_file_api_v1_clients__client_id__file_origin_inspect_post: {
@@ -3249,6 +3256,8 @@ export interface components {
              * @default 0
              */
             contasExcluidas: number;
+            /** @description Só com `vincularDocumentos` (86e3ydjzy): o vínculo conta ↔ CNPJ/CPF pela coluna de documento da própria planilha, no formato da importação da relação. */
+            vinculos?: components["schemas"]["PartiesImportPayload"] | null;
         };
         /**
          * ChartImportPreviewEnvelope
@@ -3326,6 +3335,11 @@ export interface components {
              * @description As linhas da planilha que NÃO entram (86e3ydjze), em ordem de linha, com o motivo fechado. Vazia = a planilha entra inteira. Para importar sem elas, a importação manda a MESMA lista em `linhasExcluidas`.
              */
             linhasComProblema: components["schemas"]["ChartProblemLine"][];
+            /**
+             * Documentosencontrados
+             * @description Quantas contas trazem CNPJ/CPF na coluna de documento da planilha (86e3ydjzy), fora o `0`; `null` quando a planilha não tem essa coluna. A importação com `vincularDocumentos` vincula cada uma (as inválidas ficam sem vínculo).
+             */
+            documentosEncontrados: number | null;
             /** @description Só quando o mapeamento pediu o tipo pela hierarquia (`tipoPelaHierarquia`): quantas contas ficaram sintéticas (têm conta abaixo) e quantas analíticas. `null` nos outros casos. */
             tipoDerivado: components["schemas"]["ChartDerivedTypes"] | null;
         };
@@ -7133,6 +7147,12 @@ export interface components {
             naoVinculadasTotal: number;
             /** Listlimit */
             listLimit: number;
+            /**
+             * Empresaconferida
+             * @description `false` quando o relatório não traz o CNPJ da empresa (86e3ydjzy): a relação entrou SEM conferir que é da empresa deste cliente.
+             * @default true
+             */
+            empresaConferida: boolean;
         };
         /**
          * PartyLinkEnvelope
@@ -7229,7 +7249,7 @@ export interface components {
             line: number;
             /**
              * Reason
-             * @description `sem_conta` (conta 0 no Domínio), `documento_ausente`, `documento_invalido` (dígito verificador errado no Domínio) ou `conta_compartilhada` (a mesma conta em mais de uma pessoa: vínculo um-para-um impossível).
+             * @description `sem_conta` (conta 0 no Domínio), `documento_ausente`, `documento_invalido` (dígito verificador errado no Domínio) ou `conta_compartilhada` (a mesma conta em mais de uma pessoa: vínculo um-para-um impossível); no vínculo pela coluna do plano, também `documento_repetido` (o mesmo documento em duas contas) e `conta_sintetica`.
              */
             reason: string;
             /** Accountcode */

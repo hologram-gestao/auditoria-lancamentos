@@ -135,6 +135,13 @@ class AccountingChartRepository:
         stmt = self._base_query(client_id).order_by(*_chart_order())
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def list_codes(self, client_id: UUID) -> list[str]:
+        """Só os códigos reduzidos do plano do cliente (nada cifrado é lido)."""
+        stmt = select(ClientAccountingAccount.code).where(
+            ClientAccountingAccount.client_id == client_id
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
     async def get_by_codes(
         self, client_id: UUID, codes: Collection[str]
     ) -> list[ClientAccountingAccount]:
@@ -254,7 +261,13 @@ class AccountingChartRepository:
         await self._session.execute(stmt)
 
     async def record_import(self, record: ClientAccountingChartImport) -> None:
-        """O registro de uma importação que entrou (86e3ydjze), na MESMA transação dela."""
+        """O registro de uma importação que entrou (86e3ydjze), na MESMA transação dela.
+
+        `imported_at` é o relógio da GRAVAÇÃO (`clock_timestamp()`), não o início da
+        transação (`now()`): duas importações na mesma transação empatariam, e a "última"
+        que a tela lê sairia pela ordem do UUID.
+        """
+        record.imported_at = func.clock_timestamp()
         self._session.add(record)
         await self._session.flush()
 

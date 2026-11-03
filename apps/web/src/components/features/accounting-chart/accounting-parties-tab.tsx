@@ -73,6 +73,7 @@ import {
 import { readEnum, readPositiveInt, useUrlState } from '@/hooks/use-url-state';
 import {
   partyLineReasonLabel,
+  isPartyTypeRequired,
   readAccountingPartiesRefusal,
 } from '@/lib/accounting-parties-errors';
 import { ApiError } from '@/lib/api/client';
@@ -153,6 +154,8 @@ export function AccountingPartiesTab({ clientId, isClosed, hasPlan }: Accounting
   const importMutation = useImportAccountingParties(clientId);
   const [lastImport, setLastImport] = useState<AccountingPartiesImportResult | null>(null);
   const [refusal, setRefusal] = useState<unknown>(null);
+  // O arquivo que pediu o tipo do vínculo (86e3ydjzy), até a pessoa responder.
+  const [askType, setAskType] = useState<File | null>(null);
   const [linkSheetOpen, setLinkSheetOpen] = useState(false);
   const [linkSheetKey, setLinkSheetKey] = useState(0);
   const [unlinking, setUnlinking] = useState<AccountingPartyLink | null>(null);
@@ -163,15 +166,22 @@ export function AccountingPartiesTab({ clientId, isClosed, hasPlan }: Accounting
     mode: 'onSubmit',
   });
 
-  async function onSubmit(values: AccountingPartiesImportValues) {
-    if (!(values.file instanceof File)) return;
+  async function send(file: File, partyType: AccountingPartyType | null) {
     setRefusal(null);
     try {
-      const result = await importMutation.mutateAsync(values.file);
+      const result = await importMutation.mutateAsync({ file, partyType });
       setLastImport(result);
+      setAskType(null);
       toast.success(partiesImportSuccessMessage(result));
       form.reset({ file: null });
     } catch (err) {
+      // 86e3ydjzy: a relação sem o título do Domínio. Não é recusa: a tela pergunta o
+      // tipo (sem padrão) e reenvia o MESMO arquivo com a escolha.
+      if (isPartyTypeRequired(err)) {
+        setAskType(file);
+        return;
+      }
+      setAskType(null);
       if (readAccountingPartiesRefusal(err) !== null) {
         setRefusal(err);
         return;
@@ -180,6 +190,11 @@ export function AccountingPartiesTab({ clientId, isClosed, hasPlan }: Accounting
         err instanceof ApiError ? err.userMessage : 'Não foi possível importar a relação.',
       );
     }
+  }
+
+  async function onSubmit(values: AccountingPartiesImportValues) {
+    if (!(values.file instanceof File)) return;
+    await send(values.file, null);
   }
 
   const rows = listQuery.data?.data ?? [];
@@ -224,6 +239,7 @@ export function AccountingPartiesTab({ clientId, isClosed, hasPlan }: Accounting
                       onChange={(file) => {
                         field.onChange(file);
                         setRefusal(null);
+                        setAskType(null);
                       }}
                     />
                   </FormControl>
@@ -251,6 +267,36 @@ export function AccountingPartiesTab({ clientId, isClosed, hasPlan }: Accounting
             ? 'Cliente encerrado: as relações não podem ser importadas. Os vínculos já gravados continuam listados, sem o documento.'
             : 'Importe o plano contábil do cliente antes: cada linha da relação aponta para uma conta do plano, e sem ele nenhuma conta seria encontrada.'}
         </p>
+      )}
+
+      {askType !== null && (
+        <section
+          role="group"
+          aria-labelledby="accounting-parties-type-question"
+          data-testid="accounting-parties-type-question"
+          className="bg-card space-y-3 rounded-lg border p-4 text-sm"
+        >
+          <p id="accounting-parties-type-question" className="font-medium">
+            Esta relação é de clientes ou de fornecedores?
+          </p>
+          <p className="text-muted-foreground">
+            O arquivo não traz o título do Domínio (&quot;Relação de clientes&quot; ou &quot;Relação
+            de fornecedores&quot;). Escolha o tipo para vincular as contas.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {PARTY_TYPES.map((option) => (
+              <Button
+                key={option}
+                type="button"
+                variant="outline"
+                disabled={importMutation.isPending}
+                onClick={() => void send(askType, option)}
+              >
+                {PARTY_LIST_LABELS[option]}
+              </Button>
+            ))}
+          </div>
+        </section>
       )}
 
       {lastImport !== null && (
@@ -508,6 +554,12 @@ function ImportResultPanel({
           <X className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
+      {!result.empresaConferida && (
+        <p data-testid="accounting-parties-company-unchecked" className="font-medium">
+          A empresa do relatório não foi conferida: o arquivo não traz o CNPJ da empresa no
+          cabeçalho. Confira que a relação é deste cliente.
+        </p>
+      )}
       {result.naoVinculadas.length > 0 && (
         <div className="space-y-2">
           <p className="text-xs font-medium">

@@ -90,6 +90,11 @@ class ErrorCode(StrEnum):
     #: reconhecimento por conteúdo não decidiu código, nome ou tipo: em vez de recusa,
     #: a tela pergunta o que é cada coluna (422, com o perfil das colunas).
     MAPEAMENTO_NECESSARIO = "MAPEAMENTO_NECESSARIO"
+    #: 86e3ydjzy — a relação de clientes/fornecedores sem o título do Domínio: o tipo
+    #: do vínculo é perguntado na tela (422), nunca adivinhado; com título, o título
+    #: manda, e um tipo escolhido diferente dele é 422 (nunca ignorado).
+    TIPO_DE_VINCULO_NECESSARIO = "TIPO_DE_VINCULO_NECESSARIO"
+    TIPO_DE_VINCULO_DIVERGENTE = "TIPO_DE_VINCULO_DIVERGENTE"
     LINHAS_INVALIDAS = "LINHAS_INVALIDAS"
     TOTAL_DIVERGENTE = "TOTAL_DIVERGENTE"
     # Sprint 16 — plano de contas contábil do cliente (BACK 16.1). A importação reusa
@@ -944,6 +949,29 @@ class ChartMappingRequiredError(AppError):
     code = ErrorCode.MAPEAMENTO_NECESSARIO
     status_code = 422
     default_user_message = "Diga o que é cada coluna para continuar."
+
+
+class PartyTypeRequiredError(AppError):
+    """422 — a relação não diz se é de clientes ou de fornecedores (sem o título do
+    Domínio): a tela pergunta e reenvia com `tipoVinculo` (86e3ydjzy)."""
+
+    code = ErrorCode.TIPO_DE_VINCULO_NECESSARIO
+    status_code = 422
+    default_user_message = (
+        "O arquivo não diz se é a relação de clientes ou a de fornecedores. Escolha o tipo "
+        "e envie de novo."
+    )
+
+
+class PartyTypeMismatchError(AppError):
+    """422 — o tipo escolhido contradiz o título do relatório (o título manda)."""
+
+    code = ErrorCode.TIPO_DE_VINCULO_DIVERGENTE
+    status_code = 422
+    default_user_message = (
+        "O tipo escolhido não é o do relatório: o título do arquivo diz outro. Confira o "
+        "arquivo ou o tipo e envie de novo."
+    )
 
 
 class FileLinesInvalidError(AppError):

@@ -96,6 +96,7 @@ import { AccountingAccountFormSheet } from './accounting-account-form-sheet';
 import { AccountingChartImportSheet, importSuccessMessage } from './accounting-chart-import-sheet';
 import { AccountingChartModel } from './accounting-chart-model';
 import { AccountingPartiesTab } from './accounting-parties-tab';
+import { partiesImportSuccessMessage } from './accounting-parties-tab';
 import { BankAccountsSection } from './bank-accounts-section';
 import { classificationDepth, indentClassFor } from './chart-hierarchy';
 import { ChartImportIncompleteBadge } from './chart-import-incomplete-badge';
@@ -335,6 +336,14 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
             <Stat label="Alteradas" value={lastImport.contasAlteradas} />
             <Stat label="Não vieram" value={lastImport.contasAusentes} />
           </dl>
+          {lastImport.vinculos && (
+            <p data-testid="accounting-chart-import-links">
+              {partiesImportSuccessMessage(lastImport.vinculos).replace(
+                /^Relação de (clientes|fornecedores) importada/,
+                'Vínculo pelos documentos da planilha',
+              )}
+            </p>
+          )}
           {(lastImport.contasExcluidas ?? 0) > 0 && (
             <p data-testid="accounting-chart-import-excluded" className="font-medium">
               {lastImport.contasExcluidas === 1

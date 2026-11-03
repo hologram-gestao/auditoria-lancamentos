@@ -94,6 +94,7 @@ from app.modules.client_accounting_chart.schemas import (
     ChartImportPreviewEnvelope,
     ChartImportPreviewPayload,
     ChartLastImport,
+    ChartLinkDocumentsRequest,
     OmieExportPreviewEnvelope,
     OmieExportPreviewPayload,
     PartiesImportEnvelope,
@@ -216,6 +217,41 @@ ExcludedLinesForm = Annotated[
 ]
 
 
+_LINK_FORM_DESCRIPTION = (
+    "Opcional, só na importação (86e3ydjzy). Quando a prévia devolveu "
+    "`documentosEncontrados`, vincula cada conta ao CNPJ/CPF da coluna de documento da "
+    'própria planilha, com o tipo escolhido para o lote: JSON `{"tipo": "fornecedor"}` ou '
+    '`{"tipo": "cliente"}` (o tipo nunca é inferido da posição da conta). Mesma política '
+    "da relação: inválido, `0`, conta sintética e documento repetido em duas contas ficam "
+    "sem vínculo e voltam em `vinculos.naoVinculadas`. Forma inválida: 400."
+)
+LinkDocumentsForm = Annotated[
+    str | None,
+    Form(alias="vincularDocumentos", max_length=100, description=_LINK_FORM_DESCRIPTION),
+]
+PartyTypeForm = Annotated[
+    AccountingPartyType | None,
+    Form(
+        alias="tipoVinculo",
+        description=(
+            "Opcional (86e3ydjzy): `cliente` ou `fornecedor`, para a relação que NÃO traz o "
+            "título do Domínio (sem ele, a resposta é 422 `TIPO_DE_VINCULO_NECESSARIO`). Com "
+            "título, o título manda e um tipo diferente é 422 `TIPO_DE_VINCULO_DIVERGENTE`."
+        ),
+    ),
+]
+
+
+def _link_from_form(raw: str | None) -> AccountingPartyType | None:
+    """O tipo do vínculo pela coluna do plano; forma inválida é o 400 genérico."""
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return ChartLinkDocumentsRequest.model_validate_json(raw).tipo
+    except ValidationError:
+        raise ValidationAppError("vínculo dos documentos do plano inválido") from None
+
+
 def _excluded_from_form(raw: str | None) -> list[int] | None:
     """As linhas confirmadas do multipart; forma inválida é o 400 genérico."""
     if raw is None or not raw.strip():
@@ -305,16 +341,23 @@ async def import_accounting_chart(
     ],
     mapeamento: MappingForm = None,
     linhas_excluidas: ExcludedLinesForm = None,
+    vincular_documentos: LinkDocumentsForm = None,
 ) -> ChartImportEnvelope:
     mapping = _mapping_from_form(mapeamento)
     excluded = _excluded_from_form(linhas_excluidas)
+    link_documents = _link_from_form(vincular_documentos)
     content = await read_upload_within_limit(
         file,
         declared_content_length=parse_content_length(request.headers.get("content-length")),
         max_bytes=settings.max_upload_bytes,
     )
     result = await service.import_sheet(
-        client, actor=actor, content=content, mapping=mapping, excluded_lines=excluded
+        client,
+        actor=actor,
+        content=content,
+        mapping=mapping,
+        excluded_lines=excluded,
+        link_documents=link_documents,
     )
     return ChartImportEnvelope(data=ChartImportPayload.from_result(result))
 
@@ -484,10 +527,15 @@ async def update_accounting_account(
         "Reimportar é idempotente; a conta vinculada que não vem no relatório fica como "
         "está. O CNPJ da empresa no cabeçalho do relatório é comparado (por impressão "
         "digital, nunca em claro) com o dos relatórios já importados: outra empresa é 422 "
-        "`RELATORIO_DE_OUTRA_EMPRESA`. Arquivo que não é a relação: 422 "
-        "`CABECALHO_DIVERGENTE`; sem título ou sem o CNPJ da empresa: 422 `ARQUIVO_INVALIDO` "
-        "com `details.reason` (`relatorio_nao_reconhecido`, `empresa_nao_identificada`, "
-        "`sem_pessoas`); CSV ou PDF: 422 `FORMATO_NAO_SUPORTADO`. Requer "
+        "`RELATORIO_DE_OUTRA_EMPRESA`; sem o CNPJ da empresa, a relação entra SEM conferir "
+        "e a resposta diz `empresaConferida: false` (86e3ydjzy). O cabeçalho por nome só "
+        "exige `Conta` e a coluna do documento (outras colunas não recusam); sem ele, o "
+        "conteúdo decide (documento com cara de CNPJ/CPF, conta de inteiros que existem no "
+        "plano). Arquivo que não é a relação: 422 `CABECALHO_DIVERGENTE`; sem o título do "
+        "Domínio: 422 `TIPO_DE_VINCULO_NECESSARIO` (reenviar com `tipoVinculo`), e o "
+        "`tipoVinculo` que contradiz o título é 422 `TIPO_DE_VINCULO_DIVERGENTE`; sem "
+        "pessoas: 422 `ARQUIVO_INVALIDO` com `details.reason=sem_pessoas`; CSV ou PDF: 422 "
+        "`FORMATO_NAO_SUPORTADO`. Requer "
         "`manage_client_accounting_chart`; cliente encerrado 409. Nenhum documento, nome "
         "ou razão social sai na resposta nem vai para o log."
     ),
@@ -504,13 +552,16 @@ async def import_accounting_parties(
             description="A RELAÇÃO DE CLIENTES ou a RELAÇÃO DE FORNECEDORES do Domínio (XLS/XLSX)."
         ),
     ],
+    tipo_vinculo: PartyTypeForm = None,
 ) -> PartiesImportEnvelope:
     content = await read_upload_within_limit(
         file,
         declared_content_length=parse_content_length(request.headers.get("content-length")),
         max_bytes=settings.max_upload_bytes,
     )
-    result = await service.import_parties(client, actor=actor, content=content)
+    result = await service.import_parties(
+        client, actor=actor, content=content, party_type=tipo_vinculo
+    )
     return PartiesImportEnvelope(data=PartiesImportPayload.from_result(result))
 
 

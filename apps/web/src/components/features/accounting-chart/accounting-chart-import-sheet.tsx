@@ -59,6 +59,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
+import { Switch } from '@/components/ui/switch';
 import {
   useImportAccountingChart,
   usePreviewAccountingChartImport,
@@ -111,6 +112,81 @@ export function importSuccessMessage(result: AccountingChartImportResult): strin
   )}${excluded > 0 ? `; ${plural(excluded, 'linha ficou', 'linhas ficaram')} de fora` : ''}.`;
 }
 
+/**
+ * O vínculo pela coluna de CNPJ/CPF da própria planilha (86e3ydjzy): desligado por
+ * padrão; ligado, o tipo do LOTE é escolhido aqui (nunca inferido da posição da conta).
+ */
+function DocumentLinkChoice({
+  found,
+  enabled,
+  onEnabledChange,
+  partyType,
+  onPartyTypeChange,
+  disabled,
+}: {
+  found: number;
+  enabled: boolean;
+  onEnabledChange: (next: boolean) => void;
+  partyType: 'cliente' | 'fornecedor';
+  onPartyTypeChange: (next: 'cliente' | 'fornecedor') => void;
+  disabled: boolean;
+}) {
+  const label =
+    found === 1
+      ? 'Vincular a conta ao CNPJ/CPF que veio no arquivo'
+      : `Vincular as ${found} contas ao CNPJ/CPF que vieram no arquivo`;
+  return (
+    <section
+      aria-label="Vínculo pelos documentos da planilha"
+      data-testid="accounting-chart-link-documents"
+      className="bg-card space-y-3 rounded-lg border p-3 text-sm"
+    >
+      <div className="flex items-start gap-3">
+        <Switch
+          id="accounting-chart-link-documents-switch"
+          checked={enabled}
+          onCheckedChange={onEnabledChange}
+          disabled={disabled}
+          aria-describedby="accounting-chart-link-documents-help"
+        />
+        <div className="space-y-0.5">
+          <label
+            htmlFor="accounting-chart-link-documents-switch"
+            className="cursor-pointer font-medium"
+          >
+            {label}
+          </label>
+          <p id="accounting-chart-link-documents-help" className="text-muted-foreground text-xs">
+            A planilha tem uma coluna de CNPJ/CPF. Ligado, cada conta fica vinculada à pessoa (como
+            na importação da relação do Domínio); documento inválido ou repetido fica sem vínculo e
+            aparece no resultado.
+          </p>
+        </div>
+      </div>
+      {enabled && (
+        <fieldset className="space-y-1" disabled={disabled}>
+          <legend className="text-xs font-medium">As contas são de</legend>
+          <div className="flex flex-wrap gap-4">
+            {(['fornecedor', 'cliente'] as const).map((option) => (
+              <label key={option} className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="radio"
+                  name="accounting-chart-link-type"
+                  value={option}
+                  checked={partyType === option}
+                  onChange={() => onPartyTypeChange(option)}
+                  className="accent-primary h-4 w-4"
+                />
+                {option === 'fornecedor' ? 'Fornecedores' : 'Clientes'}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
+    </section>
+  );
+}
+
 /** O rótulo do "Confirmar": com linha de fora, diz quantas ficam de fora (86e3ydjze). */
 function confirmLabel(
   preview: AccountingChartImportPreview,
@@ -151,6 +227,10 @@ export function AccountingChartImportSheet({
   // mapeamento que valeu na prévia (o mesmo vai na importação).
   const [mappingStep, setMappingStep] = useState<ChartMappingRequired | null>(null);
   const [mapping, setMapping] = useState<AccountingChartMappingPayload | null>(null);
+  // 86e3ydjzy: vincular as contas ao CNPJ/CPF da coluna de documento da planilha. Só
+  // por escolha (desligado por padrão), com o tipo do lote pré-marcado "fornecedor".
+  const [linkDocuments, setLinkDocuments] = useState(false);
+  const [linkAs, setLinkAs] = useState<'cliente' | 'fornecedor'>('fornecedor');
 
   const form = useForm<AccountingChartImportValues>({
     resolver: zodResolver(accountingChartImportSchema),
@@ -184,6 +264,7 @@ export function AccountingChartImportSheet({
     setPreview(null);
     setMappingStep(null);
     setMapping(null);
+    setLinkDocuments(false);
   }
 
   function handleFailure(err: unknown, fallback: string) {
@@ -220,10 +301,12 @@ export function AccountingChartImportSheet({
       // 86e3ydjze: as linhas com problema que a prévia mostrou e a pessoa confirmou deixar
       // de fora; o servidor só grava se forem EXATAMENTE as que ele calcula agora.
       const excluded = preview?.linhasComProblema.map((item) => item.linha) ?? [];
+      const offersLink = (preview?.documentosEncontrados ?? 0) > 0;
       const result = await importMutation.mutateAsync({
         file,
         mapping,
         excludedLines: excluded.length > 0 ? excluded : null,
+        linkDocumentsAs: offersLink && linkDocuments ? linkAs : null,
       });
       toast.success(importSuccessMessage(result));
       onImported(result);
@@ -310,6 +393,17 @@ export function AccountingChartImportSheet({
                 <div ref={previewRef}>
                   <AccountingChartImportPreviewPanel preview={preview} />
                 </div>
+              )}
+
+              {preview !== null && (preview.documentosEncontrados ?? 0) > 0 && (
+                <DocumentLinkChoice
+                  found={preview.documentosEncontrados ?? 0}
+                  enabled={linkDocuments}
+                  onEnabledChange={setLinkDocuments}
+                  partyType={linkAs}
+                  onPartyTypeChange={setLinkAs}
+                  disabled={isPending}
+                />
               )}
 
               {refusal !== null && <AccountingChartRefusalNotice error={refusal} />}

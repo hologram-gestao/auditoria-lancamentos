@@ -233,6 +233,7 @@ function preview(
     listLimit: 200,
     tipoDerivado: null,
     linhasComProblema: [],
+    documentosEncontrados: null,
     ...overrides,
   };
 }
@@ -1264,6 +1265,83 @@ describe('linhas de fora e o selo "não está 100%" (86e3ydjze)', () => {
     lastImportState = null;
     render(<AccountingChartScreen clientId="c1" />);
     expect(screen.queryByTestId('accounting-chart-incomplete-badge')).not.toBeInTheDocument();
+  });
+});
+
+describe('vínculo pela coluna de CNPJ/CPF do plano (86e3ydjzy)', () => {
+  async function reviewWithDocuments() {
+    withoutPlan();
+    previewState.mutateAsync = vi
+      .fn()
+      .mockResolvedValue(preview({ layout: 'reconhecido', documentosEncontrados: 252 }));
+    importState.mutateAsync = vi.fn().mockResolvedValue({
+      contas: 1850,
+      contasNovas: 1850,
+      contasAlteradas: 0,
+      contasAusentes: 0,
+      contasExcluidas: 0,
+      vinculos: {
+        relatorio: 'cliente',
+        linhas: 263,
+        contasVinculadas: 240,
+        vinculosNovos: 240,
+        vinculosAtualizados: 0,
+        vinculosSemMudanca: 0,
+        naoVinculadas: [],
+        naoVinculadasTotal: 23,
+        listLimit: 50,
+        empresaConferida: false,
+      },
+    });
+    render(<AccountingChartScreen clientId="c1" />);
+    const user = userEvent.setup({ applyAccept: false });
+    await user.click(screen.getByRole('button', { name: /Importar planilha/ }));
+    const dialog = await screen.findByRole('dialog');
+    await user.upload(within(dialog).getByLabelText('Planilha (.csv, .xlsx ou .xls)'), csvFile());
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+    return { user, dialog };
+  }
+
+  it('desligado por padrão: a importação não leva o vínculo', async () => {
+    const { user, dialog } = await reviewWithDocuments();
+    const choice = await within(dialog).findByTestId('accounting-chart-link-documents');
+    expect(choice).toHaveTextContent('Vincular as 252 contas ao CNPJ/CPF que vieram no arquivo');
+    expect(within(choice).getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+    await user.click(within(dialog).getByRole('button', { name: 'Confirmar importação' }));
+    await waitFor(() =>
+      expect(importState.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ linkDocumentsAs: null }),
+      ),
+    );
+  });
+
+  it('ligado, com o tipo do lote escolhido (pré-marcado fornecedor), e o resultado aparece', async () => {
+    const { user, dialog } = await reviewWithDocuments();
+    const choice = await within(dialog).findByTestId('accounting-chart-link-documents');
+    await user.click(within(choice).getByRole('switch'));
+    expect(within(choice).getByRole('radio', { name: 'Fornecedores' })).toBeChecked();
+    await user.click(within(choice).getByRole('radio', { name: 'Clientes' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Confirmar importação' }));
+    await waitFor(() =>
+      expect(importState.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ linkDocumentsAs: 'cliente' }),
+      ),
+    );
+    expect(await screen.findByTestId('accounting-chart-import-links')).toHaveTextContent(
+      'Vínculo pelos documentos da planilha: 263 pessoas, 240 contas vinculadas',
+    );
+  });
+
+  it('sem coluna de documento, nada é oferecido', async () => {
+    withoutPlan();
+    render(<AccountingChartScreen clientId="c1" />);
+    const user = userEvent.setup({ applyAccept: false });
+    await user.click(screen.getByRole('button', { name: /Importar planilha/ }));
+    const dialog = await screen.findByRole('dialog');
+    await user.upload(within(dialog).getByLabelText('Planilha (.csv, .xlsx ou .xls)'), csvFile());
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+    await within(dialog).findByTestId('accounting-chart-import-preview');
+    expect(within(dialog).queryByTestId('accounting-chart-link-documents')).not.toBeInTheDocument();
   });
 });
 

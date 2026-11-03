@@ -223,6 +223,13 @@ class ChartImportPayload(BaseModel):
             'com elas, a tela do plano mostra o selo "não está 100%".'
         ),
     )
+    vinculos: PartiesImportPayload | None = Field(
+        default=None,
+        description=(
+            "Só com `vincularDocumentos` (86e3ydjzy): o vínculo conta ↔ CNPJ/CPF pela coluna "
+            "de documento da própria planilha, no formato da importação da relação."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -234,6 +241,9 @@ class ChartImportPayload(BaseModel):
             contas_alteradas=result.updated,
             contas_ausentes=result.absent,
             contas_excluidas=result.excluded,
+            vinculos=(
+                PartiesImportPayload.from_result(result.links) if result.links is not None else None
+            ),
         )
 
 
@@ -303,6 +313,14 @@ MAX_CHART_MAPPING_CHARS = 1000
 #: linhas e a importação recusa acima de 20% com problema, então 2.000 números de até
 #: 5 dígitos e a vírgula cabem com folga.
 MAX_EXCLUDED_LINES_CHARS = 16_000
+
+
+class ChartLinkDocumentsRequest(BaseModel):
+    """O vínculo pela coluna de CNPJ/CPF do plano (campo `vincularDocumentos`, 86e3ydjzy)."""
+
+    tipo: AccountingPartyType
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class ChartExcludedLinesRequest(BaseModel):
@@ -421,6 +439,14 @@ class ChartImportPreviewPayload(BaseModel):
             "importação manda a MESMA lista em `linhasExcluidas`."
         ),
     )
+    documentos_encontrados: int | None = Field(
+        alias="documentosEncontrados",
+        description=(
+            "Quantas contas trazem CNPJ/CPF na coluna de documento da planilha (86e3ydjzy), "
+            "fora o `0`; `null` quando a planilha não tem essa coluna. A importação com "
+            "`vincularDocumentos` vincula cada uma (as inválidas ficam sem vínculo)."
+        ),
+    )
     tipo_derivado: ChartDerivedTypes | None = Field(
         alias="tipoDerivado",
         description=(
@@ -449,6 +475,7 @@ class ChartImportPreviewPayload(BaseModel):
             linhas_com_problema=[
                 ChartProblemLine(linha=line, motivo=reason) for line, reason in preview.problems
             ],
+            documentos_encontrados=preview.documents_found,
             contas=preview.accounts,
             contas_novas=len(diff.new_rows),
             contas_alteradas=len(diff.changed),
@@ -610,7 +637,9 @@ class PartySkippedLine(BaseModel):
         description=(
             "`sem_conta` (conta 0 no Domínio), `documento_ausente`, `documento_invalido` "
             "(dígito verificador errado no Domínio) ou `conta_compartilhada` (a mesma conta "
-            "em mais de uma pessoa: vínculo um-para-um impossível)."
+            "em mais de uma pessoa: vínculo um-para-um impossível); no vínculo pela coluna "
+            "do plano, também `documento_repetido` (o mesmo documento em duas contas) e "
+            "`conta_sintetica`."
         )
     )
     account_code: str | None = Field(default=None, alias="accountCode")
@@ -647,12 +676,21 @@ class PartiesImportPayload(BaseModel):
     )
     nao_vinculadas_total: int = Field(ge=0, alias="naoVinculadasTotal")
     list_limit: int = Field(alias="listLimit")
+    empresa_conferida: bool = Field(
+        default=True,
+        alias="empresaConferida",
+        description=(
+            "`false` quando o relatório não traz o CNPJ da empresa (86e3ydjzy): a relação "
+            "entrou SEM conferir que é da empresa deste cliente."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
     @classmethod
     def from_result(cls, result: PartyImportResult) -> PartiesImportPayload:
         return cls(
+            empresa_conferida=result.company_checked,
             relatorio=result.party_type,
             linhas=result.lines,
             contas_vinculadas=result.linked,
@@ -878,3 +916,7 @@ class OmieExportPreviewEnvelope(BaseModel):
     """Body de `GET /clients/{client_id}/accounting-chart/omie-export/preview`."""
 
     data: OmieExportPreviewPayload
+
+
+# `ChartImportPayload.vinculos` aponta para um modelo declarado depois dele.
+ChartImportPayload.model_rebuild()

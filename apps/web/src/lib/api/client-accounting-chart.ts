@@ -77,14 +77,26 @@ type PartiesBody =
   components['schemas']['Body_import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post'];
 
 /** Nome do campo do multipart — travado no contrato pelo `satisfies` (as três rotas). */
-const IMPORT_FIELD = { file: 'file' } as const satisfies Partial<Record<keyof ImportBody, string>> &
-  Partial<Record<keyof PreviewBody, string>> &
-  Record<keyof PartiesBody, string>;
+const IMPORT_FIELD = { file: 'file' } as const satisfies Record<
+  'file',
+  keyof ImportBody & keyof PreviewBody & keyof PartiesBody
+>;
 
 /** Os campos opcionais da importação do plano, travados no contrato (épico 86e3ydjy9). */
 const IMPORT_OPTION_FIELDS = {
   mapping: 'mapeamento',
 } as const satisfies Record<string, keyof ImportBody & keyof PreviewBody>;
+/** A relação sem título: o tipo escolhido na tela (86e3ydjzy). */
+const PARTY_TYPE_FIELD = 'tipoVinculo' as const satisfies keyof PartiesBody;
+/** O vínculo pela coluna de CNPJ/CPF do próprio plano, só na importação (86e3ydjzy). */
+const LINK_DOCUMENTS_FIELD = 'vincularDocumentos' as const satisfies keyof ImportBody;
+
+export interface AccountingPartiesImportRequest {
+  file: File;
+  /** Só quando o servidor pediu (`TIPO_DE_VINCULO_NECESSARIO`): o título manda. */
+  partyType?: 'cliente' | 'fornecedor' | null;
+}
+
 /** Só na importação: as linhas confirmadas para ficar de fora (86e3ydjze). */
 const EXCLUDED_LINES_FIELD = 'linhasExcluidas' as const satisfies keyof ImportBody;
 
@@ -98,6 +110,11 @@ export interface AccountingChartImportRequest {
    * pessoa confirmou deixar de fora. O servidor exige a MESMA lista.
    */
   excludedLines?: number[] | null;
+  /**
+   * Só na importação (86e3ydjzy): vincular as contas ao CNPJ/CPF da coluna de documento da
+   * planilha, com o tipo do lote (escolhido, nunca inferido).
+   */
+  linkDocumentsAs?: 'cliente' | 'fornecedor' | null;
 }
 
 function importForm(request: AccountingChartImportRequest): FormData {
@@ -108,6 +125,9 @@ function importForm(request: AccountingChartImportRequest): FormData {
   }
   if (request.excludedLines && request.excludedLines.length > 0) {
     form.append(EXCLUDED_LINES_FIELD, JSON.stringify(request.excludedLines));
+  }
+  if (request.linkDocumentsAs) {
+    form.append(LINK_DOCUMENTS_FIELD, JSON.stringify({ tipo: request.linkDocumentsAs }));
   }
   return form;
 }
@@ -236,10 +256,11 @@ export type ListAccountingPartiesParams = ListAccountingPartiesQuery;
  */
 export async function importAccountingParties(
   clientId: string,
-  file: File,
+  request: AccountingPartiesImportRequest,
 ): Promise<AccountingPartiesImportResult> {
   const form = new FormData();
-  form.append(IMPORT_FIELD.file, file);
+  form.append(IMPORT_FIELD.file, request.file);
+  if (request.partyType) form.append(PARTY_TYPE_FIELD, request.partyType);
   return apiPostMultipart<AccountingPartiesImportResult>(
     `${clientBase(clientId)}/accounting-chart/parties/import`,
     form,

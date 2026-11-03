@@ -27,10 +27,12 @@ from app.core.exceptions import (
     ChartMappingRequiredError,
     FileHeaderMismatchError,
     FileLinesInvalidError,
+    PartyTypeRequiredError,
     ValidationAppError,
 )
-from app.db.models.client_accounting_account import AccountingAccountType
+from app.db.models.client_accounting_account import AccountingAccountType, AccountingPartyType
 from app.modules.client_accounting_chart import recognizer
+from app.modules.client_accounting_chart.parties import parse_parties_report
 from app.modules.client_accounting_chart.recognizer import (
     MIN_FILL_RATIO,
     MIN_FORM_RATIO,
@@ -573,3 +575,69 @@ class TestConfirmacao:
     def test_sem_problema_e_sem_confirmacao_passa(self) -> None:
         refuse_unconfirmed_lines([], confirmed=None)
         refuse_unconfirmed_lines([], confirmed=[])
+
+
+def _tract_parties() -> bytes:
+    """Só a aba "Fornecedores Ajustados" da fixture, como arquivo próprio."""
+    wb = load_workbook(io.BytesIO(_TRACT.read_bytes()))
+    del wb[wb.sheetnames[0]]
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+_TRACT_LINKS = _FIXTURES / "accounting_chart_tract" / "vinculos_esperados.csv"
+
+
+class TestRelacaoDaTract:
+    """86e3ydjzy: a relação de fornecedores da Tract (sem título do Domínio, sem `Nome`)."""
+
+    def test_sem_titulo_pergunta_o_tipo(self) -> None:
+        with pytest.raises(PartyTypeRequiredError):
+            parse_parties_report(_tract_parties())
+
+    def test_com_o_tipo_bate_conta_a_conta_com_o_esperado(self) -> None:
+        report = parse_parties_report(_tract_parties(), party_type=AccountingPartyType.FORNECEDOR)
+        with _TRACT_LINKS.open(encoding="utf-8", newline="") as fh:
+            expected = [
+                (int(r["linha"]), r["conta"], r["documento"])
+                for r in csv.DictReader(fh, delimiter=";")
+            ]
+        assert [(line.line, line.account_code, line.document) for line in report.lines] == (
+            expected
+        )
+        assert report.persons == 288
+        assert sorted({p.reason for p in report.skipped}) == [
+            "conta_compartilhada",
+            "documento_ausente",
+        ]
+        # O banner da fixture tem um CNPJ inválido de propósito: a empresa não é conferida.
+        assert report.company_document is None
+
+    def test_sem_cabecalho_o_conteudo_acha_conta_e_documento(self) -> None:
+        wb = load_workbook(io.BytesIO(_tract_parties()))
+        wb.worksheets[0].delete_rows(5)
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        known = {r.code for r in parse_chart_sheet(_TRACT.read_bytes()).rows} | {"1260"}
+        report = parse_parties_report(
+            buffer.getvalue(), party_type=AccountingPartyType.FORNECEDOR, known_codes=known
+        )
+        assert len(report.lines) == 275
+        # Sem os códigos do plano, a coluna da conta não é reconhecida: recusa de cabeçalho.
+        with pytest.raises(FileHeaderMismatchError):
+            parse_parties_report(buffer.getvalue(), party_type=AccountingPartyType.FORNECEDOR)
+
+    def test_cnpj_da_empresa_na_mesma_celula_do_rotulo_e_lido(self) -> None:
+        wb = load_workbook(io.BytesIO(_tract_parties()))
+        wb.worksheets[0]["A2"] = "C.N.P.J.: 11.222.333/0001-81"
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        report = parse_parties_report(buffer.getvalue(), party_type=AccountingPartyType.FORNECEDOR)
+        assert report.company_document == "11222333000181"
+
+    def test_o_plano_traz_os_documentos_da_coluna_g(self) -> None:
+        parsed = parse_chart_sheet(_TRACT.read_bytes())
+        assert parsed.documents_found == 252
+        assert len(parsed.documents) == 263
+        assert "documents" not in repr(parsed)

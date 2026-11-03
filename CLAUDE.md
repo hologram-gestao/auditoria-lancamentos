@@ -669,8 +669,22 @@
      arquivo e tudo ou nada** (86e3qhhrn): `POST …/accounting-chart/parties/import` lê a
      "RELAÇÃO DE CLIENTES" ou a "RELAÇÃO DE FORNECEDORES" (`.xls` com o mesmo defeito dos
      BLANKs do plano; colunas pelo NOME, porque os dois relatórios trocam `Código` e
-     `Conta` de lugar; o tipo do vínculo vem do TÍTULO, nunca é perguntado) e grava, em
-     cada conta do plano, o documento cifrado. Conta que não existe no plano ou é
+     `Conta` de lugar; o tipo do vínculo vem do TÍTULO) e grava, em cada conta do plano,
+     o documento cifrado. **Desde 86e3ydjzy (a relação da Tract) o relatório não precisa
+     estar intacto**: o cabeçalho por nome exige só `Conta` e a coluna do documento
+     (`Código`, `Nome` e `Razão Social` são ignorados, coluna a mais não recusa) e, sem ele,
+     o CONTEÚDO decide (`recognize_party_columns`: documento com cara de CNPJ/CPF, conta de
+     inteiros que EXISTEM no plano); sem o título, o tipo é PERGUNTADO na tela (`tipoVinculo`;
+     sem ele, 422 `TIPO_DE_VINCULO_NECESSARIO`), e com título o título manda (tipo
+     diferente é 422 `TIPO_DE_VINCULO_DIVERGENTE`); sem o CNPJ da empresa legível no banner,
+     a relação entra SEM conferir a empresa nem tocar a impressão digital e a resposta diz
+     `empresaConferida: false` (o CNPJ na mesma célula do rótulo `C.N.P.J.:` também vale).
+     A coluna de CNPJ/CPF do PRÓPRIO plano (a Tract a traz) vira vínculo só por escolha:
+     a prévia devolve `documentosEncontrados` e a importação com `vincularDocumentos:
+{tipo}` (o tipo do lote, nunca inferido da posição da conta) grava pelo MESMO
+     `_write_party_links` da relação, na transação da importação; inválido, `0`, conta
+     sintética e o mesmo documento em duas contas (`documento_repetido`) ficam sem vínculo
+     e voltam em `vinculos.naoVinculadas`. Conta que não existe no plano ou é
      sintética recusa o arquivo inteiro (422 `LINHAS_INVALIDAS`, com o CÓDIGO da conta:
      código não é nome). O que é estado legítimo do Domínio NÃO recusa, só fica sem
      vínculo e volta na resposta (`naoVinculadas`): conta `0` (sem conta), documento

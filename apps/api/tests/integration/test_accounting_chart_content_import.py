@@ -3,6 +3,11 @@
     POST /api/v1/clients/{client_id}/accounting-chart/import/preview
     POST /api/v1/clients/{client_id}/accounting-chart/import
 
+Sub 4 (86e3ydjzy): a aba "Fornecedores Ajustados" da Tract (sem título do Domínio) pede
+o tipo, entra com `tipoVinculo` sem conferir a empresa, recusa nomeando a conta que não
+está no plano; e o plano importado com `vincularDocumentos` vincula as contas pela coluna
+de CNPJ/CPF da própria planilha, com a mesma política da relação.
+
 Sub 3 (86e3ydjze): linha com problema não derruba mais o arquivo: a prévia a lista, a
 importação só grava sem ela com a MESMA lista confirmada (`linhasExcluidas`), o registro
 da importação alimenta `ultimaImportacao` na lista (o selo da tela), some quando o arquivo
@@ -508,3 +513,134 @@ class TestLinhasDeFora:
         )
         with pytest.raises(IntegrityError):
             await db_session.flush()
+
+
+def _tract_parties() -> bytes:
+    wb = load_workbook(io.BytesIO(_TRACT.read_bytes()))
+    del wb[wb.sheetnames[0]]
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+async def _linked(db: AsyncSession, client_id: Any) -> int:
+    stmt = select(ClientAccountingAccount).where(
+        ClientAccountingAccount.client_id == client_id,
+        ClientAccountingAccount.party_document_encrypted.is_not(None),
+    )
+    return len((await db.execute(stmt)).scalars().all())
+
+
+class TestRelacaoSemTitulo:
+    async def test_pede_o_tipo_e_entra_sem_conferir_a_empresa(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        plan = await _post_xlsx(client_with_db, f"{_url(world.client)}/import", _TRACT.read_bytes())
+        assert plan.status_code == 200, plan.text
+        url = f"{_url(world.client)}/parties/import"
+
+        sem = await _post_xlsx(client_with_db, url, _tract_parties())
+        assert sem.status_code == 422, sem.text
+        assert sem.json()["error"]["code"] == "TIPO_DE_VINCULO_NECESSARIO"
+
+        # A conta 1260 da relação não existe no plano: a recusa nomeia o CÓDIGO.
+        faltando = await _post_xlsx(
+            client_with_db, url, _tract_parties(), {"tipoVinculo": "fornecedor"}
+        )
+        assert faltando.status_code == 422, faltando.text
+        assert faltando.json()["error"]["details"]["lines"] == [
+            {"line": 259, "reason": "conta_nao_encontrada", "accountCode": "1260"}
+        ]
+        assert await _linked(db_session, world.client.id) == 0
+
+        created = await client_with_db.post(
+            f"{_url(world.client)}/accounts",
+            json={"code": "1260", "name": "Fornecedor incluído à mão", "type": "analitica"},
+        )
+        assert created.status_code == 201, created.text
+        with capture_logs() as logs:
+            ok = await _post_xlsx(
+                client_with_db, url, _tract_parties(), {"tipoVinculo": "fornecedor"}
+            )
+        assert ok.status_code == 200, ok.text
+        data = ok.json()["data"]
+        assert data["relatorio"] == "fornecedor"
+        assert data["contasVinculadas"] == 275
+        assert data["empresaConferida"] is False
+        assert await _linked(db_session, world.client.id) == 275
+        assert "Fornecedor de exemplo" not in repr(logs)
+        assert "Fornecedor de exemplo" not in ok.text
+
+    async def test_tipo_que_contradiz_o_titulo_e_recusado(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        wb = load_workbook(io.BytesIO(_tract_parties()))
+        wb.worksheets[0]["A3"] = "RELAÇÃO DE CLIENTES"
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        resp = await _post_xlsx(
+            client_with_db,
+            f"{_url(world.client)}/parties/import",
+            buffer.getvalue(),
+            {"tipoVinculo": "fornecedor"},
+        )
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["error"]["code"] == "TIPO_DE_VINCULO_DIVERGENTE"
+
+
+class TestVinculoPelaColunaDoPlano:
+    async def test_previa_conta_os_documentos_e_a_importacao_vincula_por_escolha(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        preview = await _post_xlsx(
+            client_with_db, f"{_url(world.client)}/import/preview", _TRACT.read_bytes()
+        )
+        assert preview.json()["data"]["documentosEncontrados"] == 252
+
+        sem = await _post_xlsx(client_with_db, f"{_url(world.client)}/import", _TRACT.read_bytes())
+        assert sem.status_code == 200, sem.text
+        assert sem.json()["data"].get("vinculos") is None
+        assert await _linked(db_session, world.client.id) == 0
+
+        with capture_logs() as logs:
+            com = await _post_xlsx(
+                client_with_db,
+                f"{_url(world.client)}/import",
+                _TRACT.read_bytes(),
+                {"vincularDocumentos": json.dumps({"tipo": "fornecedor"})},
+            )
+        assert com.status_code == 200, com.text
+        assert "vinculos" in com.json()["data"], com.text
+        links = com.json()["data"]["vinculos"]
+        assert links["relatorio"] == "fornecedor"
+        skipped = {item["reason"] for item in links["naoVinculadas"]}
+        assert "documento_ausente" in skipped
+        assert links["contasVinculadas"] + links["naoVinculadasTotal"] == 263
+        assert await _linked(db_session, world.client.id) == links["contasVinculadas"]
+        assert links["contasVinculadas"] > 200
+        assert "Conta de exemplo" not in repr(logs)
+
+        # A lista de fornecedores mostra só a máscara.
+        parties = await client_with_db.get(
+            f"{_url(world.client)}/parties", params={"type": "fornecedor", "pageSize": 5}
+        )
+        assert parties.status_code == 200, parties.text
+        assert all("*" in row["documentMasked"] for row in parties.json()["data"])
+
+    @pytest.mark.parametrize(
+        "raw", ["fornecedor", '{"tipo": "socio"}', '{"tipo": "cliente", "x": 1}']
+    )
+    async def test_forma_invalida_e_400(
+        self, client_with_db: AsyncClient, world: World, raw: str
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        resp = await _post_xlsx(
+            client_with_db,
+            f"{_url(world.client)}/import",
+            _TRACT.read_bytes(),
+            {"vincularDocumentos": raw},
+        )
+        assert resp.status_code == 400, resp.text

@@ -693,7 +693,7 @@ let accountingImportOutcome: 'sucesso' | 'linhas' | 'dominio' | 'mapeamento' | '
 /** 86e3ydjze — a última importação deixou linhas de fora (o selo "não está 100%"). */
 let accountingLastImportIncomplete = false;
 /** 86e3qhhrn — a importação da relação de clientes/fornecedores: sucesso ou recusa. */
-let partiesImportOutcome: 'sucesso' | 'linhas' = 'sucesso';
+let partiesImportOutcome: 'sucesso' | 'linhas' | 'sem-titulo' = 'sucesso';
 /** 86e3qhhrr — a prévia da planilha da Omie: pronta (com aviso de cadastro) ou com problemas. */
 let omieExportOutcome: 'pronta' | 'problemas' = 'pronta';
 
@@ -2692,6 +2692,25 @@ async function fulfillApi(route: Route): Promise<void> {
   // 86e3qhhrn — vínculo conta ↔ cliente/fornecedor. A lista é o trio REAL
   // `{ data, pagination, summary }` (`fulfill` cru); o filtro `type` recorta no mock.
   if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/parties/import`) {
+    // 86e3ydjzy: a relação sem o título do Domínio pede o tipo; com ele, entra sem
+    // conferir a empresa.
+    if (partiesImportOutcome === 'sem-titulo') {
+      if (!(route.request().postData() ?? '').includes('name="tipoVinculo"')) {
+        return route.fulfill({
+          status: 422,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: {
+              code: 'TIPO_DE_VINCULO_NECESSARIO',
+              message: 'x',
+              userMessage: 'Escolha o tipo e envie de novo.',
+              details: {},
+            },
+          }),
+        });
+      }
+      return json({ ...PARTIES_IMPORT_RESULT, empresaConferida: false });
+    }
     if (partiesImportOutcome === 'linhas') {
       return route.fulfill({
         status: 422,
@@ -2766,6 +2785,7 @@ async function fulfillApi(route: Route): Promise<void> {
           { linha: 10, motivo: 'codigo_vazio' },
           { linha: 12, motivo: 'tipo_invalido' },
         ],
+        documentosEncontrados: 2,
       });
     }
     if (accountingImportOutcome === 'mapeamento') {
@@ -12292,6 +12312,11 @@ for (const vp of VIEWPORTS) {
       const linhas = gaveta.getByTestId('accounting-chart-preview-problem-lines');
       await expect(linhas).toContainText('2 linhas da planilha têm problema e ficam de fora');
       await expect(linhas.getByRole('row')).toHaveCount(3);
+      // 86e3ydjzy: a planilha tem a coluna de CNPJ/CPF; o vínculo é escolha, desligado.
+      const vinculo = gaveta.getByTestId('accounting-chart-link-documents');
+      await expect(vinculo).toContainText('Vincular as 2 contas ao CNPJ/CPF');
+      await vinculo.getByRole('switch').click();
+      await expect(vinculo.getByRole('radio', { name: 'Fornecedores' })).toBeChecked();
       const confirmar = gaveta.getByRole('button', { name: 'Importar sem as 2 linhas' });
       await exigirDentroDaViewport(page, confirmar, `${vp.label}: "Importar sem as 2 linhas"`);
       await shot(page, `plano-contabil-linhas-de-fora-${slugPC}`);
@@ -12326,6 +12351,29 @@ for (const vp of VIEWPORTS) {
       );
       await shot(page, `plano-contabil-selo-incompleto-${slugPC}`);
       await analyze(page, `plano contábil — diálogo das linhas de fora (${vp.label})`);
+    });
+
+    test('relação sem o título do Domínio: o tipo é perguntado (86e3ydjzy)', async ({ page }) => {
+      partiesImportOutcome = 'sem-titulo';
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil?aba=clientes-fornecedores`);
+      await page.getByLabel('Relação exportada do Domínio (.xls ou .xlsx)').setInputFiles({
+        name: 'Fornecedores Ajustados.xlsx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        buffer: Buffer.from('xlsx de teste'),
+      });
+      await page.getByRole('button', { name: 'Importar relação' }).click();
+      const pergunta = page.getByTestId('accounting-parties-type-question');
+      await expect(pergunta).toContainText('Esta relação é de clientes ou de fornecedores?');
+      const fornecedores = pergunta.getByRole('button', { name: 'Fornecedores' });
+      await exigirDentroDaViewport(page, fornecedores, `${vp.label}: "Fornecedores"`);
+      await shot(page, `plano-contabil-relacao-tipo-${slugPC}`);
+      await analyze(page, `plano contábil — pergunta do tipo da relação (${vp.label})`);
+      await fornecedores.click();
+      const sucesso = page.getByTestId('accounting-parties-import-success');
+      await expect(sucesso.getByTestId('accounting-parties-company-unchecked')).toBeVisible();
+      await aguardarToastEstavel(page);
+      await analyze(page, `plano contábil — relação sem empresa conferida (${vp.label})`);
     });
   });
 }
