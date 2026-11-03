@@ -309,6 +309,9 @@ class TestAmostraMsfgPeloCaminhoReal:
             "contasNovas": 20,
             "contasAlteradas": 0,
             "contasAusentes": 0,
+            # Épico 86e3ydjy9: as linhas de fora e o vínculo pelo plano.
+            "contasExcluidas": 0,
+            "vinculos": None,
         }
         (evento,) = await _events(db_session, "plano_contabil_importado", client_id)
         assert evento.props == {
@@ -318,6 +321,7 @@ class TestAmostraMsfgPeloCaminhoReal:
             "contas_alteradas": 0,
             "contas_ausentes": 0,
             "layout": "modelo",
+            "contas_excluidas": 0,
         }
         accounts = await _accounts_by_code(http, client_id)
         assert len(accounts) == 20
