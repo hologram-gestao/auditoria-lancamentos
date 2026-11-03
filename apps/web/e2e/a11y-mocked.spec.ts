@@ -769,6 +769,10 @@ const ACCOUNTING_PREVIEW_FIRST = {
   alteradas: [],
   ausentes: [],
   listLimit: 200,
+  // Épico 86e3ydjy9: os campos que o servidor sempre devolve desde 03/11.
+  linhasComProblema: [] as Array<{ linha: number; motivo: string }>,
+  documentosEncontrados: null as number | null,
+  tipoDerivado: null as { sinteticas: number; analiticas: number } | null,
 };
 const ACCOUNTING_PREVIEW_REIMPORT = {
   layout: 'modelo',
@@ -797,6 +801,10 @@ const ACCOUNTING_PREVIEW_REIMPORT = {
     },
   ],
   listLimit: 200,
+  // Épico 86e3ydjy9: os campos que o servidor sempre devolve desde 03/11.
+  linhasComProblema: [] as Array<{ linha: number; motivo: string }>,
+  documentosEncontrados: null as number | null,
+  tipoDerivado: null as { sinteticas: number; analiticas: number } | null,
 };
 
 /**
