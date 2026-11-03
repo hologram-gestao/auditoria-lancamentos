@@ -223,6 +223,9 @@ class TestPrevia:
             "contasNovas": 1,
             "contasAlteradas": 0,
             "contasAusentes": 0,
+            # Épico 86e3ydjy9: as linhas de fora e o vínculo pelo plano.
+            "contasExcluidas": 0,
+            "vinculos": None,
         }
         depois = await _accounts(db_session, world.client.id)
         assert set(depois) == set(antes) | {"701"}

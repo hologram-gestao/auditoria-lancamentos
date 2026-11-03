@@ -41,9 +41,20 @@ CÓDIGO da conta (código não é nome, §4.5: é o que a pessoa procura no plan
 corrigir). O documento, o nome e a razão social nunca saem daqui a não ser dentro de
 `PartyLine`, em memória.
 
-O relatório que não é nenhum dos dois (sem o título) e o arquivo sem o CNPJ da empresa
-no banner são recusados: o tipo do vínculo nunca é adivinhado, e a empresa é o que
-impede importar o relatório de OUTRO cliente por engano.
+**Desde 03/11/2026 (86e3ydjzy, a aba "Fornecedores Ajustados" da Tract)** a relação não
+precisa ser o relatório do Domínio intacto:
+
+- o cabeçalho por NOME exige só as colunas que viram vínculo (`Conta` e a do documento);
+  `Código`, `Nome` e `Razão Social` são reconhecidos e ignorados, e coluna a mais não
+  recusa. Sem cabeçalho por nome, o CONTEÚDO decide (`recognize_party_columns`): o
+  documento é a coluna com cara de CNPJ/CPF e a conta, a de inteiros que EXISTEM como
+  código no plano do cliente;
+- sem o título, o tipo do vínculo é PERGUNTADO (`tipoVinculo` no pedido; sem ele, 422
+  `TIPO_DE_VINCULO_NECESSARIO`), nunca adivinhado; com título, o título manda e um tipo
+  diferente é 422 `TIPO_DE_VINCULO_DIVERGENTE`;
+- sem o CNPJ da empresa no banner (ou ilegível), a relação entra SEM conferir a empresa e
+  sem tocar a impressão digital; a resposta diz `empresaConferida: false`. O CNPJ ao lado
+  de `C.N.P.J.:` na MESMA célula também é lido.
 """
 
 from __future__ import annotations
@@ -59,9 +70,17 @@ from app.core.exceptions import (
     FileHeaderMismatchError,
     FileInvalidError,
     FileLinesInvalidError,
+    PartyTypeMismatchError,
+    PartyTypeRequiredError,
 )
 from app.db.models.client_accounting_account import AccountingPartyType
 from app.db.models.client_input_mapping import InputFileFormat
+from app.modules.client_accounting_chart.recognizer import (
+    MIN_FORM_RATIO,
+    as_integer,
+    find_block,
+    is_document_like,
+)
 from app.modules.client_accounting_chart.sheet import fold_text
 from app.modules.client_file_ingestion.reader import (
     MAX_INVALID_LINES_REPORTED,
@@ -70,7 +89,7 @@ from app.modules.client_file_ingestion.reader import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Collection, Sequence
 
 #: Até onde o título, o CNPJ da empresa e o cabeçalho são procurados. Nas amostras
 #: o cabeçalho é a linha 7; 15 dá folga sem varrer o arquivo.
@@ -126,6 +145,11 @@ type PartySkipReason = Literal[
     "documento_invalido",
     # A mesma conta em linhas de pessoas DIFERENTES: vínculo um-para-um impossível.
     "conta_compartilhada",
+    # Só no vínculo pela coluna de documento do PLANO (86e3ydjzy): o mesmo documento em
+    # duas contas, com o mesmo tipo, não sabe qual delas é a da pessoa.
+    "documento_repetido",
+    # Só no vínculo pela coluna do plano: a conta é sintética (só analítica vincula).
+    "conta_sintetica",
 ]
 
 type DocumentKind = Literal["cnpj", "cpf"]
@@ -189,7 +213,9 @@ class PartiesReport:
     vinculáveis e as que ficam sem vínculo (`skipped`, motivo em `PartySkipReason`)."""
 
     party_type: AccountingPartyType
-    company_document: str
+    #: `None` = o relatório não traz o CNPJ da empresa (legível): a importação segue sem
+    #: conferir a empresa e sem tocar a impressão digital (86e3ydjzy).
+    company_document: str | None
     lines: list[PartyLine]
     skipped: list[PartyLineProblem]
     #: Linhas de pessoa no relatório (vinculáveis + sem vínculo + repetidas).
@@ -228,32 +254,81 @@ def _as_int(value: Any) -> int | None:
     return None
 
 
+#: As colunas sem as quais não há vínculo: a conta do plano e o documento.
+REQUIRED_PARTY_COLUMNS: tuple[PartyColumn, ...] = ("conta", "documento")
+
+
 def find_parties_header(
     rows: Sequence[tuple[int, Sequence[Any]]],
 ) -> tuple[int, dict[PartyColumn, int]] | None:
     """A linha do cabeçalho e a COLUNA de cada papel, ou `None`.
 
     O cabeçalho é a linha, nas primeiras `PARTIES_HEADER_SEARCH_ROWS`, cujas células
-    preenchidas são todas texto e cobrem os cinco papéis (as posições não importam:
-    os dois relatórios trocam `Código` e `Conta` de lugar).
+    preenchidas são todas texto, que nomeia a `Conta` e o documento, e onde nenhum papel
+    se repete (as posições não importam: os dois relatórios trocam `Código` e `Conta` de
+    lugar). `Código`, `Nome` e `Razão Social` são reconhecidos e ignorados; outra coluna
+    não recusa (86e3ydjzy: a relação da Tract não tem `Nome`).
     """
     for line, cells in rows[:PARTIES_HEADER_SEARCH_ROWS]:
         filled = _filled(cells)
         if not filled or not all(isinstance(cell, str) for _, cell in filled):
             continue
         roles: dict[PartyColumn, int] = {}
+        repeated = False
         for col, cell in filled:
             folded = _fold(cell)
             role = _HEADER_ROLES.get(folded)
             if role is None and folded.startswith(_DOCUMENT_HEADER_PREFIX):
                 role = "documento"
-            if role is None or role in roles:
-                roles = {}
+            if role is None:
+                continue
+            if role in roles:
+                repeated = True
                 break
             roles[role] = col
-        if len(roles) == 5:
+        if not repeated and all(r in roles for r in REQUIRED_PARTY_COLUMNS):
             return line, roles
     return None
+
+
+def recognize_party_columns(
+    rows: Sequence[tuple[int, Sequence[Any]]], known_codes: Collection[str]
+) -> tuple[int, dict[PartyColumn, int]] | None:
+    """O segundo caminho (86e3ydjzy): as colunas pelo CONTEÚDO, quando não há cabeçalho.
+
+    O bloco é o maior trecho com cara de linha de pessoa (o mesmo `find_block` do plano).
+    O documento é a coluna com forma de CNPJ/CPF; a conta, a coluna de inteiros cujos
+    valores (fora o `0`, a "sem conta" do Domínio) EXISTEM como código no plano do
+    cliente. Empate ou ausência de qualquer um dos dois: `None` (a recusa de cabeçalho).
+    Devolve a "linha do cabeçalho" como a linha logo acima do bloco, que é onde a
+    conversão começa a ler.
+    """
+    positions = find_block(rows)
+    if not positions:
+        return None
+    block = [rows[p][1] for p in positions]
+    width = max(len(cells) for cells in block)
+    documents: list[int] = []
+    accounts: list[int] = []
+    for col in range(width):
+        values = [cells[col] for cells in block if col < len(cells) and cells[col] is not None]
+        if not values:
+            continue
+        shaped = [v for v in values if is_document_like(v)]
+        if len(shaped) >= MIN_FORM_RATIO * len(values) and any(as_integer(v) != 0 for v in shaped):
+            documents.append(col)
+            continue
+        numbers = [as_integer(v) for v in values]
+        non_zero = [str(n) for n in numbers if n is not None and n != 0]
+        if (
+            non_zero
+            and len([n for n in numbers if n is not None]) >= MIN_FORM_RATIO * len(values)
+            and sum(code in known_codes for code in non_zero) >= MIN_FORM_RATIO * len(non_zero)
+        ):
+            accounts.append(col)
+    if len(documents) != 1 or len(accounts) != 1:
+        return None
+    return rows[positions[0]][0] - 1, {"conta": accounts[0], "documento": documents[0]}
 
 
 def _find_title(
@@ -269,21 +344,34 @@ def _find_title(
 
 
 def _find_company(rows: Sequence[tuple[int, Sequence[Any]]], header_line: int) -> str | None:
-    """Os 14 dígitos do CNPJ ao lado de `C.N.P.J.:` no banner, ou `None`."""
+    """Os 14 dígitos do CNPJ da empresa no banner, ou `None` se o banner não tem o rótulo.
+
+    Ao lado de `C.N.P.J.:` (a célula seguinte, como o Domínio exporta) ou na MESMA célula,
+    depois do rótulo (`C.N.P.J.: 05.482.859/0001-06`, como a relação da Tract traz). Rótulo
+    presente com valor que não é CNPJ recusa (`empresa_nao_identificada`).
+    """
     for line, cells in rows:
         if line >= header_line:
             break
         filled = _filled(cells)
         for position, (_, cell) in enumerate(filled):
-            if (
-                isinstance(cell, str)
-                and _fold(cell) == _COMPANY_LABEL
-                and position + 1 < len(filled)
-            ):
-                normalized = normalize_document(filled[position + 1][1])
-                if normalized is None or normalized[1] != "cnpj":
-                    return None
-                return normalized[0]
+            if not isinstance(cell, str):
+                continue
+            folded = _fold(cell)
+            value: Any
+            if folded == _COMPANY_LABEL and position + 1 < len(filled):
+                value = filled[position + 1][1]
+            elif folded.startswith(_COMPANY_LABEL) and len(folded) > len(_COMPANY_LABEL):
+                value = cell.strip()[len(_COMPANY_LABEL) :]
+            else:
+                continue
+            normalized = normalize_document(value)
+            if normalized is None or normalized[1] != "cnpj":
+                # O rótulo existe e o valor não é um CNPJ: é o arquivo editado (ou de outro
+                # sistema), e importar sem conferir a empresa abriria a porta para a
+                # relação de OUTRO cliente. Só a AUSÊNCIA do rótulo entra sem conferir.
+                _raise_invalid_file("empresa_nao_identificada")
+            return normalized[0]
     return None
 
 
@@ -481,14 +569,23 @@ def raise_party_lines(problems: Sequence[PartyLineProblem]) -> NoReturn:
     )
 
 
-def parse_parties_report(content: bytes) -> PartiesReport:
+def parse_parties_report(
+    content: bytes,
+    *,
+    party_type: AccountingPartyType | None = None,
+    known_codes: Collection[str] = (),
+) -> PartiesReport:
     """Lê e valida o relatório INTEIRO; devolve as linhas ou levanta a recusa tipada.
 
     Ordem das recusas (todas 422, nenhuma grava nada): formato pelo conteúdo
     (`FORMATO_NAO_SUPORTADO`: só planilha) → arquivo que não abre (`ARQUIVO_INVALIDO`)
-    → cabeçalho da relação (`CABECALHO_DIVERGENTE`) → título e CNPJ da empresa
-    (`ARQUIVO_INVALIDO` com `details.reason`) → linhas (`LINHAS_INVALIDAS`) →
-    relatório sem nenhuma pessoa (`ARQUIVO_INVALIDO`, `reason=sem_pessoas`).
+    → colunas da relação, pelo nome ou pelo conteúdo (`CABECALHO_DIVERGENTE`) → tipo do
+    vínculo (`TIPO_DE_VINCULO_NECESSARIO` sem título e sem `party_type`;
+    `TIPO_DE_VINCULO_DIVERGENTE` se o escolhido contradiz o título) → linhas
+    (`LINHAS_INVALIDAS`) → relatório sem nenhuma pessoa (`ARQUIVO_INVALIDO`,
+    `reason=sem_pessoas`). Sem o CNPJ da empresa, segue com `company_document=None`.
+    `known_codes` são os códigos do plano do cliente (o reconhecimento da conta pelo
+    conteúdo precisa deles).
     """
     if detect_format(content) is not InputFileFormat.XLSX:
         raise FileFormatNotSupportedError(
@@ -499,7 +596,8 @@ def parse_parties_report(content: bytes) -> PartiesReport:
     except FileInvalidError:
         _raise_invalid_file()
 
-    header = find_parties_header(raw)
+    by_name = find_parties_header(raw)
+    header = by_name or recognize_party_columns(raw, known_codes)
     if header is None:
         raise FileHeaderMismatchError(
             "relatório de terceiros sem o cabeçalho da relação",
@@ -513,20 +611,31 @@ def parse_parties_report(content: bytes) -> PartiesReport:
             },
         )
     header_line, columns = header
-    party_type = _find_title(raw, header_line)
-    if party_type is None:
-        _raise_invalid_file("relatorio_nao_reconhecido")
+    titled = _find_title(raw, header_line)
+    if titled is None:
+        if party_type is None:
+            raise PartyTypeRequiredError("relatório de terceiros sem o título do Domínio")
+        titled = party_type
+    elif party_type is not None and party_type is not titled:
+        raise PartyTypeMismatchError("tipo escolhido diverge do título do relatório")
     company = _find_company(raw, header_line)
-    if company is None:
-        _raise_invalid_file("empresa_nao_identificada")
 
     converted = convert_parties(raw, header_line, columns)
-    if converted.problems:
-        raise_party_lines(converted.problems)
+    problems = list(converted.problems)
+    if by_name is None:
+        # Pelo conteúdo, o "cabeçalho" é a linha acima do MAIOR bloco: uma pessoa acima
+        # dele (o bloco partido por uma linha sem cara de conta) seria pulada calada.
+        problems.extend(
+            PartyLineProblem(line, "linha_fora_do_bloco")
+            for line, cells in raw
+            if line <= header_line and _looks_like_party(cells, columns)
+        )
+    if problems:
+        raise_party_lines(problems)
     if converted.persons == 0:
         _raise_invalid_file("sem_pessoas")
     return PartiesReport(
-        party_type=party_type,
+        party_type=titled,
         company_document=company,
         lines=converted.lines,
         skipped=converted.skipped,

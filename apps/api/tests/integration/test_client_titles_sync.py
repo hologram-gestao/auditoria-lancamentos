@@ -16,7 +16,7 @@ preserva a carteira anterior com os dois relógios no estado certo.
 from __future__ import annotations
 
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -567,7 +567,10 @@ class TestEventoCarteiraSincronizada:
         )
         respx.post(OMIE_RECEBER_URL).mock(
             return_value=_envelope(
-                "conta_receber_cadastro", [_titulo(3, vencimento=date(2026, 10, 30))]
+                # Um ano à frente de HOJE: a data fixa (30/10/2026) virou passado em
+                # 31/10 e o teste passou a contar três vencidos.
+                "conta_receber_cadastro",
+                [_titulo(3, vencimento=date.today() + timedelta(days=365))],
             )
         )
 
@@ -579,7 +582,7 @@ class TestEventoCarteiraSincronizada:
         for evento in eventos:
             assert evento.props["titulos_pagar"] == 2
             assert evento.props["titulos_receber"] == 1
-            # dois vencidos (27/05 e 20/08); o de 30/10 ainda não venceu
+            # dois vencidos (27/05 e 20/08); o de daqui a um ano ainda não venceu
             assert evento.props["vencidos"] == 2
 
     @respx.mock

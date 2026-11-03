@@ -632,12 +632,59 @@
      categoria). O código do fornecedor padrão não é conferido no Omie ao gravar: quem o
      escolhe é a busca por CNPJ da tela, e um código que sumir falha no título com a
      mensagem da Omie.
+   - **A planilha do plano contábil é lida pelo CONTEÚDO das colunas quando não é o modelo
+     nem o export do Domínio** (épico 86e3ydjy9, Tract em 03/11/2026): a pergunta deixou de
+     ser "qual layout é este?" e passou a ser "qual coluna é o quê?". Três caminhos, nesta
+     ordem: cabeçalho exato do Domínio, cabeçalho exato do modelo, e o RECONHECEDOR
+     (`client_accounting_chart/recognizer.py::recognize_columns`, função pura, sem IA,
+     layout `reconhecido`): inteiro sem repetição é o código, `1.1.2` a classificação, só
+     `S`/`A` o tipo (vazio é analítica só quando a coluna nunca traz `A`), inteiro igual à
+     profundidade o grau, texto o nome (colunas vizinhas que nunca dividem uma linha são o
+     nome recuado do Domínio); natureza, CNPJ e o resto são IGNORADOS (coluna a mais nunca
+     recusa), e o nome da coluna só desempata. Cada limiar é constante nomeada
+     (`MIN_FILL_RATIO` 0,9, `MIN_FORM_RATIO` 0,95, `MIN_UNIQUE_RATIO` 0,95). As linhas
+     convertidas passam pelo MESMO `validate_rows`. Bloco de contas com papel obrigatório
+     ausente ou empatado NÃO é beco sem saída: é 422 `MAPEAMENTO_NECESSARIO` (86e3ydjz4) com a
+     frase "Reconhecemos…; não encontramos…", os papéis e o perfil das colunas, e a tela
+     pergunta o que é cada coluna; a prévia e a importação levam o campo `mapeamento` (layout
+     `mapeado`, não persiste). **O tipo pela hierarquia só por escolha explícita**
+     (`tipoPelaHierarquia`, com a contagem na prévia): na Tract daria 152 sintéticas contra
+     180, porque grupo sintético sem filho existe. Sem bloco, `CABECALHO_DIVERGENTE` com
+     `details.recognizedRoles`/`missingRoles`/`ambiguousRoles` (papéis nossos). Só planilha:
+     o CSV segue só no modelo. **Linha com problema não derruba mais o arquivo
+     inteiro** (86e3ydjze): a prévia a lista em `linhasComProblema` (só linha e motivo dos
+     vocabulários que já existiam) e a importação só grava SEM ela quando o campo
+     `linhasExcluidas` traz EXATAMENTE a lista que o servidor recalcula no mesmo arquivo
+     (`sheet.refuse_unconfirmed_lines`; sem o campo, ou diferente, é o 422 de sempre e nada
+     é gravado). Continuam recusando o arquivo inteiro: `codigo_repetido` (qual das duas
+     vale?) e mais de `MAX_PROBLEM_LINE_RATIO` (20%) das linhas. Cada importação que entra
+     grava `client_accounting_chart_imports` (migration `e3a1c7d5b9f2`, CHECK da contagem
+     igual ao tamanho do JSONB), a lista do plano devolve a última em `ultimaImportacao`, e
+     com linha de fora a tela mostra o selo vermelho "Plano não está 100%" (tooltip e
+     diálogo com as linhas), que some quando uma importação seguinte entra inteira. **Arquivo de cliente novo vira
+     fixture anonimizada ANTES de regra mudar** (`tests/fixtures/accounting_chart_tract/`,
+     `scripts/anonymize_tract_chart_sample.py`), e as duas fixtures do Domínio chegam ao
+     MESMO plano pelo conteúdo, sem o cabeçalho (teste de generalidade).
    - **O vínculo conta contábil ↔ cliente/fornecedor vem das relações do Domínio, por
      arquivo e tudo ou nada** (86e3qhhrn): `POST …/accounting-chart/parties/import` lê a
      "RELAÇÃO DE CLIENTES" ou a "RELAÇÃO DE FORNECEDORES" (`.xls` com o mesmo defeito dos
      BLANKs do plano; colunas pelo NOME, porque os dois relatórios trocam `Código` e
-     `Conta` de lugar; o tipo do vínculo vem do TÍTULO, nunca é perguntado) e grava, em
-     cada conta do plano, o documento cifrado. Conta que não existe no plano ou é
+     `Conta` de lugar; o tipo do vínculo vem do TÍTULO) e grava, em cada conta do plano,
+     o documento cifrado. **Desde 86e3ydjzy (a relação da Tract) o relatório não precisa
+     estar intacto**: o cabeçalho por nome exige só `Conta` e a coluna do documento
+     (`Código`, `Nome` e `Razão Social` são ignorados, coluna a mais não recusa) e, sem ele,
+     o CONTEÚDO decide (`recognize_party_columns`: documento com cara de CNPJ/CPF, conta de
+     inteiros que EXISTEM no plano); sem o título, o tipo é PERGUNTADO na tela (`tipoVinculo`;
+     sem ele, 422 `TIPO_DE_VINCULO_NECESSARIO`), e com título o título manda (tipo
+     diferente é 422 `TIPO_DE_VINCULO_DIVERGENTE`); sem o rótulo `C.N.P.J.:` no banner (rótulo presente com valor que não é CNPJ continua recusando),
+     a relação entra SEM conferir a empresa nem tocar a impressão digital e a resposta diz
+     `empresaConferida: false` (o CNPJ na mesma célula do rótulo `C.N.P.J.:` também vale).
+     A coluna de CNPJ/CPF do PRÓPRIO plano (a Tract a traz) vira vínculo só por escolha:
+     a prévia devolve `documentosEncontrados` e a importação com `vincularDocumentos:
+{tipo}` (o tipo do lote, nunca inferido da posição da conta) grava pelo MESMO
+     `_write_party_links` da relação, na transação da importação; inválido, `0`, conta
+     sintética e o mesmo documento em duas contas (`documento_repetido`) ficam sem vínculo
+     e voltam em `vinculos.naoVinculadas`. Conta que não existe no plano ou é
      sintética recusa o arquivo inteiro (422 `LINHAS_INVALIDAS`, com o CÓDIGO da conta:
      código não é nome). O que é estado legítimo do Domínio NÃO recusa, só fica sem
      vínculo e volta na resposta (`naoVinculadas`): conta `0` (sem conta), documento
@@ -973,7 +1020,9 @@ installment_number)`, `UNIQUE(client_id, payable_key)`, `UNIQUE(claimed_by_file_
       **associação da conta do banco** (`client_source_account_bindings`) e depois o
       **plano contábil do cliente** (`client_accounting_accounts`), nessa ordem
       (a associação aponta para o plano), depois das decisões do de-para e antes dos
-      usuários (autoria RESTRICT), no purge e na exclusão definitiva; o vínculo conta ↔
+      usuários (autoria RESTRICT), no purge e na exclusão definitiva, e o **registro das
+      importações do plano** (`client_accounting_chart_imports`, 86e3ydjze: só contagens e
+      `{linha, motivo}`) sai junto, antes dos usuários (`imported_by` RESTRICT); o vínculo conta ↔
       cliente/fornecedor (86e3qhhrn) mora nas colunas da própria conta e sai com ela, e a
       impressão digital da empresa dos relatórios (`party_reports_company_fingerprint`) é
       zerada no encerramento, em Core, junto com o nome. Nas
@@ -1169,7 +1218,11 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
     descrição de lançamento — que nascem cifrados (§4.1/§4.5). Filtrar por heurística
     ("parece cabeçalho": sem dígito, curto) não resolve, porque nome de conta passa no
     teste. A exceção é `SEM_MAPEAMENTO`, onde mostrar as colunas É a função da resposta
-    (a tela constrói o mapeamento a partir delas) — exceção declarada, não esquecimento;
+    (a tela constrói o mapeamento a partir delas) — exceção declarada, não esquecimento; a
+    segunda é o `MAPEAMENTO_NECESSARIO` do plano contábil (86e3ydjz4), que devolve o
+    `cabecalho` de cada coluna e NUNCA um valor de célula, e só aceita como cabeçalho uma
+    linha de duas células de texto ou mais logo acima do bloco (a linha do banner, com a
+    razão social, nunca sai);
   - **coluna com tamanho fixo derivado de uma constante usa a CONSTANTE, nunca um
     literal** (86e3g9v0j): `title_contexts.text_iv` nasceu `String(32)` na migration da
     S15 enquanto o modelo e as outras 16 colunas `_iv` diziam `IV_HEX_LENGTH = 24`. Não
@@ -1611,7 +1664,8 @@ que vale como lei:
   importado por planilha no modelo da plataforma (`codigo_reduzido;nome;tipo[;classificacao]`)
   ou pelo plano EXPORTADO do Domínio em `.xlsx`, reconhecido pelo cabeçalho e convertido
   para o modelo (`client_accounting_chart/dominio.py`, 86e3gkd7y; o CSV nativo do Domínio
-  não entra), tudo ou nada; o Domínio aceita duas contas com a MESMA classificação e a
+  não entra), ou por qualquer planilha lida pelo CONTEÚDO das colunas (épico 86e3ydjy9,
+  §4.8); o Domínio aceita duas contas com a MESMA classificação e a
   chave da conta é o código reduzido, então classificação repetida entra (86e3uyzcf,
   amostra da 4S) e só código repetido recusa; **reimportar só adiciona e atualiza** (86e3qhhrm, decisão do
   Pedro de 14/10): casa por código, a conta que não veio fica como estava (nunca
@@ -1958,6 +2012,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 ---
 
 _Versão 1.114, 29/10/2026. **O modelo padrão da IA passou a `claude-sonnet-5`, ponte para a retirada do `claude-sonnet-4-5` em 30/11/2026 (86e3wg8ek, task sem épico acima).** As três chamadas (extração, identificação do PDF dividido e qualificação) mandam `thinking={"type": "disabled"}` explícito pela constante `THINKING_DISABLED` do cliente da Anthropic: no 4.5 omitir o parâmetro já rodava sem pensamento, e no Sonnet 5 omitir roda pensamento adaptativo dentro do `max_tokens` (comeria os 256 da identificação). O `tool_choice` forçado continua: o Sonnet 5 ainda o aceita no Claude API, e o `claude-sonnet-5-5` recusa tanto ele quanto `disabled` (a migração definitiva, 86e3wg8et até 27/11, troca os dois). `KNOWN_MODEL_OUTPUT_CAPS` ganhou `claude-sonnet-5: 128_000` e manteve o 4.5 (64.000), os dois conferidos na Models API em 29/10. Medido na mesma sessão, 3 rodadas por modelo (faturas e extrato reais, CSV sintético de 320 linhas em 4 blocos, lote de qualificação de 50 pares): qualidade igual nas 30 rodadas e custo estimado 27 % menor. O `gcloud` local estava sem autenticação, então segue a confirmar se `ANTHROPIC_MODEL_DEFAULT` está definida no Cloud Run, o que anularia a troca. `SUBPROCESSADORES.md` atualizado. Endpoints sensíveis (**137**), matriz (**29**) e pares de AAD (**18**) iguais, sem migration._
+
+_Versão 1.114, 03/11/2026. **A importação do plano contábil deixou de exigir um layout exato: as colunas são reconhecidas pelo CONTEÚDO, a tela pergunta o que não dá para decidir, linha com problema fica de fora por confirmação e a relação de fornecedores sem título pergunta o tipo (épico 86e3ydjy9, Tract, subtasks 86e3ydjyq, 86e3ydjz4, 86e3ydjze e 86e3ydjzy num PR só; a 86e3ydk0c espera o export cru do Domínio).** O Marcelo (Tract) não conseguiu importar o plano "ajustado" (cabeçalho `Código, Classificação, Tipo, Grau, Natureza, Nome da conta` e o CNPJ do fornecedor numa coluna a mais) e cada cliente novo vinha virando um conserto pontual. Regras novas na §4.8 (o parágrafo do reconhecimento por conteúdo e o do vínculo), na §4.12 (purge do registro das importações) e na §7 Backend (a segunda exceção declarada de eco do arquivo, o `cabecalho` do `MAPEAMENTO_NECESSARIO`). Medido: a fixture da Tract (1850 contas, 180 sintéticas) e as duas do Domínio sem o cabeçalho (563 e 370) batem conta a conta com o esperado pelo reconhecedor; a hierarquia daria 152 sintéticas contra 180 na Tract, por isso o tipo derivado é sempre escolha. Achados no caminho: a coluna de CNPJ do plano da Tract é uma FÓRMULA (a plataforma lê o valor guardado; o anonimizador usa `data_only`); sem cabeçalho, o banner com a razão social virava "cabeçalho" e sairia na resposta (agora só conta linha de duas células de texto ou mais logo acima do bloco); a relação da Tract não tem a coluna `Nome` e traz uma conta (1260) fora do plano, recusada pelo código como sempre; duas importações na mesma transação empatavam em `now()` (o registro usa `clock_timestamp()`). Uma migration (`e3a1c7d5b9f2`, `client_accounting_chart_imports`), dois códigos de erro tipados novos do vínculo (`TIPO_DE_VINCULO_NECESSARIO`, `TIPO_DE_VINCULO_DIVERGENTE`) e um do mapeamento (`MAPEAMENTO_NECESSARIO`); nenhuma rota, permissão nem campo cifrado novo: endpoints sensíveis (**137**), matriz (**29**) e pares de AAD (**18**) iguais._
 
 _Versão 1.113, 27/10/2026. **A fatura do Inter dividida em blocos deixou de perder compras (86e3w4k20, subtask 2 do épico 86e3uyzc9, implantação da Contribute).** A fatura da 4S (8 páginas, 4 blocos, três cartões) saía com 7 de 22 linhas e "os saldos não fecham" (diferença 2.679,26 = página 3 + página 5). Medido na mesma sessão contra o PDF real: baseline 5 de 5 rodadas com 7 linhas (`[0, 7, 0, 0]` por bloco); o PDF inteiro sem dividir trazia as 22 linhas mas a de R$ 150,00 do cartão 4400 (`REV CR COMPRA INTERNAC - R$ 150,00`) como crédito, 3 de 3. A causa da perda foi isolada com o bloco sozinho e a tool forçada: sem a nota de bloco, 21 linhas e a linha da página 5 em 4 de 4; com ela, 7 e 0. Uma regra nova no system prompt sobre "a lista inteira, de todos os cartões" acertou 4 de 5 e depois 1 de 5 e foi descartada; tirar só a frase do cabeçalho não mudou nada. A nota perdeu "o cabeçalho se repete", "Extraia apenas" e o exemplo "(só totais, avisos, saldos ou rodapé)" e ganhou "todas as movimentações listadas nas páginas deste bloco". O sinal: a regra 10 sem mudança deu +150 em 8 de 8; "o sinal impresso decide" sozinho, 2 de 8; com a conferência pelo "Total CARTÃO" de cada cartão, sem o pagamento, 8 de 8. A revisão do PR trocou "`- R$` é débito" por "siga a marcação da própria fatura" (há emissor que imprime o estorno com o menos) e tirou "estorno de crédito" (ambíguo); o texto final foi medido de novo. Aceite: 10 de 10, duas vezes (antes e depois da revisão), rodadas com 22 linhas, 1 pagamento, 5.697,97 = 5.697,97 e a linha de −150,00. Não-regressão antes e depois, iguais: fatura Cora 5 + 5 + 5 (5 compras, ok, vencimento 2026-10-13, parcela 3/6, nenhum IOF do resumo), extrato Cora 3 + 3 + 3 (13 linhas) e um CSV SINTÉTICO de 320 linhas dividido em 4 blocos, 2 + 2 (320, ok), porque nenhuma planilha real da máquina passa do limiar. A fatura Nubank da DM, onde a nota antiga nasceu, não está na máquina. Tool sem mudança. Dois unitários novos em `test_tool_schema_consistency.py`. Endpoints sensíveis (**137**), matriz (**29**) e pares de AAD (**18**) iguais, sem migration._
 

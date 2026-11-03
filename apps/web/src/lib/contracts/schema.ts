@@ -603,7 +603,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Importa (ou reimporta) o plano de contas contábil do cliente a partir de uma planilha no MODELO DA PLATAFORMA — tudo ou nada. Modelo: CSV UTF-8 separado por `;`, XLSX ou XLS (primeira aba), cabeçalho na linha 1 com as colunas `codigo_reduzido`, `nome` e `tipo` (obrigatórias) e `classificacao` (opcional), em qualquer ordem e sem outras colunas; `tipo` é `analitica` ou `sintetica`; código reduzido com letras, dígitos, `.` e `-` (até 20), nome até 200 caracteres, classificação até 40. Exemplo: `codigo_reduzido;nome;tipo` / `649;Banco conta movimento;analitica`. Também aceita o plano de contas EXPORTADO do Domínio em XLSX ou no XLS que o sistema grava, reconhecido pelo cabeçalho `Código`/`T`/`Classificação`/`Nome`/`Grau` nas 10 primeiras linhas e convertido para o modelo (código, `S` = sintética e vazio = analítica, classificação, nome e grau, que tem de ser a profundidade da classificação); o CSV nativo do Domínio não é aceito. A reimportação casa por código e só adiciona e atualiza: conta nova entra ativa, conta existente atualiza nome, tipo e classificação, e a conta que não veio na planilha continua como estava (nunca é inativada nem apagada) e ganha o selo `absentSince`, que sai quando ela volta. A situação da conta não muda pela planilha. Antes de gravar, `POST …/import/preview` mostra o que muda. Responde as contagens `contas`, `contasNovas`, `contasAlteradas` e `contasAusentes`. O nome é cifrado com a chave do cliente. Requer `manage_client_accounting_chart` (plataforma, admin e gerente da carteira; usuários do cliente recebem 403 e a negação fica na trilha). Cliente encerrado: 409. Recusas, todas 422 e sem gravar nada: `FORMATO_NAO_SUPORTADO` (não é CSV nem XLSX pelo CONTEÚDO), `ARQUIVO_INVALIDO` (não abre, ou planilha sem nenhuma conta com `details.reason=sem_contas`), `CABECALHO_DIVERGENTE` (`details.missingColumns`/`repeatedColumns` — só colunas do MODELO — mais `details.unexpectedColumnCount`/`foundColumnCount`) e `LINHAS_INVALIDAS` (`details.lines=[{line, reason}]` com `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, `codigo_repetido`, `nome_vazio`, `nome_longo`, `tipo_invalido`, `classificacao_longa` e, no export do Domínio, também `codigo_ausente`, `classificacao_ausente`, `grau_ausente`, `grau_divergente`, `linha_irreconhecivel` e `conta_fora_do_bloco` (linha com cara de conta depois do fim das contas: o arquivo inteiro é recusado), e `details.total`) — a resposta nunca traz o conteúdo de uma célula. */
+        /** Importa (ou reimporta) o plano de contas contábil do cliente a partir de uma planilha no MODELO DA PLATAFORMA — tudo ou nada. Modelo: CSV UTF-8 separado por `;`, XLSX ou XLS (primeira aba), cabeçalho na linha 1 com as colunas `codigo_reduzido`, `nome` e `tipo` (obrigatórias) e `classificacao` (opcional), em qualquer ordem e sem outras colunas; `tipo` é `analitica` ou `sintetica`; código reduzido com letras, dígitos, `.` e `-` (até 20), nome até 200 caracteres, classificação até 40. Exemplo: `codigo_reduzido;nome;tipo` / `649;Banco conta movimento;analitica`. Também aceita o plano de contas EXPORTADO do Domínio em XLSX ou no XLS que o sistema grava, reconhecido pelo cabeçalho `Código`/`T`/`Classificação`/`Nome`/`Grau` nas 10 primeiras linhas e convertido para o modelo (código, `S` = sintética e vazio = analítica, classificação, nome e grau, que tem de ser a profundidade da classificação); o CSV nativo do Domínio não é aceito. Planilha (XLSX ou XLS) que não é nenhum dos dois é lida pelo CONTEÚDO das colunas (layout `reconhecido`): inteiro sem repetição é o código, `1.1.2` a classificação, `S`/`A` o tipo, inteiro igual à profundidade da classificação o grau e texto o nome; natureza, CNPJ e qualquer outra coluna são ignorados, e o nome da coluna só desempata. Quando o conteúdo não decide código, nome ou tipo, a resposta é 422 `MAPEAMENTO_NECESSARIO` com `details.colunas` (`indice`, `cabecalho`, `formaDetectada`, `preenchimento`, `papelSugerido`: o cabeçalho é o único texto do arquivo que sai, nunca um valor de célula) e o pedido seguinte manda o campo `mapeamento`. Linha com problema não recusa mais o arquivo inteiro: a prévia a lista em `linhasComProblema` e a importação só grava SEM ela quando o campo `linhasExcluidas` traz exatamente a mesma lista (sem o campo, ou diferente, é o 422 `LINHAS_INVALIDAS`); o arquivo inteiro continua recusado com código repetido ou com mais de 20% das linhas com problema. A importação fica registrada, e a lista do plano devolve a última em `ultimaImportacao`. A reimportação casa por código e só adiciona e atualiza: conta nova entra ativa, conta existente atualiza nome, tipo e classificação, e a conta que não veio na planilha continua como estava (nunca é inativada nem apagada) e ganha o selo `absentSince`, que sai quando ela volta. A situação da conta não muda pela planilha. Antes de gravar, `POST …/import/preview` mostra o que muda. Responde as contagens `contas`, `contasNovas`, `contasAlteradas` e `contasAusentes`. O nome é cifrado com a chave do cliente. Requer `manage_client_accounting_chart` (plataforma, admin e gerente da carteira; usuários do cliente recebem 403 e a negação fica na trilha). Cliente encerrado: 409. Recusas, todas 422 e sem gravar nada: `FORMATO_NAO_SUPORTADO` (não é CSV nem XLSX pelo CONTEÚDO), `ARQUIVO_INVALIDO` (não abre, ou planilha sem nenhuma conta com `details.reason=sem_contas`), `CABECALHO_DIVERGENTE` (`details.missingColumns`/`repeatedColumns` — só colunas do MODELO — mais `details.unexpectedColumnCount`/`foundColumnCount` e, do reconhecimento por conteúdo, `recognizedRoles`/`missingRoles`/`ambiguousRoles` em papéis `codigo`, `classificacao`, `tipo`, `grau` e `nome`) e `LINHAS_INVALIDAS` (`details.lines=[{line, reason}]` com `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, `codigo_repetido`, `nome_vazio`, `nome_longo`, `tipo_invalido`, `classificacao_longa` e, no export do Domínio, também `codigo_ausente`, `classificacao_ausente`, `grau_ausente`, `grau_divergente`, `linha_irreconhecivel` e `conta_fora_do_bloco` (linha com cara de conta depois do fim das contas: o arquivo inteiro é recusado), e `details.total`) — a resposta nunca traz o conteúdo de uma célula. */
         post: operations["import_accounting_chart_api_v1_clients__client_id__accounting_chart_import_post"];
         delete?: never;
         options?: never;
@@ -620,7 +620,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Mostra o que a importação desta planilha faria, SEM GRAVAR nada: o mesmo leitor e as mesmas recusas 422 de `POST …/import` (modelo da plataforma e plano exportado do Domínio). Devolve as contagens (`contasNovas`, `contasAlteradas`, `contasSemMudanca`, `contasAusentes`, `contasAusentesEmUso` — as ausentes que decisões do de-para, de qualquer vigência, ou a conta do banco usam —, `contasQueVoltaram` e `contasInativasNaPlanilha`), `temMudancas` e as listas `novas` (como na planilha), `alteradas` (o nome novo e os campos que mudam: `nome`, `tipo`, `classificacao`) e `ausentes` (o nome atual, a situação, `inUse` e `absentSince`), cada uma com até `listLimit` itens. Mesma permissão da importação (`manage_client_accounting_chart`; a negação fica na trilha); cliente encerrado 409. */
+        /** Mostra o que a importação desta planilha faria, SEM GRAVAR nada: o mesmo leitor e as mesmas recusas 422 de `POST …/import` (modelo da plataforma, plano exportado do Domínio, planilha lida pelo conteúdo das colunas e o 422 `MAPEAMENTO_NECESSARIO`), e o mesmo campo `mapeamento`; com o tipo pela hierarquia, `tipoDerivado` diz quantas ficaram sintéticas. Devolve as contagens (`contasNovas`, `contasAlteradas`, `contasSemMudanca`, `contasAusentes`, `contasAusentesEmUso` — as ausentes que decisões do de-para, de qualquer vigência, ou a conta do banco usam —, `contasQueVoltaram` e `contasInativasNaPlanilha`), `temMudancas` e as listas `novas` (como na planilha), `alteradas` (o nome novo e os campos que mudam: `nome`, `tipo`, `classificacao`) e `ausentes` (o nome atual, a situação, `inUse` e `absentSince`), cada uma com até `listLimit` itens. Mesma permissão da importação (`manage_client_accounting_chart`; a negação fica na trilha); cliente encerrado 409. */
         post: operations["preview_accounting_chart_import_api_v1_clients__client_id__accounting_chart_import_preview_post"];
         delete?: never;
         options?: never;
@@ -688,7 +688,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Importa a RELAÇÃO DE CLIENTES ou a RELAÇÃO DE FORNECEDORES exportada do Domínio (XLS ou XLSX, reconhecida pelo título e pelo cabeçalho `Código`/`Conta`/`Nome`/`Razão Social`/`C.N.P.J./C.P.F.`, em qualquer ordem de colunas) e vincula cada conta do plano contábil do cliente (a coluna `Conta` é o código reduzido) ao CNPJ ou CPF da pessoa, cifrado com a chave do cliente. O tipo do vínculo (`cliente`/`fornecedor`) vem do título do relatório. Por arquivo, tudo ou nada: conta que não existe no plano ou é sintética recusa o arquivo inteiro com 422 `LINHAS_INVALIDAS` (`details.lines=[{line, reason, accountCode}]`, `reason` ∈ `conta_nao_encontrada`, `conta_sintetica`, `conta_ausente`, `conta_invalida`, `linha_fora_do_bloco`). Não recusam, mas ficam SEM vínculo e voltam em `naoVinculadas`: conta `0` (`sem_conta`), `documento_ausente`, `documento_invalido` (dígito verificador errado no Domínio) e `conta_compartilhada` (a mesma conta em mais de uma pessoa). Reimportar é idempotente; a conta vinculada que não vem no relatório fica como está. O CNPJ da empresa no cabeçalho do relatório é comparado (por impressão digital, nunca em claro) com o dos relatórios já importados: outra empresa é 422 `RELATORIO_DE_OUTRA_EMPRESA`. Arquivo que não é a relação: 422 `CABECALHO_DIVERGENTE`; sem título ou sem o CNPJ da empresa: 422 `ARQUIVO_INVALIDO` com `details.reason` (`relatorio_nao_reconhecido`, `empresa_nao_identificada`, `sem_pessoas`); CSV ou PDF: 422 `FORMATO_NAO_SUPORTADO`. Requer `manage_client_accounting_chart`; cliente encerrado 409. Nenhum documento, nome ou razão social sai na resposta nem vai para o log. */
+        /** Importa a RELAÇÃO DE CLIENTES ou a RELAÇÃO DE FORNECEDORES exportada do Domínio (XLS ou XLSX, reconhecida pelo título e pelo cabeçalho `Código`/`Conta`/`Nome`/`Razão Social`/`C.N.P.J./C.P.F.`, em qualquer ordem de colunas) e vincula cada conta do plano contábil do cliente (a coluna `Conta` é o código reduzido) ao CNPJ ou CPF da pessoa, cifrado com a chave do cliente. O tipo do vínculo (`cliente`/`fornecedor`) vem do título do relatório. Por arquivo, tudo ou nada: conta que não existe no plano ou é sintética recusa o arquivo inteiro com 422 `LINHAS_INVALIDAS` (`details.lines=[{line, reason, accountCode}]`, `reason` ∈ `conta_nao_encontrada`, `conta_sintetica`, `conta_ausente`, `conta_invalida`, `linha_fora_do_bloco`). Não recusam, mas ficam SEM vínculo e voltam em `naoVinculadas`: conta `0` (`sem_conta`), `documento_ausente`, `documento_invalido` (dígito verificador errado no Domínio) e `conta_compartilhada` (a mesma conta em mais de uma pessoa). Reimportar é idempotente; a conta vinculada que não vem no relatório fica como está. O CNPJ da empresa no cabeçalho do relatório é comparado (por impressão digital, nunca em claro) com o dos relatórios já importados: outra empresa é 422 `RELATORIO_DE_OUTRA_EMPRESA`; sem o CNPJ da empresa, a relação entra SEM conferir e a resposta diz `empresaConferida: false` (86e3ydjzy). O cabeçalho por nome só exige `Conta` e a coluna do documento (outras colunas não recusam); sem ele, o conteúdo decide (documento com cara de CNPJ/CPF, conta de inteiros que existem no plano). Arquivo que não é a relação: 422 `CABECALHO_DIVERGENTE`; sem o título do Domínio: 422 `TIPO_DE_VINCULO_NECESSARIO` (reenviar com `tipoVinculo`), e o `tipoVinculo` que contradiz o título é 422 `TIPO_DE_VINCULO_DIVERGENTE`; sem pessoas: 422 `ARQUIVO_INVALIDO` com `details.reason=sem_pessoas`; CSV ou PDF: 422 `FORMATO_NAO_SUPORTADO`. Requer `manage_client_accounting_chart`; cliente encerrado 409. Nenhum documento, nome ou razão social sai na resposta nem vai para o log. */
         post: operations["import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post"];
         delete?: never;
         options?: never;
@@ -2481,6 +2481,8 @@ export interface components {
             /** Data */
             data: components["schemas"]["AccountingAccountResponse"][];
             pagination: components["schemas"]["PaginationMeta"];
+            /** @description A última importação registrada do plano (desde 03/11/2026), ou `null`. Só contagens, linhas e motivos fechados: nenhum nome nem célula. */
+            ultimaImportacao?: components["schemas"]["ChartLastImport"] | null;
         };
         /** AccountingFileGenerationEnvelope */
         AccountingFileGenerationEnvelope: {
@@ -3048,6 +3050,21 @@ export interface components {
              * @description CSV (`;`, UTF-8), XLSX ou XLS no modelo, ou o plano exportado do Domínio.
              */
             file: string;
+            /**
+             * Mapeamento
+             * @description Opcional. O que é cada coluna, quando a planilha pediu (`MAPEAMENTO_NECESSARIO`): JSON `{"colunas": {"codigo": 0, "classificacao": 1, "tipo": 2, "grau": 3, "nome": 5}, "tipoPelaHierarquia": false}` (índice 0 = primeira coluna). `codigo` e `nome` são obrigatórios; `tipo` também, salvo com `tipoPelaHierarquia: true`, que exige a `classificacao` e marca como sintética a conta que tem outra abaixo. Com ele, a planilha é lida pelos papéis escolhidos (layout `mapeado`). Forma inválida: 400.
+             */
+            mapeamento?: string | null;
+            /**
+             * Linhasexcluidas
+             * @description Opcional, só na importação. As linhas que a pessoa confirmou deixar DE FORA, como a prévia as devolveu em `linhasComProblema`: JSON `[12, 40]`. O servidor recalcula as linhas com problema do MESMO arquivo e só grava se o conjunto for IGUAL; diferença é 422 `LINHAS_INVALIDAS` e nada é gravado. Forma inválida: 400.
+             */
+            linhasExcluidas?: string | null;
+            /**
+             * Vinculardocumentos
+             * @description Opcional, só na importação (86e3ydjzy). Quando a prévia devolveu `documentosEncontrados`, vincula cada conta ao CNPJ/CPF da coluna de documento da própria planilha, com o tipo escolhido para o lote: JSON `{"tipo": "fornecedor"}` ou `{"tipo": "cliente"}` (o tipo nunca é inferido da posição da conta). Mesma política da relação: inválido, `0`, conta sintética e documento repetido em duas contas ficam sem vínculo e voltam em `vinculos.naoVinculadas`. Forma inválida: 400.
+             */
+            vincularDocumentos?: string | null;
         };
         /** Body_import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post */
         Body_import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post: {
@@ -3056,6 +3073,8 @@ export interface components {
              * @description A RELAÇÃO DE CLIENTES ou a RELAÇÃO DE FORNECEDORES do Domínio (XLS/XLSX).
              */
             file: string;
+            /** @description Opcional (86e3ydjzy): `cliente` ou `fornecedor`, para a relação que NÃO traz o título do Domínio (sem ele, a resposta é 422 `TIPO_DE_VINCULO_NECESSARIO`). Com título, o título manda e um tipo diferente é 422 `TIPO_DE_VINCULO_DIVERGENTE`. */
+            tipoVinculo?: components["schemas"]["AccountingPartyType"] | null;
         };
         /** Body_inspect_file_api_v1_clients__client_id__file_origin_inspect_post */
         Body_inspect_file_api_v1_clients__client_id__file_origin_inspect_post: {
@@ -3088,6 +3107,11 @@ export interface components {
              * @description CSV (`;`, UTF-8), XLSX ou XLS no modelo, ou o plano exportado do Domínio.
              */
             file: string;
+            /**
+             * Mapeamento
+             * @description Opcional. O que é cada coluna, quando a planilha pediu (`MAPEAMENTO_NECESSARIO`): JSON `{"colunas": {"codigo": 0, "classificacao": 1, "tipo": 2, "grau": 3, "nome": 5}, "tipoPelaHierarquia": false}` (índice 0 = primeira coluna). `codigo` e `nome` são obrigatórios; `tipo` também, salvo com `tipoPelaHierarquia: true`, que exige a `classificacao` e marca como sintética a conta que tem outra abaixo. Com ele, a planilha é lida pelos papéis escolhidos (layout `mapeado`). Forma inválida: 400.
+             */
+            mapeamento?: string | null;
         };
         /** Body_preview_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_preview_post */
         Body_preview_client_mapping_import_api_v1_clients__client_id__mapping__destination_type__import_preview_post: {
@@ -3185,6 +3209,16 @@ export interface components {
          */
         CategoryMode: "coluna_categoria" | "classificacao_livre";
         /**
+         * ChartDerivedTypes
+         * @description Quantas contas o tipo pela hierarquia marcou como sintéticas e como analíticas.
+         */
+        ChartDerivedTypes: {
+            /** Sinteticas */
+            sinteticas: number;
+            /** Analiticas */
+            analiticas: number;
+        };
+        /**
          * ChartImportEnvelope
          * @description Body de `POST /clients/{client_id}/accounting-chart/import`.
          */
@@ -3216,6 +3250,14 @@ export interface components {
              * @description Contas do cliente que não vieram nesta planilha: continuam como estavam (nunca são inativadas nem apagadas) e ganham o selo `absentSince`.
              */
             contasAusentes: number;
+            /**
+             * Contasexcluidas
+             * @description Linhas da planilha que ficaram DE FORA por confirmação (`linhasExcluidas`); com elas, a tela do plano mostra o selo "não está 100%".
+             * @default 0
+             */
+            contasExcluidas: number;
+            /** @description Só com `vincularDocumentos` (86e3ydjzy): o vínculo conta ↔ CNPJ/CPF pela coluna de documento da própria planilha, no formato da importação da relação. */
+            vinculos?: components["schemas"]["PartiesImportPayload"] | null;
         };
         /**
          * ChartImportPreviewEnvelope
@@ -3231,10 +3273,10 @@ export interface components {
         ChartImportPreviewPayload: {
             /**
              * Layout
-             * @description `modelo` da plataforma ou o plano exportado do `dominio`.
+             * @description `modelo` da plataforma, o plano exportado do `dominio`, `reconhecido` (a planilha lida pelo CONTEÚDO das colunas, com as que a plataforma não usa ignoradas) ou `mapeado` (lida pelo mapeamento escolhido na tela).
              * @enum {string}
              */
-            layout: "modelo" | "dominio";
+            layout: "modelo" | "dominio" | "reconhecido" | "mapeado";
             /**
              * Contas
              * @description Contas na planilha.
@@ -3288,6 +3330,38 @@ export interface components {
              * @description O teto de cada lista; as contagens são as reais.
              */
             listLimit: number;
+            /**
+             * Linhascomproblema
+             * @description As linhas da planilha que NÃO entram (86e3ydjze), em ordem de linha, com o motivo fechado. Vazia = a planilha entra inteira. Para importar sem elas, a importação manda a MESMA lista em `linhasExcluidas`.
+             */
+            linhasComProblema: components["schemas"]["ChartProblemLine"][];
+            /**
+             * Documentosencontrados
+             * @description Quantas contas trazem CNPJ/CPF na coluna de documento da planilha (86e3ydjzy), fora o `0`; `null` quando a planilha não tem essa coluna. A importação com `vincularDocumentos` vincula cada uma (as inválidas ficam sem vínculo).
+             */
+            documentosEncontrados: number | null;
+            /** @description Só quando o mapeamento pediu o tipo pela hierarquia (`tipoPelaHierarquia`): quantas contas ficaram sintéticas (têm conta abaixo) e quantas analíticas. `null` nos outros casos. */
+            tipoDerivado: components["schemas"]["ChartDerivedTypes"] | null;
+        };
+        /**
+         * ChartLastImport
+         * @description A última importação do plano (86e3ydjze): o que a tela lê para o selo.
+         */
+        ChartLastImport: {
+            /**
+             * Importadaem
+             * Format: date-time
+             */
+            importadaEm: string;
+            /** Layout */
+            layout: string;
+            /** Contas */
+            contas: number;
+            /**
+             * Linhasexcluidas
+             * @description As linhas que ficaram DE FORA por confirmação na prévia. Vazia = o plano importado está inteiro; com itens, a tela mostra o selo "não está 100%".
+             */
+            linhasExcluidas: components["schemas"]["ChartProblemLine"][];
         };
         /**
          * ChartOfAccountEntryResponse
@@ -3501,6 +3575,22 @@ export interface components {
             type: components["schemas"]["AccountingAccountType"];
             /** Classification */
             classification?: string | null;
+        };
+        /**
+         * ChartProblemLine
+         * @description Uma linha da planilha que fica (ou ficou) DE FORA: só o número e o motivo fechado.
+         */
+        ChartProblemLine: {
+            /**
+             * Linha
+             * @description A linha física da planilha, como no Excel.
+             */
+            linha: number;
+            /**
+             * Motivo
+             * @description Motivo no vocabulário fechado da importação (`codigo_vazio`, `nome_vazio`, `tipo_invalido`, `grau_divergente`, `conta_fora_do_bloco`…).
+             */
+            motivo: string;
         };
         /**
          * CheckDuplicateResponse
@@ -7057,6 +7147,12 @@ export interface components {
             naoVinculadasTotal: number;
             /** Listlimit */
             listLimit: number;
+            /**
+             * Empresaconferida
+             * @description `false` quando o relatório não traz o CNPJ da empresa (86e3ydjzy): a relação entrou SEM conferir que é da empresa deste cliente.
+             * @default true
+             */
+            empresaConferida: boolean;
         };
         /**
          * PartyLinkEnvelope
@@ -7153,7 +7249,7 @@ export interface components {
             line: number;
             /**
              * Reason
-             * @description `sem_conta` (conta 0 no Domínio), `documento_ausente`, `documento_invalido` (dígito verificador errado no Domínio) ou `conta_compartilhada` (a mesma conta em mais de uma pessoa: vínculo um-para-um impossível).
+             * @description `sem_conta` (conta 0 no Domínio), `documento_ausente`, `documento_invalido` (dígito verificador errado no Domínio) ou `conta_compartilhada` (a mesma conta em mais de uma pessoa: vínculo um-para-um impossível); no vínculo pela coluna do plano, também `documento_repetido` (o mesmo documento em duas contas) e `conta_sintetica`.
              */
             reason: string;
             /** Accountcode */

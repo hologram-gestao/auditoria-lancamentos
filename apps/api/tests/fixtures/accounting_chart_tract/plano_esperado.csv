@@ -1,0 +1,1851 @@
+linha;codigo_reduzido;nome;tipo;classificacao
+6;1;Grupo de exemplo 1;sintetica;1
+7;2;Grupo de exemplo 1.1;sintetica;1.1
+8;3;Grupo de exemplo 1.1.1;sintetica;1.1.1
+9;4;Grupo de exemplo 1.1.1.01;sintetica;1.1.1.01
+10;5;Conta de exemplo 1.1.1.01.001;analitica;1.1.1.01.001
+11;6;Conta de exemplo 1.1.1.01.002;analitica;1.1.1.01.002
+12;7;Grupo de exemplo 1.1.1.02;sintetica;1.1.1.02
+13;8;Conta de exemplo 1.1.1.02.001;analitica;1.1.1.02.001
+14;9;Conta de exemplo 1.1.1.02.002;analitica;1.1.1.02.002
+15;504;Conta de exemplo 1.1.1.02.003;analitica;1.1.1.02.003
+16;1143;Conta de exemplo 1.1.1.02.004;analitica;1.1.1.02.004
+17;10;Grupo de exemplo 1.1.1.03 Alfa Beta Gama;sintetica;1.1.1.03
+18;11;Conta de exemplo 1.1.1.03.001;analitica;1.1.1.03.001
+19;861;Conta de exemplo 1.1.1.03.002;analitica;1.1.1.03.002
+20;1166;Conta de exemplo 1.1.1.03.003 A;analitica;1.1.1.03.003
+21;1343;Conta de exemplo 1.1.1.03.004;analitica;1.1.1.03.004
+22;1815;Conta de exemplo 1.1.1.03.005;analitica;1.1.1.03.005
+23;2080;Conta de exemplo 1.1.1.03.006;analitica;1.1.1.03.006
+24;12;Grupo de exemplo 1.1.2;sintetica;1.1.2
+25;13;Grupo de exemplo 1.1.2.01;sintetica;1.1.2.01
+26;825;Conta de exemplo 1.1.2.01.00001;analitica;1.1.2.01.00001
+27;1623;Conta de exemplo 1.1.2.01.00002 Alfa Beta;analitica;1.1.2.01.00002
+28;1877;Conta de exemplo 1.1.2.01.00003 Alfa Beta;analitica;1.1.2.01.00003
+29;1465;Conta de exemplo 1.1.2.01.00004;analitica;1.1.2.01.00004
+30;2113;Conta de exemplo 1.1.2.01.00005 Alfa Be;analitica;1.1.2.01.00005
+31;1400;Conta de exemplo 1.1.2.01.00006;analitica;1.1.2.01.00006
+32;1762;Conta de exemplo 1.1.2.01.00007 Alfa Beta;analitica;1.1.2.01.00007
+33;1837;Conta de exemplo 1.1.2.01.00008 Alfa Beta;analitica;1.1.2.01.00008
+34;2144;Conta de exemplo 1.1.2.01.00009;analitica;1.1.2.01.00009
+35;1030;Conta de exemplo 1.1.2.01.00010;analitica;1.1.2.01.00010
+36;1716;Conta de exemplo 1.1.2.01.00011;analitica;1.1.2.01.00011
+37;1747;Conta de exemplo 1.1.2.01.00012 Alf;analitica;1.1.2.01.00012
+38;622;Conta de exemplo 1.1.2.01.00013 Alf;analitica;1.1.2.01.00013
+39;1723;Conta de exemplo 1.1.2.01.00014;analitica;1.1.2.01.00014
+40;2123;Conta de exemplo 1.1.2.01.00015;analitica;1.1.2.01.00015
+41;1724;Conta de exemplo 1.1.2.01.00016 Alfa Beta Gama;analitica;1.1.2.01.00016
+42;1725;Conta de exemplo 1.1.2.01.00017 Alfa Beta Gama;analitica;1.1.2.01.00017
+43;793;Conta de exemplo 1.1.2.01.00018;analitica;1.1.2.01.00018
+44;1209;Conta de exemplo 1.1.2.01.00019 Alfa;analitica;1.1.2.01.00019
+45;905;Conta de exemplo 1.1.2.01.00021 Alfa Beta;analitica;1.1.2.01.00021
+46;1878;Conta de exemplo 1.1.2.01.00022 Alfa Bet;analitica;1.1.2.01.00022
+47;1838;Conta de exemplo 1.1.2.01.00023;analitica;1.1.2.01.00023
+48;1839;Conta de exemplo 1.1.2.01.00024;analitica;1.1.2.01.00024
+49;1405;Conta de exemplo 1.1.2.01.00025 Alfa Beta Gama;analitica;1.1.2.01.00025
+50;2159;Conta de exemplo 1.1.2.01.00026;analitica;1.1.2.01.00026
+51;1443;Conta de exemplo 1.1.2.01.00027 Al;analitica;1.1.2.01.00027
+52;1886;Conta de exemplo 1.1.2.01.00028;analitica;1.1.2.01.00028
+53;1562;Conta de exemplo 1.1.2.01.00029;analitica;1.1.2.01.00029
+54;805;Conta de exemplo 1.1.2.01.00030;analitica;1.1.2.01.00030
+55;639;Conta de exemplo 1.1.2.01.00031;analitica;1.1.2.01.00031
+56;2175;Conta de exemplo 1.1.2.01.00032;analitica;1.1.2.01.00032
+57;549;Conta de exemplo 1.1.2.01.00033 Alfa Bet;analitica;1.1.2.01.00033
+58;546;Conta de exemplo 1.1.2.01.00034 Alfa;analitica;1.1.2.01.00034
+59;2094;Conta de exemplo 1.1.2.01.00035;analitica;1.1.2.01.00035
+60;2133;Conta de exemplo 1.1.2.01.00036 Alf;analitica;1.1.2.01.00036
+61;651;Conta de exemplo 1.1.2.01.00037;analitica;1.1.2.01.00037
+62;628;Conta de exemplo 1.1.2.01.00038;analitica;1.1.2.01.00038
+63;1504;Conta de exemplo 1.1.2.01.00039 Alfa Beta Gama De;analitica;1.1.2.01.00039
+64;2091;Conta de exemplo 1.1.2.01.00040 Alfa Be;analitica;1.1.2.01.00040
+65;1782;Conta de exemplo 1.1.2.01.00041;analitica;1.1.2.01.00041
+66;911;Conta de exemplo 1.1.2.01.00042;analitica;1.1.2.01.00042
+67;2081;Conta de exemplo 1.1.2.01.00043;analitica;1.1.2.01.00043
+68;585;Conta de exemplo 1.1.2.01.00044 Alfa Bet;analitica;1.1.2.01.00044
+69;808;Conta de exemplo 1.1.2.01.00045;analitica;1.1.2.01.00045
+70;1880;Conta de exemplo 1.1.2.01.00046 Alfa;analitica;1.1.2.01.00046
+71;1327;Conta de exemplo 1.1.2.01.00047 Alfa B;analitica;1.1.2.01.00047
+72;1335;Conta de exemplo 1.1.2.01.00048;analitica;1.1.2.01.00048
+73;2083;Conta de exemplo 1.1.2.01.00049;analitica;1.1.2.01.00049
+74;1077;Conta de exemplo 1.1.2.01.00050;analitica;1.1.2.01.00050
+75;803;Conta de exemplo 1.1.2.01.00051;analitica;1.1.2.01.00051
+76;1076;Conta de exemplo 1.1.2.01.00052;analitica;1.1.2.01.00052
+77;641;Conta de exemplo 1.1.2.01.00053;analitica;1.1.2.01.00053
+78;811;Conta de exemplo 1.1.2.01.00054;analitica;1.1.2.01.00054
+79;1881;Conta de exemplo 1.1.2.01.00055 Alfa;analitica;1.1.2.01.00055
+80;640;Conta de exemplo 1.1.2.01.00056 A;analitica;1.1.2.01.00056
+81;1367;Conta de exemplo 1.1.2.01.00057 Alfa Beta Gama Delta;analitica;1.1.2.01.00057
+82;846;Conta de exemplo 1.1.2.01.00058;analitica;1.1.2.01.00058
+83;1798;Conta de exemplo 1.1.2.01.00059;analitica;1.1.2.01.00059
+84;849;Conta de exemplo 1.1.2.01.00060 Alfa Bet;analitica;1.1.2.01.00060
+85;934;Conta de exemplo 1.1.2.01.00062;analitica;1.1.2.01.00062
+86;1095;Conta de exemplo 1.1.2.01.00063 Alfa;analitica;1.1.2.01.00063
+87;538;Conta de exemplo 1.1.2.01.00064 Alfa;analitica;1.1.2.01.00064
+88;1581;Conta de exemplo 1.1.2.01.00065;analitica;1.1.2.01.00065
+89;655;Conta de exemplo 1.1.2.01.00066 Alf;analitica;1.1.2.01.00066
+90;1087;Conta de exemplo 1.1.2.01.00067 Al;analitica;1.1.2.01.00067
+91;2130;Conta de exemplo 1.1.2.01.00068 Alfa Beta Ga;analitica;1.1.2.01.00068
+92;1984;Conta de exemplo 1.1.2.01.00069;analitica;1.1.2.01.00069
+93;860;Conta de exemplo 1.1.2.01.00070;analitica;1.1.2.01.00070
+94;1775;Conta de exemplo 1.1.2.01.00071;analitica;1.1.2.01.00071
+95;528;Conta de exemplo 1.1.2.01.00072 Alfa Bet;analitica;1.1.2.01.00072
+96;1326;Conta de exemplo 1.1.2.01.00073;analitica;1.1.2.01.00073
+97;1564;Conta de exemplo 1.1.2.01.00074;analitica;1.1.2.01.00074
+98;529;Conta de exemplo 1.1.2.01.00075 Alfa Bet;analitica;1.1.2.01.00075
+99;1650;Conta de exemplo 1.1.2.01.00078 Alfa Beta Gama Del;analitica;1.1.2.01.00078
+100;2002;Conta de exemplo 1.1.2.01.00079 Alfa Beta Gama Del;analitica;1.1.2.01.00079
+101;1464;Conta de exemplo 1.1.2.01.00080;analitica;1.1.2.01.00080
+102;1463;Conta de exemplo 1.1.2.01.00081;analitica;1.1.2.01.00081
+103;1290;Conta de exemplo 1.1.2.01.00082;analitica;1.1.2.01.00082
+104;1462;Conta de exemplo 1.1.2.01.00083;analitica;1.1.2.01.00083
+105;1451;Conta de exemplo 1.1.2.01.00084;analitica;1.1.2.01.00084
+106;1450;Conta de exemplo 1.1.2.01.00085;analitica;1.1.2.01.00085
+107;656;Conta de exemplo 1.1.2.01.00086;analitica;1.1.2.01.00086
+108;850;Conta de exemplo 1.1.2.01.00091 Alf;analitica;1.1.2.01.00091
+109;1764;Conta de exemplo 1.1.2.01.00092;analitica;1.1.2.01.00092
+110;1449;Conta de exemplo 1.1.2.01.00093;analitica;1.1.2.01.00093
+111;1342;Conta de exemplo 1.1.2.01.00094 Alfa Beta Gama D;analitica;1.1.2.01.00094
+112;1593;Conta de exemplo 1.1.2.01.00095 Alfa Bet;analitica;1.1.2.01.00095
+113;1940;Conta de exemplo 1.1.2.01.00096 Alfa Bet;analitica;1.1.2.01.00096
+114;1147;Conta de exemplo 1.1.2.01.00098;analitica;1.1.2.01.00098
+115;1654;Conta de exemplo 1.1.2.01.00100;analitica;1.1.2.01.00100
+116;2006;Conta de exemplo 1.1.2.01.00101;analitica;1.1.2.01.00101
+117;927;Conta de exemplo 1.1.2.01.00103 Alfa Beta;analitica;1.1.2.01.00103
+118;2097;Conta de exemplo 1.1.2.01.00104 Al;analitica;1.1.2.01.00104
+119;2171;Conta de exemplo 1.1.2.01.00105 A;analitica;1.1.2.01.00105
+120;851;Conta de exemplo 1.1.2.01.00106;analitica;1.1.2.01.00106
+121;659;Conta de exemplo 1.1.2.01.00107 Alfa Bet;analitica;1.1.2.01.00107
+122;1882;Conta de exemplo 1.1.2.01.00108 Alfa Beta;analitica;1.1.2.01.00108
+123;1573;Conta de exemplo 1.1.2.01.00109 Alfa Beta Gama;analitica;1.1.2.01.00109
+124;1667;Conta de exemplo 1.1.2.01.00110;analitica;1.1.2.01.00110
+125;836;Conta de exemplo 1.1.2.01.00111 Alfa;analitica;1.1.2.01.00111
+126;1994;Conta de exemplo 1.1.2.01.00112;analitica;1.1.2.01.00112
+127;580;Conta de exemplo 1.1.2.01.00113;analitica;1.1.2.01.00113
+128;530;Conta de exemplo 1.1.2.01.00114;analitica;1.1.2.01.00114
+129;1480;Conta de exemplo 1.1.2.01.00115;analitica;1.1.2.01.00115
+130;514;Conta de exemplo 1.1.2.01.00116;analitica;1.1.2.01.00116
+131;1883;Conta de exemplo 1.1.2.01.00119;analitica;1.1.2.01.00119
+132;532;Conta de exemplo 1.1.2.01.00121;analitica;1.1.2.01.00121
+133;1805;Conta de exemplo 1.1.2.01.00122 Alfa;analitica;1.1.2.01.00122
+134;2014;Conta de exemplo 1.1.2.01.00123 Alfa Beta;analitica;1.1.2.01.00123
+135;663;Conta de exemplo 1.1.2.01.00124 Alfa Bet;analitica;1.1.2.01.00124
+136;619;Conta de exemplo 1.1.2.01.00126 Alfa Bet;analitica;1.1.2.01.00126
+137;1738;Conta de exemplo 1.1.2.01.00129 Alfa Beta Gama Delta Épsilon Zeta Eta Teta Iota C;analitica;1.1.2.01.00129
+138;2060;Conta de exemplo 1.1.2.01.00130 Alfa Beta Gama Delta;analitica;1.1.2.01.00130
+139;1694;Conta de exemplo 1.1.2.01.00131 Alfa Beta Gama Delta;analitica;1.1.2.01.00131
+140;1520;Conta de exemplo 1.1.2.01.00132 Alfa Beta Gam;analitica;1.1.2.01.00132
+141;662;Conta de exemplo 1.1.2.01.00133 Alfa;analitica;1.1.2.01.00133
+142;1407;Conta de exemplo 1.1.2.01.00134 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00134
+143;2098;Conta de exemplo 1.1.2.01.00135 Alfa Beta Gama Delta Épsilon Zeta Eta Teta Iota Capa Lambda Ômega A;analitica;1.1.2.01.00135
+144;1274;Conta de exemplo 1.1.2.01.00136 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00136
+145;944;Conta de exemplo 1.1.2.01.00138 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00138
+146;621;Conta de exemplo 1.1.2.01.00139 Alfa Be;analitica;1.1.2.01.00139
+147;664;Conta de exemplo 1.1.2.01.00143;analitica;1.1.2.01.00143
+148;848;Conta de exemplo 1.1.2.01.00144;analitica;1.1.2.01.00144
+149;1422;Conta de exemplo 1.1.2.01.00145;analitica;1.1.2.01.00145
+150;870;Conta de exemplo 1.1.2.01.00146;analitica;1.1.2.01.00146
+151;1884;Conta de exemplo 1.1.2.01.00147 Alfa;analitica;1.1.2.01.00147
+152;1557;Conta de exemplo 1.1.2.01.00148 Alfa;analitica;1.1.2.01.00148
+153;822;Conta de exemplo 1.1.2.01.00149 Alfa B;analitica;1.1.2.01.00149
+154;533;Conta de exemplo 1.1.2.01.00150;analitica;1.1.2.01.00150
+155;1164;Conta de exemplo 1.1.2.01.00151 Alfa Beta;analitica;1.1.2.01.00151
+156;1885;Conta de exemplo 1.1.2.01.00152 Alfa;analitica;1.1.2.01.00152
+157;1497;Conta de exemplo 1.1.2.01.00153 Alfa;analitica;1.1.2.01.00153
+158;1369;Conta de exemplo 1.1.2.01.00154;analitica;1.1.2.01.00154
+159;941;Conta de exemplo 1.1.2.01.00160;analitica;1.1.2.01.00160
+160;505;Conta de exemplo 1.1.2.01.00161;analitica;1.1.2.01.00161
+161;858;Conta de exemplo 1.1.2.01.00162 Alfa Be;analitica;1.1.2.01.00162
+162;1698;Conta de exemplo 1.1.2.01.00163 Al;analitica;1.1.2.01.00163
+163;2061;Conta de exemplo 1.1.2.01.00164 Al;analitica;1.1.2.01.00164
+164;1547;Conta de exemplo 1.1.2.01.00165;analitica;1.1.2.01.00165
+165;506;Conta de exemplo 1.1.2.01.00168 Alfa Bet;analitica;1.1.2.01.00168
+166;588;Conta de exemplo 1.1.2.01.00169;analitica;1.1.2.01.00169
+167;1211;Conta de exemplo 1.1.2.01.00171 Alfa Beta;analitica;1.1.2.01.00171
+168;1544;Conta de exemplo 1.1.2.01.00172 A;analitica;1.1.2.01.00172
+169;1717;Conta de exemplo 1.1.2.01.00173 Alfa Bet;analitica;1.1.2.01.00173
+170;1800;Conta de exemplo 1.1.2.01.00174 Alf;analitica;1.1.2.01.00174
+171;871;Conta de exemplo 1.1.2.01.00175;analitica;1.1.2.01.00175
+172;1887;Conta de exemplo 1.1.2.01.00176;analitica;1.1.2.01.00176
+173;1633;Conta de exemplo 1.1.2.01.00177 Alfa Bet;analitica;1.1.2.01.00177
+174;1377;Conta de exemplo 1.1.2.01.00178 Alfa;analitica;1.1.2.01.00178
+175;620;Conta de exemplo 1.1.2.01.00179;analitica;1.1.2.01.00179
+176;1888;Conta de exemplo 1.1.2.01.00180 Alfa Beta Gama Delta É;analitica;1.1.2.01.00180
+177;925;Conta de exemplo 1.1.2.01.00181 Alfa Beta Gama Delta Épsilo;analitica;1.1.2.01.00181
+178;1770;Conta de exemplo 1.1.2.01.00182;analitica;1.1.2.01.00182
+179;1889;Conta de exemplo 1.1.2.01.00183;analitica;1.1.2.01.00183
+180;518;Conta de exemplo 1.1.2.01.00184;analitica;1.1.2.01.00184
+181;835;Conta de exemplo 1.1.2.01.00186;analitica;1.1.2.01.00186
+182;1794;Conta de exemplo 1.1.2.01.00187;analitica;1.1.2.01.00187
+183;872;Conta de exemplo 1.1.2.01.00188 Al;analitica;1.1.2.01.00188
+184;1212;Conta de exemplo 1.1.2.01.00189;analitica;1.1.2.01.00189
+185;534;Conta de exemplo 1.1.2.01.00190 Alfa Bet;analitica;1.1.2.01.00190
+186;2151;Conta de exemplo 1.1.2.01.00191 Alfa;analitica;1.1.2.01.00191
+187;1891;Conta de exemplo 1.1.2.01.00192 Alfa Beta Gama Del;analitica;1.1.2.01.00192
+188;1188;Conta de exemplo 1.1.2.01.00193 Alfa Be;analitica;1.1.2.01.00193
+189;666;Conta de exemplo 1.1.2.01.00194 Alf;analitica;1.1.2.01.00194
+190;649;Conta de exemplo 1.1.2.01.00196 Alfa Be;analitica;1.1.2.01.00196
+191;904;Conta de exemplo 1.1.2.01.00198;analitica;1.1.2.01.00198
+192;1591;Conta de exemplo 1.1.2.01.00199 Alfa Bet;analitica;1.1.2.01.00199
+193;1892;Conta de exemplo 1.1.2.01.00200 Alfa Bet;analitica;1.1.2.01.00200
+194;923;Conta de exemplo 1.1.2.01.00202 Alfa Bet;analitica;1.1.2.01.00202
+195;1714;Conta de exemplo 1.1.2.01.00203 Alfa Beta Gam;analitica;1.1.2.01.00203
+196;1713;Conta de exemplo 1.1.2.01.00204 A;analitica;1.1.2.01.00204
+197;642;Conta de exemplo 1.1.2.01.00205;analitica;1.1.2.01.00205
+198;2039;Conta de exemplo 1.1.2.01.00207;analitica;1.1.2.01.00207
+199;1323;Conta de exemplo 1.1.2.01.00208 Alfa Beta G;analitica;1.1.2.01.00208
+200;507;Conta de exemplo 1.1.2.01.00209 Alfa Beta Gama D;analitica;1.1.2.01.00209
+201;1757;Conta de exemplo 1.1.2.01.00211 Alfa;analitica;1.1.2.01.00211
+202;1893;Conta de exemplo 1.1.2.01.00212 Alfa Bet;analitica;1.1.2.01.00212
+203;1492;Conta de exemplo 1.1.2.01.00213 Alfa Beta;analitica;1.1.2.01.00213
+204;1273;Conta de exemplo 1.1.2.01.00214;analitica;1.1.2.01.00214
+205;1746;Conta de exemplo 1.1.2.01.00215 A;analitica;1.1.2.01.00215
+206;1439;Conta de exemplo 1.1.2.01.00216;analitica;1.1.2.01.00216
+207;1438;Conta de exemplo 1.1.2.01.00217;analitica;1.1.2.01.00217
+208;1437;Conta de exemplo 1.1.2.01.00218;analitica;1.1.2.01.00218
+209;855;Conta de exemplo 1.1.2.01.00219 Al;analitica;1.1.2.01.00219
+210;1445;Conta de exemplo 1.1.2.01.00220;analitica;1.1.2.01.00220
+211;1436;Conta de exemplo 1.1.2.01.00221;analitica;1.1.2.01.00221
+212;1435;Conta de exemplo 1.1.2.01.00222;analitica;1.1.2.01.00222
+213;1894;Conta de exemplo 1.1.2.01.00223;analitica;1.1.2.01.00223
+214;1660;Conta de exemplo 1.1.2.01.00224;analitica;1.1.2.01.00224
+215;1037;Conta de exemplo 1.1.2.01.00226 Alfa Beta G;analitica;1.1.2.01.00226
+216;910;Conta de exemplo 1.1.2.01.00227 Alfa B;analitica;1.1.2.01.00227
+217;2072;Conta de exemplo 1.1.2.01.00228;analitica;1.1.2.01.00228
+218;1695;Conta de exemplo 1.1.2.01.00229;analitica;1.1.2.01.00229
+219;854;Conta de exemplo 1.1.2.01.00231 Alfa Bet;analitica;1.1.2.01.00231
+220;1434;Conta de exemplo 1.1.2.01.00232;analitica;1.1.2.01.00232
+221;2071;Conta de exemplo 1.1.2.01.00233;analitica;1.1.2.01.00233
+222;1514;Conta de exemplo 1.1.2.01.00234;analitica;1.1.2.01.00234
+223;1216;Conta de exemplo 1.1.2.01.00235 Alfa Be;analitica;1.1.2.01.00235
+224;831;Conta de exemplo 1.1.2.01.00236 Alfa Beta Ga;analitica;1.1.2.01.00236
+225;1751;Conta de exemplo 1.1.2.01.00237 Alfa Be;analitica;1.1.2.01.00237
+226;1995;Conta de exemplo 1.1.2.01.00238;analitica;1.1.2.01.00238
+227;1712;Conta de exemplo 1.1.2.01.00239 Alfa B;analitica;1.1.2.01.00239
+228;1604;Conta de exemplo 1.1.2.01.00240;analitica;1.1.2.01.00240
+229;1674;Conta de exemplo 1.1.2.01.00241 Alfa;analitica;1.1.2.01.00241
+230;2023;Conta de exemplo 1.1.2.01.00242 Alfa;analitica;1.1.2.01.00242
+231;1300;Conta de exemplo 1.1.2.01.00243 Alfa Beta Gama D;analitica;1.1.2.01.00243
+232;1752;Conta de exemplo 1.1.2.01.00244 Al;analitica;1.1.2.01.00244
+233;1433;Conta de exemplo 1.1.2.01.00245;analitica;1.1.2.01.00245
+234;1432;Conta de exemplo 1.1.2.01.00246;analitica;1.1.2.01.00246
+235;1322;Conta de exemplo 1.1.2.01.00248;analitica;1.1.2.01.00248
+236;1996;Conta de exemplo 1.1.2.01.00249;analitica;1.1.2.01.00249
+237;1487;Conta de exemplo 1.1.2.01.00250;analitica;1.1.2.01.00250
+238;1895;Conta de exemplo 1.1.2.01.00251;analitica;1.1.2.01.00251
+239;2040;Conta de exemplo 1.1.2.01.00252 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00252
+240;1684;Conta de exemplo 1.1.2.01.00253 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00253
+241;873;Conta de exemplo 1.1.2.01.00254;analitica;1.1.2.01.00254
+242;1210;Conta de exemplo 1.1.2.01.00255 Alfa Beta Gama Delt;analitica;1.1.2.01.00255
+243;1590;Conta de exemplo 1.1.2.01.00256 Alfa Beta Ga;analitica;1.1.2.01.00256
+244;1896;Conta de exemplo 1.1.2.01.00257;analitica;1.1.2.01.00257
+245;1519;Conta de exemplo 1.1.2.01.00258;analitica;1.1.2.01.00258
+246;1608;Conta de exemplo 1.1.2.01.00259;analitica;1.1.2.01.00259
+247;1441;Conta de exemplo 1.1.2.01.00260;analitica;1.1.2.01.00260
+248;2132;Conta de exemplo 1.1.2.01.00261;analitica;1.1.2.01.00261
+249;1309;Conta de exemplo 1.1.2.01.00262 A;analitica;1.1.2.01.00262
+250;1429;Conta de exemplo 1.1.2.01.00263;analitica;1.1.2.01.00263
+251;15;Conta de exemplo 1.1.2.01.00264;analitica;1.1.2.01.00264
+252;14;Conta de exemplo 1.1.2.01.00265;analitica;1.1.2.01.00265
+253;1428;Conta de exemplo 1.1.2.01.00266;analitica;1.1.2.01.00266
+254;1745;Conta de exemplo 1.1.2.01.00267 Alf;analitica;1.1.2.01.00267
+255;1897;Conta de exemplo 1.1.2.01.00268 Alfa B;analitica;1.1.2.01.00268
+256;1410;Conta de exemplo 1.1.2.01.00269 Alfa Beta G;analitica;1.1.2.01.00269
+257;839;Conta de exemplo 1.1.2.01.00270 Alfa;analitica;1.1.2.01.00270
+258;1663;Conta de exemplo 1.1.2.01.00271;analitica;1.1.2.01.00271
+259;1421;Conta de exemplo 1.1.2.01.00272;analitica;1.1.2.01.00272
+260;668;Conta de exemplo 1.1.2.01.00273;analitica;1.1.2.01.00273
+261;508;Conta de exemplo 1.1.2.01.00274 Alfa Bet;analitica;1.1.2.01.00274
+262;1427;Conta de exemplo 1.1.2.01.00275;analitica;1.1.2.01.00275
+263;1426;Conta de exemplo 1.1.2.01.00276;analitica;1.1.2.01.00276
+264;669;Conta de exemplo 1.1.2.01.00277;analitica;1.1.2.01.00277
+265;796;Conta de exemplo 1.1.2.01.00279 Alfa Be;analitica;1.1.2.01.00279
+266;1898;Conta de exemplo 1.1.2.01.00280 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00280
+267;646;Conta de exemplo 1.1.2.01.00283 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00283
+268;1765;Conta de exemplo 1.1.2.01.00284;analitica;1.1.2.01.00284
+269;1785;Conta de exemplo 1.1.2.01.00285 Alfa;analitica;1.1.2.01.00285
+270;1786;Conta de exemplo 1.1.2.01.00286 Alf;analitica;1.1.2.01.00286
+271;1779;Conta de exemplo 1.1.2.01.00287 Alfa;analitica;1.1.2.01.00287
+272;1784;Conta de exemplo 1.1.2.01.00288 Al;analitica;1.1.2.01.00288
+273;1789;Conta de exemplo 1.1.2.01.00289;analitica;1.1.2.01.00289
+274;1778;Conta de exemplo 1.1.2.01.00290 Alfa;analitica;1.1.2.01.00290
+275;1804;Conta de exemplo 1.1.2.01.00291 Alfa Be;analitica;1.1.2.01.00291
+276;1787;Conta de exemplo 1.1.2.01.00292 Al;analitica;1.1.2.01.00292
+277;1803;Conta de exemplo 1.1.2.01.00293 Alfa B;analitica;1.1.2.01.00293
+278;1802;Conta de exemplo 1.1.2.01.00294 Alfa;analitica;1.1.2.01.00294
+279;1208;Conta de exemplo 1.1.2.01.00295;analitica;1.1.2.01.00295
+280;1788;Conta de exemplo 1.1.2.01.00296 Alfa Be;analitica;1.1.2.01.00296
+281;2164;Conta de exemplo 1.1.2.01.00297 Alf;analitica;1.1.2.01.00297
+282;527;Conta de exemplo 1.1.2.01.00298 Alfa Bet;analitica;1.1.2.01.00298
+283;535;Conta de exemplo 1.1.2.01.00300;analitica;1.1.2.01.00300
+284;1624;Conta de exemplo 1.1.2.01.00302 Alfa B;analitica;1.1.2.01.00302
+285;670;Conta de exemplo 1.1.2.01.00303;analitica;1.1.2.01.00303
+286;1303;Conta de exemplo 1.1.2.01.00304;analitica;1.1.2.01.00304
+287;2049;Conta de exemplo 1.1.2.01.00305 Alfa;analitica;1.1.2.01.00305
+288;1692;Conta de exemplo 1.1.2.01.00306 Alfa;analitica;1.1.2.01.00306
+289;1899;Conta de exemplo 1.1.2.01.00307 Alfa Beta Gama Del;analitica;1.1.2.01.00307
+290;1339;Conta de exemplo 1.1.2.01.00308 Alfa Beta Gama Del;analitica;1.1.2.01.00308
+291;1900;Conta de exemplo 1.1.2.01.00309 Alfa Beta Gama;analitica;1.1.2.01.00309
+292;1338;Conta de exemplo 1.1.2.01.00310 Alfa Beta Gama;analitica;1.1.2.01.00310
+293;1340;Conta de exemplo 1.1.2.01.00311 Alfa Beta Gam;analitica;1.1.2.01.00311
+294;856;Conta de exemplo 1.1.2.01.00312 Alf;analitica;1.1.2.01.00312
+295;539;Conta de exemplo 1.1.2.01.00313 Alf;analitica;1.1.2.01.00313
+296;874;Conta de exemplo 1.1.2.01.00314 A;analitica;1.1.2.01.00314
+297;544;Conta de exemplo 1.1.2.01.00316 Alf;analitica;1.1.2.01.00316
+298;1985;Conta de exemplo 1.1.2.01.00317 Alfa Beta Gama Delta;analitica;1.1.2.01.00317
+299;1700;Conta de exemplo 1.1.2.01.00318 Alfa B;analitica;1.1.2.01.00318
+300;1310;Conta de exemplo 1.1.2.01.00320 Alfa Beta Ga;analitica;1.1.2.01.00320
+301;844;Conta de exemplo 1.1.2.01.00321 Alfa;analitica;1.1.2.01.00321
+302;1430;Conta de exemplo 1.1.2.01.00322;analitica;1.1.2.01.00322
+303;932;Conta de exemplo 1.1.2.01.00323 Alfa Beta Gama Delta Épsi;analitica;1.1.2.01.00323
+304;1901;Conta de exemplo 1.1.2.01.00324 Alfa Beta Gama Del;analitica;1.1.2.01.00324
+305;1632;Conta de exemplo 1.1.2.01.00325 Alfa Beta Gama Del;analitica;1.1.2.01.00325
+306;1529;Conta de exemplo 1.1.2.01.00326 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00326
+307;633;Conta de exemplo 1.1.2.01.00328 Alfa Bet;analitica;1.1.2.01.00328
+308;2121;Conta de exemplo 1.1.2.01.00329;analitica;1.1.2.01.00329
+309;1404;Conta de exemplo 1.1.2.01.00330 Alfa Be;analitica;1.1.2.01.00330
+310;1425;Conta de exemplo 1.1.2.01.00331;analitica;1.1.2.01.00331
+311;2154;Conta de exemplo 1.1.2.01.00332 Alfa Beta Gama Del;analitica;1.1.2.01.00332
+312;1706;Conta de exemplo 1.1.2.01.00333;analitica;1.1.2.01.00333
+313;1424;Conta de exemplo 1.1.2.01.00334;analitica;1.1.2.01.00334
+314;1902;Conta de exemplo 1.1.2.01.00335;analitica;1.1.2.01.00335
+315;1513;Conta de exemplo 1.1.2.01.00336;analitica;1.1.2.01.00336
+316;1538;Conta de exemplo 1.1.2.01.00337 Alfa B;analitica;1.1.2.01.00337
+317;1767;Conta de exemplo 1.1.2.01.00338 Alfa;analitica;1.1.2.01.00338
+318;2145;Conta de exemplo 1.1.2.01.00339;analitica;1.1.2.01.00339
+319;2101;Conta de exemplo 1.1.2.01.00340;analitica;1.1.2.01.00340
+320;550;Conta de exemplo 1.1.2.01.00341 Alfa Be;analitica;1.1.2.01.00341
+321;2062;Conta de exemplo 1.1.2.01.00344 Alfa Be;analitica;1.1.2.01.00344
+322;1423;Conta de exemplo 1.1.2.01.00345;analitica;1.1.2.01.00345
+323;636;Conta de exemplo 1.1.2.01.00346 Alfa Bet;analitica;1.1.2.01.00346
+324;2090;Conta de exemplo 1.1.2.01.00347;analitica;1.1.2.01.00347
+325;1605;Conta de exemplo 1.1.2.01.00348;analitica;1.1.2.01.00348
+326;1653;Conta de exemplo 1.1.2.01.00349;analitica;1.1.2.01.00349
+327;1998;Conta de exemplo 1.1.2.01.00350;analitica;1.1.2.01.00350
+328;1530;Conta de exemplo 1.1.2.01.00351;analitica;1.1.2.01.00351
+329;2134;Conta de exemplo 1.1.2.01.00352 Alfa Beta;analitica;1.1.2.01.00352
+330;1277;Conta de exemplo 1.1.2.01.00353 A;analitica;1.1.2.01.00353
+331;840;Conta de exemplo 1.1.2.01.00354 Alfa;analitica;1.1.2.01.00354
+332;1677;Conta de exemplo 1.1.2.01.00355;analitica;1.1.2.01.00355
+333;1190;Conta de exemplo 1.1.2.01.00356;analitica;1.1.2.01.00356
+334;1659;Conta de exemplo 1.1.2.01.00357 Alfa Beta G;analitica;1.1.2.01.00357
+335;1657;Conta de exemplo 1.1.2.01.00358 Alfa Beta G;analitica;1.1.2.01.00358
+336;674;Conta de exemplo 1.1.2.01.00359;analitica;1.1.2.01.00359
+337;2118;Conta de exemplo 1.1.2.01.00360 Alfa B;analitica;1.1.2.01.00360
+338;2095;Conta de exemplo 1.1.2.01.00361 Alfa Beta;analitica;1.1.2.01.00361
+339;1679;Conta de exemplo 1.1.2.01.00362 Alfa Beta;analitica;1.1.2.01.00362
+340;2114;Conta de exemplo 1.1.2.01.00363 Alfa Beta;analitica;1.1.2.01.00363
+341;1512;Conta de exemplo 1.1.2.01.00364 Alfa Beta Gama Del;analitica;1.1.2.01.00364
+342;591;Conta de exemplo 1.1.2.01.00365;analitica;1.1.2.01.00365
+343;2168;Conta de exemplo 1.1.2.01.00366 Alfa Beta Gama Delt;analitica;1.1.2.01.00366
+344;1213;Conta de exemplo 1.1.2.01.00367 Alfa Beta;analitica;1.1.2.01.00367
+345;1148;Conta de exemplo 1.1.2.01.00368 Alfa Beta Gam;analitica;1.1.2.01.00368
+346;1545;Conta de exemplo 1.1.2.01.00370 Alfa Beta Gama Delt;analitica;1.1.2.01.00370
+347;930;Conta de exemplo 1.1.2.01.00373 Alfa Bet;analitica;1.1.2.01.00373
+348;592;Conta de exemplo 1.1.2.01.00374 A;analitica;1.1.2.01.00374
+349;875;Conta de exemplo 1.1.2.01.00375;analitica;1.1.2.01.00375
+350;675;Conta de exemplo 1.1.2.01.00376 Alfa;analitica;1.1.2.01.00376
+351;1288;Conta de exemplo 1.1.2.01.00377 Alfa Beta Gama;analitica;1.1.2.01.00377
+352;1903;Conta de exemplo 1.1.2.01.00378 Alfa Beta Ga;analitica;1.1.2.01.00378
+353;676;Conta de exemplo 1.1.2.01.00379 Alfa Bet;analitica;1.1.2.01.00379
+354;1904;Conta de exemplo 1.1.2.01.00380 Alfa Bet;analitica;1.1.2.01.00380
+355;1502;Conta de exemplo 1.1.2.01.00381 Alfa Bet;analitica;1.1.2.01.00381
+356;818;Conta de exemplo 1.1.2.01.00384 Alfa Be;analitica;1.1.2.01.00384
+357;1651;Conta de exemplo 1.1.2.01.00385;analitica;1.1.2.01.00385
+358;2093;Conta de exemplo 1.1.2.01.00386;analitica;1.1.2.01.00386
+359;579;Conta de exemplo 1.1.2.01.00387 Alfa Bet;analitica;1.1.2.01.00387
+360;677;Conta de exemplo 1.1.2.01.00389;analitica;1.1.2.01.00389
+361;1289;Conta de exemplo 1.1.2.01.00390;analitica;1.1.2.01.00390
+362;1038;Conta de exemplo 1.1.2.01.00392;analitica;1.1.2.01.00392
+363;2148;Conta de exemplo 1.1.2.01.00393;analitica;1.1.2.01.00393
+364;916;Conta de exemplo 1.1.2.01.00395;analitica;1.1.2.01.00395
+365;1362;Conta de exemplo 1.1.2.01.00398;analitica;1.1.2.01.00398
+366;2050;Conta de exemplo 1.1.2.01.00399;analitica;1.1.2.01.00399
+367;926;Conta de exemplo 1.1.2.01.00400 Alfa;analitica;1.1.2.01.00400
+368;1479;Conta de exemplo 1.1.2.01.00401;analitica;1.1.2.01.00401
+369;523;Conta de exemplo 1.1.2.01.00402 Alfa;analitica;1.1.2.01.00402
+370;584;Conta de exemplo 1.1.2.01.00403 Alfa Bet;analitica;1.1.2.01.00403
+371;1665;Conta de exemplo 1.1.2.01.00404;analitica;1.1.2.01.00404
+372;510;Conta de exemplo 1.1.2.01.00406 Alfa;analitica;1.1.2.01.00406
+373;547;Conta de exemplo 1.1.2.01.00408 Alfa Bet;analitica;1.1.2.01.00408
+374;2157;Conta de exemplo 1.1.2.01.00411;analitica;1.1.2.01.00411
+375;1207;Conta de exemplo 1.1.2.01.00412 Alfa Bet;analitica;1.1.2.01.00412
+376;1542;Conta de exemplo 1.1.2.01.00413 Alfa Beta Gama D;analitica;1.1.2.01.00413
+377;1490;Conta de exemplo 1.1.2.01.00414 Alfa Bet;analitica;1.1.2.01.00414
+378;1905;Conta de exemplo 1.1.2.01.00415 Alfa Beta;analitica;1.1.2.01.00415
+379;963;Conta de exemplo 1.1.2.01.00416;analitica;1.1.2.01.00416
+380;2131;Conta de exemplo 1.1.2.01.00417;analitica;1.1.2.01.00417
+381;1922;Conta de exemplo 1.1.2.01.00418;analitica;1.1.2.01.00418
+382;1621;Conta de exemplo 1.1.2.01.00419;analitica;1.1.2.01.00419
+383;1676;Conta de exemplo 1.1.2.01.00420;analitica;1.1.2.01.00420
+384;2024;Conta de exemplo 1.1.2.01.00421;analitica;1.1.2.01.00421
+385;679;Conta de exemplo 1.1.2.01.00422;analitica;1.1.2.01.00422
+386;1378;Conta de exemplo 1.1.2.01.00423 Al;analitica;1.1.2.01.00423
+387;845;Conta de exemplo 1.1.2.01.00424;analitica;1.1.2.01.00424
+388;2166;Conta de exemplo 1.1.2.01.00425 Alfa Beta G;analitica;1.1.2.01.00425
+389;2119;Conta de exemplo 1.1.2.01.00426;analitica;1.1.2.01.00426
+390;876;Conta de exemplo 1.1.2.01.00427;analitica;1.1.2.01.00427
+391;2153;Conta de exemplo 1.1.2.01.00428;analitica;1.1.2.01.00428
+392;509;Conta de exemplo 1.1.2.01.00430 Alfa Bet;analitica;1.1.2.01.00430
+393;2004;Conta de exemplo 1.1.2.01.00431;analitica;1.1.2.01.00431
+394;821;Conta de exemplo 1.1.2.01.00432;analitica;1.1.2.01.00432
+395;536;Conta de exemplo 1.1.2.01.00434 Alfa Bet;analitica;1.1.2.01.00434
+396;614;Conta de exemplo 1.1.2.01.00436 Alfa Be;analitica;1.1.2.01.00436
+397;2146;Conta de exemplo 1.1.2.01.00437 Alfa Beta;analitica;1.1.2.01.00437
+398;1187;Conta de exemplo 1.1.2.01.00438 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00438
+399;613;Conta de exemplo 1.1.2.01.00439 Alfa B;analitica;1.1.2.01.00439
+400;2126;Conta de exemplo 1.1.2.01.00440 Alfa B;analitica;1.1.2.01.00440
+401;2084;Conta de exemplo 1.1.2.01.00441;analitica;1.1.2.01.00441
+402;537;Conta de exemplo 1.1.2.01.00444;analitica;1.1.2.01.00444
+403;1198;Conta de exemplo 1.1.2.01.00445 Alfa;analitica;1.1.2.01.00445
+404;680;Conta de exemplo 1.1.2.01.00446;analitica;1.1.2.01.00446
+405;903;Conta de exemplo 1.1.2.01.00448 Alfa;analitica;1.1.2.01.00448
+406;1195;Conta de exemplo 1.1.2.01.00449 Alfa Bet;analitica;1.1.2.01.00449
+407;1202;Conta de exemplo 1.1.2.01.00450 Alfa Bet;analitica;1.1.2.01.00450
+408;1484;Conta de exemplo 1.1.2.01.00451 Alfa Beta Gama Delta;analitica;1.1.2.01.00451
+409;2074;Conta de exemplo 1.1.2.01.00452 Alfa Beta Gama Delta Épsilo;analitica;1.1.2.01.00452
+410;1726;Conta de exemplo 1.1.2.01.00453 Alfa Beta Gama Delta Épsilon Zeta Eta;analitica;1.1.2.01.00453
+411;2073;Conta de exemplo 1.1.2.01.00454 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00454
+412;1691;Conta de exemplo 1.1.2.01.00455 Alfa Beta Gama Delta Épsilon Zeta Et;analitica;1.1.2.01.00455
+413;1703;Conta de exemplo 1.1.2.01.00456;analitica;1.1.2.01.00456
+414;1527;Conta de exemplo 1.1.2.01.00457 Alfa Beta Gama Delta Épsi;analitica;1.1.2.01.00457
+415;1907;Conta de exemplo 1.1.2.01.00458 Alfa Beta Gama Delta Épsi;analitica;1.1.2.01.00458
+416;681;Conta de exemplo 1.1.2.01.00459 Alfa;analitica;1.1.2.01.00459
+417;857;Conta de exemplo 1.1.2.01.00460 Al;analitica;1.1.2.01.00460
+418;1999;Conta de exemplo 1.1.2.01.00461 Alfa;analitica;1.1.2.01.00461
+419;2112;Conta de exemplo 1.1.2.01.00462 Alfa Beta Gama Delta Épsilon Zeta Eta;analitica;1.1.2.01.00462
+420;1756;Conta de exemplo 1.1.2.01.00463;analitica;1.1.2.01.00463
+421;1039;Conta de exemplo 1.1.2.01.00465 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00465
+422;513;Conta de exemplo 1.1.2.01.00466;analitica;1.1.2.01.00466
+423;1943;Conta de exemplo 1.1.2.01.00467;analitica;1.1.2.01.00467
+424;1626;Conta de exemplo 1.1.2.01.00468;analitica;1.1.2.01.00468
+425;682;Conta de exemplo 1.1.2.01.00469;analitica;1.1.2.01.00469
+426;2156;Conta de exemplo 1.1.2.01.00470;analitica;1.1.2.01.00470
+427;1275;Conta de exemplo 1.1.2.01.00471 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00471
+428;629;Conta de exemplo 1.1.2.01.00473 Alfa Bet;analitica;1.1.2.01.00473
+429;2092;Conta de exemplo 1.1.2.01.00475;analitica;1.1.2.01.00475
+430;1675;Conta de exemplo 1.1.2.01.00476;analitica;1.1.2.01.00476
+431;2016;Conta de exemplo 1.1.2.01.00477;analitica;1.1.2.01.00477
+432;1792;Conta de exemplo 1.1.2.01.00478;analitica;1.1.2.01.00478
+433;1711;Conta de exemplo 1.1.2.01.00479 Alfa Beta Gama Delta Éps;analitica;1.1.2.01.00479
+434;819;Conta de exemplo 1.1.2.01.00481 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00481
+435;2025;Conta de exemplo 1.1.2.01.00482 Alfa Beta Gama Delta É;analitica;1.1.2.01.00482
+436;823;Conta de exemplo 1.1.2.01.00483 Alfa Beta Gama D;analitica;1.1.2.01.00483
+437;521;Conta de exemplo 1.1.2.01.00485 Alf;analitica;1.1.2.01.00485
+438;1647;Conta de exemplo 1.1.2.01.00487;analitica;1.1.2.01.00487
+439;1191;Conta de exemplo 1.1.2.01.00488 Alfa;analitica;1.1.2.01.00488
+440;1670;Conta de exemplo 1.1.2.01.00489 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00489
+441;582;Conta de exemplo 1.1.2.01.00490 Alf;analitica;1.1.2.01.00490
+442;638;Conta de exemplo 1.1.2.01.00496 Alfa Beta;analitica;1.1.2.01.00496
+443;1150;Conta de exemplo 1.1.2.01.00497 Alfa Beta;analitica;1.1.2.01.00497
+444;1040;Conta de exemplo 1.1.2.01.00498 Alfa Beta;analitica;1.1.2.01.00498
+445;1196;Conta de exemplo 1.1.2.01.00499 Alfa Beta;analitica;1.1.2.01.00499
+446;1908;Conta de exemplo 1.1.2.01.00500;analitica;1.1.2.01.00500
+447;1180;Conta de exemplo 1.1.2.01.00503;analitica;1.1.2.01.00503
+448;1761;Conta de exemplo 1.1.2.01.00504 Alfa;analitica;1.1.2.01.00504
+449;942;Conta de exemplo 1.1.2.01.00507 Alfa Beta G;analitica;1.1.2.01.00507
+450;1734;Conta de exemplo 1.1.2.01.00508;analitica;1.1.2.01.00508
+451;1189;Conta de exemplo 1.1.2.01.00509;analitica;1.1.2.01.00509
+452;1986;Conta de exemplo 1.1.2.01.00511 Alfa Be;analitica;1.1.2.01.00511
+453;1636;Conta de exemplo 1.1.2.01.00512 Alfa Beta Gam;analitica;1.1.2.01.00512
+454;2086;Conta de exemplo 1.1.2.01.00513 Alfa Beta Gama Delta Épsil;analitica;1.1.2.01.00513
+455;689;Conta de exemplo 1.1.2.01.00515 A;analitica;1.1.2.01.00515
+456;1909;Conta de exemplo 1.1.2.01.00516 A;analitica;1.1.2.01.00516
+457;1193;Conta de exemplo 1.1.2.01.00517 Al;analitica;1.1.2.01.00517
+458;548;Conta de exemplo 1.1.2.01.00518 Alfa Be;analitica;1.1.2.01.00518
+459;1715;Conta de exemplo 1.1.2.01.00521;analitica;1.1.2.01.00521
+460;877;Conta de exemplo 1.1.2.01.00522 A;analitica;1.1.2.01.00522
+461;1376;Conta de exemplo 1.1.2.01.00523 A;analitica;1.1.2.01.00523
+462;600;Conta de exemplo 1.1.2.01.00524 Alfa Bet;analitica;1.1.2.01.00524
+463;1197;Conta de exemplo 1.1.2.01.00525 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00525
+464;1491;Conta de exemplo 1.1.2.01.00526;analitica;1.1.2.01.00526
+465;1777;Conta de exemplo 1.1.2.01.00527;analitica;1.1.2.01.00527
+466;2140;Conta de exemplo 1.1.2.01.00528;analitica;1.1.2.01.00528
+467;1910;Conta de exemplo 1.1.2.01.00529 Alfa;analitica;1.1.2.01.00529
+468;1481;Conta de exemplo 1.1.2.01.00530;analitica;1.1.2.01.00530
+469;2075;Conta de exemplo 1.1.2.01.00531 Al;analitica;1.1.2.01.00531
+470;1697;Conta de exemplo 1.1.2.01.00532 Alfa Be;analitica;1.1.2.01.00532
+471;2165;Conta de exemplo 1.1.2.01.00533 Alfa Bet;analitica;1.1.2.01.00533
+472;1642;Conta de exemplo 1.1.2.01.00534;analitica;1.1.2.01.00534
+473;1973;Conta de exemplo 1.1.2.01.00535;analitica;1.1.2.01.00535
+474;690;Conta de exemplo 1.1.2.01.00537 Alfa;analitica;1.1.2.01.00537
+475;1763;Conta de exemplo 1.1.2.01.00538 Alfa Bet;analitica;1.1.2.01.00538
+476;1911;Conta de exemplo 1.1.2.01.00539 Alf;analitica;1.1.2.01.00539
+477;637;Conta de exemplo 1.1.2.01.00540 Alfa Bet;analitica;1.1.2.01.00540
+478;929;Conta de exemplo 1.1.2.01.00543 Alfa;analitica;1.1.2.01.00543
+479;2169;Conta de exemplo 1.1.2.01.00544;analitica;1.1.2.01.00544
+480;841;Conta de exemplo 1.1.2.01.00545 Alfa;analitica;1.1.2.01.00545
+481;1912;Conta de exemplo 1.1.2.01.00547;analitica;1.1.2.01.00547
+482;1285;Conta de exemplo 1.1.2.01.00548;analitica;1.1.2.01.00548
+483;1796;Conta de exemplo 1.1.2.01.00549;analitica;1.1.2.01.00549
+484;1710;Conta de exemplo 1.1.2.01.00550 Alfa Beta;analitica;1.1.2.01.00550
+485;1754;Conta de exemplo 1.1.2.01.00551;analitica;1.1.2.01.00551
+486;1661;Conta de exemplo 1.1.2.01.00552;analitica;1.1.2.01.00552
+487;1618;Conta de exemplo 1.1.2.01.00553 Alfa Beta Gama De;analitica;1.1.2.01.00553
+488;828;Conta de exemplo 1.1.2.01.00555;analitica;1.1.2.01.00555
+489;515;Conta de exemplo 1.1.2.01.00557 Alfa Beta Gama D;analitica;1.1.2.01.00557
+490;540;Conta de exemplo 1.1.2.01.00560 Alfa Beta G;analitica;1.1.2.01.00560
+491;2082;Conta de exemplo 1.1.2.01.00562 Alfa Bet;analitica;1.1.2.01.00562
+492;806;Conta de exemplo 1.1.2.01.00564 Alfa Beta Gama Delta É;analitica;1.1.2.01.00564
+493;1379;Conta de exemplo 1.1.2.01.00566 Alfa;analitica;1.1.2.01.00566
+494;552;Conta de exemplo 1.1.2.01.00568 Alfa Bet;analitica;1.1.2.01.00568
+495;1795;Conta de exemplo 1.1.2.01.00569;analitica;1.1.2.01.00569
+496;1681;Conta de exemplo 1.1.2.01.00571 Alfa Beta Gama Del;analitica;1.1.2.01.00571
+497;2032;Conta de exemplo 1.1.2.01.00572 Alfa Beta Gama Del;analitica;1.1.2.01.00572
+498;2096;Conta de exemplo 1.1.2.01.00573 Alfa Beta Gama;analitica;1.1.2.01.00573
+499;812;Conta de exemplo 1.1.2.01.00575 A;analitica;1.1.2.01.00575
+500;912;Conta de exemplo 1.1.2.01.00576;analitica;1.1.2.01.00576
+501;2042;Conta de exemplo 1.1.2.01.00577;analitica;1.1.2.01.00577
+502;1662;Conta de exemplo 1.1.2.01.00579;analitica;1.1.2.01.00579
+503;1913;Conta de exemplo 1.1.2.01.00580 Alfa Beta Gama;analitica;1.1.2.01.00580
+504;696;Conta de exemplo 1.1.2.01.00581 Al;analitica;1.1.2.01.00581
+505;697;Conta de exemplo 1.1.2.01.00582 Alf;analitica;1.1.2.01.00582
+506;1772;Conta de exemplo 1.1.2.01.00583;analitica;1.1.2.01.00583
+507;1793;Conta de exemplo 1.1.2.01.00584;analitica;1.1.2.01.00584
+508;1696;Conta de exemplo 1.1.2.01.00585 Alf;analitica;1.1.2.01.00585
+509;2076;Conta de exemplo 1.1.2.01.00586 Alf;analitica;1.1.2.01.00586
+510;560;Conta de exemplo 1.1.2.01.00587 Alfa Be;analitica;1.1.2.01.00587
+511;699;Conta de exemplo 1.1.2.01.00589 Alfa;analitica;1.1.2.01.00589
+512;524;Conta de exemplo 1.1.2.01.00590 Alfa Bet;analitica;1.1.2.01.00590
+513;577;Conta de exemplo 1.1.2.01.00591;analitica;1.1.2.01.00591
+514;2043;Conta de exemplo 1.1.2.01.00592;analitica;1.1.2.01.00592
+515;576;Conta de exemplo 1.1.2.01.00597 Alfa Beta Ga;analitica;1.1.2.01.00597
+516;1916;Conta de exemplo 1.1.2.01.00598 Alfa;analitica;1.1.2.01.00598
+517;701;Conta de exemplo 1.1.2.01.00600 Alfa Be;analitica;1.1.2.01.00600
+518;1766;Conta de exemplo 1.1.2.01.00601;analitica;1.1.2.01.00601
+519;1917;Conta de exemplo 1.1.2.01.00602;analitica;1.1.2.01.00602
+520;935;Conta de exemplo 1.1.2.01.00605 Alfa Beta;analitica;1.1.2.01.00605
+521;1750;Conta de exemplo 1.1.2.01.00606 Alfa Beta Gama Delta Épsilon Zeta Eta Teta Iota Capa La;analitica;1.1.2.01.00606
+522;553;Conta de exemplo 1.1.2.01.00608 Alfa Bet;analitica;1.1.2.01.00608
+523;1199;Conta de exemplo 1.1.2.01.00611 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00611
+524;939;Conta de exemplo 1.1.2.01.00613 Alfa Beta Gam;analitica;1.1.2.01.00613
+525;583;Conta de exemplo 1.1.2.01.00614 Alfa Bet;analitica;1.1.2.01.00614
+526;1760;Conta de exemplo 1.1.2.01.00615 Alfa Be;analitica;1.1.2.01.00615
+527;1768;Conta de exemplo 1.1.2.01.00616 Alfa;analitica;1.1.2.01.00616
+528;1749;Conta de exemplo 1.1.2.01.00617;analitica;1.1.2.01.00617
+529;525;Conta de exemplo 1.1.2.01.00618 Alfa Bet;analitica;1.1.2.01.00618
+530;1640;Conta de exemplo 1.1.2.01.00620 Alfa;analitica;1.1.2.01.00620
+531;797;Conta de exemplo 1.1.2.01.00623;analitica;1.1.2.01.00623
+532;554;Conta de exemplo 1.1.2.01.00625;analitica;1.1.2.01.00625
+533;1668;Conta de exemplo 1.1.2.01.00626;analitica;1.1.2.01.00626
+534;2015;Conta de exemplo 1.1.2.01.00627;analitica;1.1.2.01.00627
+535;1736;Conta de exemplo 1.1.2.01.00628;analitica;1.1.2.01.00628
+536;1969;Conta de exemplo 1.1.2.01.00629 A;analitica;1.1.2.01.00629
+537;1409;Conta de exemplo 1.1.2.01.00630 Alf;analitica;1.1.2.01.00630
+538;1064;Conta de exemplo 1.1.2.01.00631;analitica;1.1.2.01.00631
+539;947;Conta de exemplo 1.1.2.01.00634;analitica;1.1.2.01.00634
+540;1673;Conta de exemplo 1.1.2.01.00636;analitica;1.1.2.01.00636
+541;1641;Conta de exemplo 1.1.2.01.00637;analitica;1.1.2.01.00637
+542;1970;Conta de exemplo 1.1.2.01.00638;analitica;1.1.2.01.00638
+543;1781;Conta de exemplo 1.1.2.01.00639;analitica;1.1.2.01.00639
+544;1808;Conta de exemplo 1.1.2.01.00640;analitica;1.1.2.01.00640
+545;1311;Conta de exemplo 1.1.2.01.00641 Alfa Bet;analitica;1.1.2.01.00641
+546;1619;Conta de exemplo 1.1.2.01.00642;analitica;1.1.2.01.00642
+547;1755;Conta de exemplo 1.1.2.01.00643;analitica;1.1.2.01.00643
+548;1719;Conta de exemplo 1.1.2.01.00644 Alfa Beta G;analitica;1.1.2.01.00644
+549;1769;Conta de exemplo 1.1.2.01.00645 Al;analitica;1.1.2.01.00645
+550;705;Conta de exemplo 1.1.2.01.00646;analitica;1.1.2.01.00646
+551;706;Conta de exemplo 1.1.2.01.00647;analitica;1.1.2.01.00647
+552;707;Conta de exemplo 1.1.2.01.00648;analitica;1.1.2.01.00648
+553;1299;Conta de exemplo 1.1.2.01.00649 Alfa Be;analitica;1.1.2.01.00649
+554;907;Conta de exemplo 1.1.2.01.00650 Alfa Beta;analitica;1.1.2.01.00650
+555;1444;Conta de exemplo 1.1.2.01.00653;analitica;1.1.2.01.00653
+556;933;Conta de exemplo 1.1.2.01.00657;analitica;1.1.2.01.00657
+557;710;Conta de exemplo 1.1.2.01.00658;analitica;1.1.2.01.00658
+558;711;Conta de exemplo 1.1.2.01.00659 Alf;analitica;1.1.2.01.00659
+559;919;Conta de exemplo 1.1.2.01.00661 Alfa;analitica;1.1.2.01.00661
+560;555;Conta de exemplo 1.1.2.01.00663;analitica;1.1.2.01.00663
+561;1555;Conta de exemplo 1.1.2.01.00665 Alfa Beta Ga;analitica;1.1.2.01.00665
+562;2158;Conta de exemplo 1.1.2.01.00666;analitica;1.1.2.01.00666
+563;1739;Conta de exemplo 1.1.2.01.00667;analitica;1.1.2.01.00667
+564;1722;Conta de exemplo 1.1.2.01.00668;analitica;1.1.2.01.00668
+565;826;Conta de exemplo 1.1.2.01.00669;analitica;1.1.2.01.00669
+566;556;Conta de exemplo 1.1.2.01.00670 Alf;analitica;1.1.2.01.00670
+567;1918;Conta de exemplo 1.1.2.01.00671 Alfa B;analitica;1.1.2.01.00671
+568;1606;Conta de exemplo 1.1.2.01.00672 Alfa B;analitica;1.1.2.01.00672
+569;712;Conta de exemplo 1.1.2.01.00673;analitica;1.1.2.01.00673
+570;810;Conta de exemplo 1.1.2.01.00674;analitica;1.1.2.01.00674
+571;1649;Conta de exemplo 1.1.2.01.00675 Alfa Beta Gama Del;analitica;1.1.2.01.00675
+572;1997;Conta de exemplo 1.1.2.01.00676 Alfa Beta Gama Del;analitica;1.1.2.01.00676
+573;1461;Conta de exemplo 1.1.2.01.00677;analitica;1.1.2.01.00677
+574;1460;Conta de exemplo 1.1.2.01.00678;analitica;1.1.2.01.00678
+575;1560;Conta de exemplo 1.1.2.01.00679 A;analitica;1.1.2.01.00679
+576;917;Conta de exemplo 1.1.2.01.00680 Alfa Beta;analitica;1.1.2.01.00680
+577;1683;Conta de exemplo 1.1.2.01.00681 Alfa Be;analitica;1.1.2.01.00681
+578;940;Conta de exemplo 1.1.2.01.00683 A;analitica;1.1.2.01.00683
+579;816;Conta de exemplo 1.1.2.01.00684 Alfa Beta Gama Delta Ép;analitica;1.1.2.01.00684
+580;2027;Conta de exemplo 1.1.2.01.00685;analitica;1.1.2.01.00685
+581;834;Conta de exemplo 1.1.2.01.00686;analitica;1.1.2.01.00686
+582;2174;Conta de exemplo 1.1.2.01.00687 Alfa;analitica;1.1.2.01.00687
+583;1149;Conta de exemplo 1.1.2.01.00689;analitica;1.1.2.01.00689
+584;1032;Conta de exemplo 1.1.2.01.00692 Alf;analitica;1.1.2.01.00692
+585;1368;Conta de exemplo 1.1.2.01.00693 Alfa Beta Gama De;analitica;1.1.2.01.00693
+586;2139;Conta de exemplo 1.1.2.01.00694 Alfa B;analitica;1.1.2.01.00694
+587;1304;Conta de exemplo 1.1.2.01.00695;analitica;1.1.2.01.00695
+588;1971;Conta de exemplo 1.1.2.01.00696;analitica;1.1.2.01.00696
+589;519;Conta de exemplo 1.1.2.01.00699 Alfa B;analitica;1.1.2.01.00699
+590;842;Conta de exemplo 1.1.2.01.00700 Alfa Beta G;analitica;1.1.2.01.00700
+591;1489;Conta de exemplo 1.1.2.01.00702;analitica;1.1.2.01.00702
+592;2109;Conta de exemplo 1.1.2.01.00703 Alfa Beta Ga;analitica;1.1.2.01.00703
+593;1799;Conta de exemplo 1.1.2.01.00704 Al;analitica;1.1.2.01.00704
+594;558;Conta de exemplo 1.1.2.01.00705 Alfa Bet;analitica;1.1.2.01.00705
+595;1919;Conta de exemplo 1.1.2.01.00706 Alfa Beta Gama Delt;analitica;1.1.2.01.00706
+596;1526;Conta de exemplo 1.1.2.01.00709;analitica;1.1.2.01.00709
+597;1774;Conta de exemplo 1.1.2.01.00710 Alfa Bet;analitica;1.1.2.01.00710
+598;2155;Conta de exemplo 1.1.2.01.00711;analitica;1.1.2.01.00711
+599;2170;Conta de exemplo 1.1.2.01.00712;analitica;1.1.2.01.00712
+600;1286;Conta de exemplo 1.1.2.01.00713;analitica;1.1.2.01.00713
+601;1920;Conta de exemplo 1.1.2.01.00714;analitica;1.1.2.01.00714
+602;1622;Conta de exemplo 1.1.2.01.00715;analitica;1.1.2.01.00715
+603;1682;Conta de exemplo 1.1.2.01.00716 Alfa Beta Gama Delta;analitica;1.1.2.01.00716
+604;2031;Conta de exemplo 1.1.2.01.00717 Alfa Beta Gama Delta;analitica;1.1.2.01.00717
+605;809;Conta de exemplo 1.1.2.01.00718;analitica;1.1.2.01.00718
+606;1921;Conta de exemplo 1.1.2.01.00720 Alfa B;analitica;1.1.2.01.00720
+607;1408;Conta de exemplo 1.1.2.01.00721 Alfa Be;analitica;1.1.2.01.00721
+608;557;Conta de exemplo 1.1.2.01.00722;analitica;1.1.2.01.00722
+609;1585;Conta de exemplo 1.1.2.01.00723;analitica;1.1.2.01.00723
+610;1584;Conta de exemplo 1.1.2.01.00724 Alfa;analitica;1.1.2.01.00724
+611;2005;Conta de exemplo 1.1.2.01.00725 Alfa;analitica;1.1.2.01.00725
+612;1592;Conta de exemplo 1.1.2.01.00726;analitica;1.1.2.01.00726
+613;2088;Conta de exemplo 1.1.2.01.00727 Alfa Beta;analitica;1.1.2.01.00727
+614;1380;Conta de exemplo 1.1.2.01.00728 Alfa;analitica;1.1.2.01.00728
+615;2138;Conta de exemplo 1.1.2.01.00729;analitica;1.1.2.01.00729
+616;1524;Conta de exemplo 1.1.2.01.00730 Alfa Beta Gama D;analitica;1.1.2.01.00730
+617;543;Conta de exemplo 1.1.2.01.00732;analitica;1.1.2.01.00732
+618;827;Conta de exemplo 1.1.2.01.00735;analitica;1.1.2.01.00735
+619;1204;Conta de exemplo 1.1.2.01.00736;analitica;1.1.2.01.00736
+620;1177;Conta de exemplo 1.1.2.01.00737 Alfa Beta Gama Delta Épsilo;analitica;1.1.2.01.00737
+621;1036;Conta de exemplo 1.1.2.01.00739 Al;analitica;1.1.2.01.00739
+622;716;Conta de exemplo 1.1.2.01.00741;analitica;1.1.2.01.00741
+623;1200;Conta de exemplo 1.1.2.01.00742 Al;analitica;1.1.2.01.00742
+624;648;Conta de exemplo 1.1.2.01.00744 Al;analitica;1.1.2.01.00744
+625;820;Conta de exemplo 1.1.2.01.00746 Alfa;analitica;1.1.2.01.00746
+626;1203;Conta de exemplo 1.1.2.01.00748;analitica;1.1.2.01.00748
+627;718;Conta de exemplo 1.1.2.01.00749 Alfa Be;analitica;1.1.2.01.00749
+628;512;Conta de exemplo 1.1.2.01.00750 Alfa Bet;analitica;1.1.2.01.00750
+629;914;Conta de exemplo 1.1.2.01.00752 Alfa Beta Gama Delta;analitica;1.1.2.01.00752
+630;531;Conta de exemplo 1.1.2.01.00753 Alfa Beta G;analitica;1.1.2.01.00753
+631;913;Conta de exemplo 1.1.2.01.00754 Alfa Bet;analitica;1.1.2.01.00754
+632;1780;Conta de exemplo 1.1.2.01.00756 Alfa B;analitica;1.1.2.01.00756
+633;1737;Conta de exemplo 1.1.2.01.00758;analitica;1.1.2.01.00758
+634;586;Conta de exemplo 1.1.2.01.00759 Alfa Bet;analitica;1.1.2.01.00759
+635;1206;Conta de exemplo 1.1.2.01.00761;analitica;1.1.2.01.00761
+636;2122;Conta de exemplo 1.1.2.01.00762 Alfa Beta Ga;analitica;1.1.2.01.00762
+637;1541;Conta de exemplo 1.1.2.01.00763 Alfa;analitica;1.1.2.01.00763
+638;2160;Conta de exemplo 1.1.2.01.00764 Alfa Beta Gama Delta;analitica;1.1.2.01.00764
+639;2161;Conta de exemplo 1.1.2.01.00765 Alfa Beta Gama Delta;analitica;1.1.2.01.00765
+640;721;Conta de exemplo 1.1.2.01.00766 Al;analitica;1.1.2.01.00766
+641;722;Conta de exemplo 1.1.2.01.00767 Al;analitica;1.1.2.01.00767
+642;2147;Conta de exemplo 1.1.2.01.00768;analitica;1.1.2.01.00768
+643;559;Conta de exemplo 1.1.2.01.00769 Alfa Bet;analitica;1.1.2.01.00769
+644;1442;Conta de exemplo 1.1.2.01.00771;analitica;1.1.2.01.00771
+645;1923;Conta de exemplo 1.1.2.01.00773 Alfa Beta Gama;analitica;1.1.2.01.00773
+646;943;Conta de exemplo 1.1.2.01.00775 Alfa Beta Gama Delta Épsi;analitica;1.1.2.01.00775
+647;2111;Conta de exemplo 1.1.2.01.00776 Alfa Beta Gama Delta É;analitica;1.1.2.01.00776
+648;627;Conta de exemplo 1.1.2.01.00778 Alfa;analitica;1.1.2.01.00778
+649;1375;Conta de exemplo 1.1.2.01.00780 Alfa Beta Gama Delta Épsilo;analitica;1.1.2.01.00780
+650;1446;Conta de exemplo 1.1.2.01.00781;analitica;1.1.2.01.00781
+651;1181;Conta de exemplo 1.1.2.01.00784;analitica;1.1.2.01.00784
+652;1457;Conta de exemplo 1.1.2.01.00785;analitica;1.1.2.01.00785
+653;1458;Conta de exemplo 1.1.2.01.00786;analitica;1.1.2.01.00786
+654;1455;Conta de exemplo 1.1.2.01.00787;analitica;1.1.2.01.00787
+655;1456;Conta de exemplo 1.1.2.01.00788;analitica;1.1.2.01.00788
+656;1627;Conta de exemplo 1.1.2.01.00789;analitica;1.1.2.01.00789
+657;1325;Conta de exemplo 1.1.2.01.00791 Alf;analitica;1.1.2.01.00791
+658;727;Conta de exemplo 1.1.2.01.00792 A;analitica;1.1.2.01.00792
+659;1334;Conta de exemplo 1.1.2.01.00793;analitica;1.1.2.01.00793
+660;728;Conta de exemplo 1.1.2.01.00794;analitica;1.1.2.01.00794
+661;1454;Conta de exemplo 1.1.2.01.00795;analitica;1.1.2.01.00795
+662;1453;Conta de exemplo 1.1.2.01.00796;analitica;1.1.2.01.00796
+663;1228;Conta de exemplo 1.1.2.01.00797;analitica;1.1.2.01.00797
+664;2116;Conta de exemplo 1.1.2.01.00798 Alfa Beta Gama;analitica;1.1.2.01.00798
+665;511;Conta de exemplo 1.1.2.01.00800;analitica;1.1.2.01.00800
+666;1452;Conta de exemplo 1.1.2.01.00801;analitica;1.1.2.01.00801
+667;1401;Conta de exemplo 1.1.2.01.00802 Alfa Beta;analitica;1.1.2.01.00802
+668;729;Conta de exemplo 1.1.2.01.00803 Alfa Bet;analitica;1.1.2.01.00803
+669;730;Conta de exemplo 1.1.2.01.00807 Alfa;analitica;1.1.2.01.00807
+670;1398;Conta de exemplo 1.1.2.01.00808 Alfa Bet;analitica;1.1.2.01.00808
+671;731;Conta de exemplo 1.1.2.01.00809 Alfa Bet;analitica;1.1.2.01.00809
+672;1743;Conta de exemplo 1.1.2.01.00810 Alfa Beta;analitica;1.1.2.01.00810
+673;837;Conta de exemplo 1.1.2.01.00811;analitica;1.1.2.01.00811
+674;625;Conta de exemplo 1.1.2.01.00812 Alf;analitica;1.1.2.01.00812
+675;1924;Conta de exemplo 1.1.2.01.00813 Alfa Beta Gam;analitica;1.1.2.01.00813
+676;1295;Conta de exemplo 1.1.2.01.00814 Alfa Beta Gama Del;analitica;1.1.2.01.00814
+677;1035;Conta de exemplo 1.1.2.01.00818 Alfa;analitica;1.1.2.01.00818
+678;2137;Conta de exemplo 1.1.2.01.00820;analitica;1.1.2.01.00820
+679;799;Conta de exemplo 1.1.2.01.00821;analitica;1.1.2.01.00821
+680;516;Conta de exemplo 1.1.2.01.00822 Alfa Be;analitica;1.1.2.01.00822
+681;1402;Conta de exemplo 1.1.2.01.00824 Alfa Beta Gama Delt;analitica;1.1.2.01.00824
+682;1397;Conta de exemplo 1.1.2.01.00825 Alfa Beta Gam;analitica;1.1.2.01.00825
+683;1748;Conta de exemplo 1.1.2.01.00826;analitica;1.1.2.01.00826
+684;1773;Conta de exemplo 1.1.2.01.00827;analitica;1.1.2.01.00827
+685;815;Conta de exemplo 1.1.2.01.00830 Alfa Beta G;analitica;1.1.2.01.00830
+686;1699;Conta de exemplo 1.1.2.01.00831;analitica;1.1.2.01.00831
+687;800;Conta de exemplo 1.1.2.01.00832 Alfa Beta Gam;analitica;1.1.2.01.00832
+688;2136;Conta de exemplo 1.1.2.01.00834 Alfa Beta Gama Delta Épsilon Zeta Eta;analitica;1.1.2.01.00834
+689;1201;Conta de exemplo 1.1.2.01.00835;analitica;1.1.2.01.00835
+690;1925;Conta de exemplo 1.1.2.01.00836 Alfa Bet;analitica;1.1.2.01.00836
+691;1926;Conta de exemplo 1.1.2.01.00837;analitica;1.1.2.01.00837
+692;1392;Conta de exemplo 1.1.2.01.00838 Al;analitica;1.1.2.01.00838
+693;1390;Conta de exemplo 1.1.2.01.00839;analitica;1.1.2.01.00839
+694;1580;Conta de exemplo 1.1.2.01.00840;analitica;1.1.2.01.00840
+695;1937;Conta de exemplo 1.1.2.01.00841;analitica;1.1.2.01.00841
+696;1927;Conta de exemplo 1.1.2.01.00842 Alfa;analitica;1.1.2.01.00842
+697;517;Conta de exemplo 1.1.2.01.00843 Al;analitica;1.1.2.01.00843
+698;2150;Conta de exemplo 1.1.2.01.00844;analitica;1.1.2.01.00844
+699;734;Conta de exemplo 1.1.2.01.00845 Alfa Bet;analitica;1.1.2.01.00845
+700;522;Conta de exemplo 1.1.2.01.00848;analitica;1.1.2.01.00848
+701;2149;Conta de exemplo 1.1.2.01.00849;analitica;1.1.2.01.00849
+702;1448;Conta de exemplo 1.1.2.01.00850;analitica;1.1.2.01.00850
+703;735;Conta de exemplo 1.1.2.01.00851;analitica;1.1.2.01.00851
+704;736;Conta de exemplo 1.1.2.01.00852 Alfa Bet;analitica;1.1.2.01.00852
+705;1552;Conta de exemplo 1.1.2.01.00853;analitica;1.1.2.01.00853
+706;1321;Conta de exemplo 1.1.2.01.00854;analitica;1.1.2.01.00854
+707;2000;Conta de exemplo 1.1.2.01.00856;analitica;1.1.2.01.00856
+708;1928;Conta de exemplo 1.1.2.01.00857 Alfa;analitica;1.1.2.01.00857
+709;738;Conta de exemplo 1.1.2.01.00858;analitica;1.1.2.01.00858
+710;739;Conta de exemplo 1.1.2.01.00859;analitica;1.1.2.01.00859
+711;1929;Conta de exemplo 1.1.2.01.00860;analitica;1.1.2.01.00860
+712;740;Conta de exemplo 1.1.2.01.00861 Alfa B;analitica;1.1.2.01.00861
+713;918;Conta de exemplo 1.1.2.01.00863 Alfa;analitica;1.1.2.01.00863
+714;1293;Conta de exemplo 1.1.2.01.00864;analitica;1.1.2.01.00864
+715;551;Conta de exemplo 1.1.2.01.00867 Alfa;analitica;1.1.2.01.00867
+716;1205;Conta de exemplo 1.1.2.01.00868 Al;analitica;1.1.2.01.00868
+717;1578;Conta de exemplo 1.1.2.01.00869;analitica;1.1.2.01.00869
+718;908;Conta de exemplo 1.1.2.01.00870;analitica;1.1.2.01.00870
+719;1701;Conta de exemplo 1.1.2.01.00873 Al;analitica;1.1.2.01.00873
+720;1553;Conta de exemplo 1.1.2.01.00874 Alfa Be;analitica;1.1.2.01.00874
+721;1447;Conta de exemplo 1.1.2.01.00875;analitica;1.1.2.01.00875
+722;830;Conta de exemplo 1.1.2.01.00877;analitica;1.1.2.01.00877
+723;2100;Conta de exemplo 1.1.2.01.00879;analitica;1.1.2.01.00879
+724;2163;Conta de exemplo 1.1.2.01.00880;analitica;1.1.2.01.00880
+725;794;Conta de exemplo 1.1.2.01.00883 Alfa Beta Gama Del;analitica;1.1.2.01.00883
+726;1231;Conta de exemplo 1.1.2.01.00884 Alfa Bet;analitica;1.1.2.01.00884
+727;1930;Conta de exemplo 1.1.2.01.00885;analitica;1.1.2.01.00885
+728;1617;Conta de exemplo 1.1.2.01.00886;analitica;1.1.2.01.00886
+729;852;Conta de exemplo 1.1.2.01.00888;analitica;1.1.2.01.00888
+730;1740;Conta de exemplo 1.1.2.01.00889;analitica;1.1.2.01.00889
+731;744;Conta de exemplo 1.1.2.01.00890 Alfa B;analitica;1.1.2.01.00890
+732;2176;Conta de exemplo 1.1.2.01.00891;analitica;1.1.2.01.00891
+733;520;Conta de exemplo 1.1.2.01.00892 Alfa Bet;analitica;1.1.2.01.00892
+734;2143;Conta de exemplo 1.1.2.01.00893 Al;analitica;1.1.2.01.00893
+735;1192;Conta de exemplo 1.1.2.01.00895 Alfa B;analitica;1.1.2.01.00895
+736;746;Conta de exemplo 1.1.2.01.00896 Alfa;analitica;1.1.2.01.00896
+737;1806;Conta de exemplo 1.1.2.01.00897 Alf;analitica;1.1.2.01.00897
+738;2142;Conta de exemplo 1.1.2.01.00898;analitica;1.1.2.01.00898
+739;1230;Conta de exemplo 1.1.2.01.00899;analitica;1.1.2.01.00899
+740;747;Conta de exemplo 1.1.2.01.00900 Alfa Be;analitica;1.1.2.01.00900
+741;833;Conta de exemplo 1.1.2.01.00901;analitica;1.1.2.01.00901
+742;2085;Conta de exemplo 1.1.2.01.00902 Alfa Beta Gama Delta É;analitica;1.1.2.01.00902
+743;1931;Conta de exemplo 1.1.2.01.00903 Alfa Beta Gama Delta;analitica;1.1.2.01.00903
+744;590;Conta de exemplo 1.1.2.01.00907 Alfa Bet;analitica;1.1.2.01.00907
+745;2099;Conta de exemplo 1.1.2.01.00908 Alfa Beta Gama Delt;analitica;1.1.2.01.00908
+746;946;Conta de exemplo 1.1.2.01.00910 A;analitica;1.1.2.01.00910
+747;1727;Conta de exemplo 1.1.2.01.00911 Alfa Beta Gama Delta Épsilon Zeta Eta T;analitica;1.1.2.01.00911
+748;631;Conta de exemplo 1.1.2.01.00912 Alfa Be;analitica;1.1.2.01.00912
+749;2135;Conta de exemplo 1.1.2.01.00913;analitica;1.1.2.01.00913
+750;2089;Conta de exemplo 1.1.2.01.00914;analitica;1.1.2.01.00914
+751;562;Conta de exemplo 1.1.2.01.00916 Alfa Be;analitica;1.1.2.01.00916
+752;623;Conta de exemplo 1.1.2.01.00918 Alfa Bet;analitica;1.1.2.01.00918
+753;2152;Conta de exemplo 1.1.2.01.00919 Alfa Beta;analitica;1.1.2.01.00919
+754;650;Conta de exemplo 1.1.2.01.00921 Alfa;analitica;1.1.2.01.00921
+755;748;Conta de exemplo 1.1.2.01.00922;analitica;1.1.2.01.00922
+756;1758;Conta de exemplo 1.1.2.01.00923;analitica;1.1.2.01.00923
+757;624;Conta de exemplo 1.1.2.01.00924;analitica;1.1.2.01.00924
+758;630;Conta de exemplo 1.1.2.01.00926 Alfa;analitica;1.1.2.01.00926
+759;1388;Conta de exemplo 1.1.2.01.00927 Alfa Beta Ga;analitica;1.1.2.01.00927
+760;1387;Conta de exemplo 1.1.2.01.00928;analitica;1.1.2.01.00928
+761;564;Conta de exemplo 1.1.2.01.00929 Alfa Bet;analitica;1.1.2.01.00929
+762;601;Conta de exemplo 1.1.2.01.00931 A;analitica;1.1.2.01.00931
+763;1483;Conta de exemplo 1.1.2.01.00933 Alfa Beta Gama Delta É;analitica;1.1.2.01.00933
+764;928;Conta de exemplo 1.1.2.01.00936;analitica;1.1.2.01.00936
+765;1932;Conta de exemplo 1.1.2.01.00937 Alfa Beta Gama D;analitica;1.1.2.01.00937
+766;1507;Conta de exemplo 1.1.2.01.00938 Alfa Beta Gama Delta Épsil;analitica;1.1.2.01.00938
+767;1610;Conta de exemplo 1.1.2.01.00939;analitica;1.1.2.01.00939
+768;1718;Conta de exemplo 1.1.2.01.00940 Alfa Beta Gama Delta Épsilo;analitica;1.1.2.01.00940
+769;1776;Conta de exemplo 1.1.2.01.00941;analitica;1.1.2.01.00941
+770;804;Conta de exemplo 1.1.2.01.00942 Alfa Bet;analitica;1.1.2.01.00942
+771;566;Conta de exemplo 1.1.2.01.00943;analitica;1.1.2.01.00943
+772;1287;Conta de exemplo 1.1.2.01.00944 Alf;analitica;1.1.2.01.00944
+773;2127;Conta de exemplo 1.1.2.01.00945;analitica;1.1.2.01.00945
+774;581;Conta de exemplo 1.1.2.01.00947;analitica;1.1.2.01.00947
+775;749;Conta de exemplo 1.1.2.01.00950;analitica;1.1.2.01.00950
+776;2087;Conta de exemplo 1.1.2.01.00951;analitica;1.1.2.01.00951
+777;1801;Conta de exemplo 1.1.2.01.00952;analitica;1.1.2.01.00952
+778;1272;Conta de exemplo 1.1.2.01.00953 Alfa Beta Gama Delta;analitica;1.1.2.01.00953
+779;1935;Conta de exemplo 1.1.2.01.00954 Alfa Beta Gama Delta;analitica;1.1.2.01.00954
+780;1639;Conta de exemplo 1.1.2.01.00955;analitica;1.1.2.01.00955
+781;1987;Conta de exemplo 1.1.2.01.00956;analitica;1.1.2.01.00956
+782;938;Conta de exemplo 1.1.2.01.00958 Alfa Beta G;analitica;1.1.2.01.00958
+783;542;Conta de exemplo 1.1.2.01.00959;analitica;1.1.2.01.00959
+784;750;Conta de exemplo 1.1.2.01.00960 Alfa Bet;analitica;1.1.2.01.00960
+785;575;Conta de exemplo 1.1.2.01.00964 Alfa Bet;analitica;1.1.2.01.00964
+786;1742;Conta de exemplo 1.1.2.01.00967 Alfa Beta Gama Delta É;analitica;1.1.2.01.00967
+787;1936;Conta de exemplo 1.1.2.01.00968;analitica;1.1.2.01.00968
+788;1614;Conta de exemplo 1.1.2.01.00969;analitica;1.1.2.01.00969
+789;567;Conta de exemplo 1.1.2.01.00970 Alfa Bet;analitica;1.1.2.01.00970
+790;1058;Conta de exemplo 1.1.2.01.00971 Alfa Beta Gama Delt;analitica;1.1.2.01.00971
+791;920;Conta de exemplo 1.1.2.01.00974;analitica;1.1.2.01.00974
+792;1616;Conta de exemplo 1.1.2.01.00976 Alfa Beta Gama;analitica;1.1.2.01.00976
+793;1938;Conta de exemplo 1.1.2.01.00977 Alfa Be;analitica;1.1.2.01.00977
+794;753;Conta de exemplo 1.1.2.01.00978 Alfa;analitica;1.1.2.01.00978
+795;754;Conta de exemplo 1.1.2.01.00979;analitica;1.1.2.01.00979
+796;1559;Conta de exemplo 1.1.2.01.00980;analitica;1.1.2.01.00980
+797;1890;Conta de exemplo 1.1.2.01.00981 Alfa Beta Gama Delta Épsilo;analitica;1.1.2.01.00981
+798;1550;Conta de exemplo 1.1.2.01.00982 Alfa Beta Gama Delta Épsilo;analitica;1.1.2.01.00982
+799;1182;Conta de exemplo 1.1.2.01.00985 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.00985
+800;1406;Conta de exemplo 1.1.2.01.00986 Alfa Beta Gam;analitica;1.1.2.01.00986
+801;1214;Conta de exemplo 1.1.2.01.00987 Alfa Beta Gama Delt;analitica;1.1.2.01.00987
+802;1536;Conta de exemplo 1.1.2.01.00989 Alf;analitica;1.1.2.01.00989
+803;1658;Conta de exemplo 1.1.2.01.00990 A;analitica;1.1.2.01.00990
+804;1648;Conta de exemplo 1.1.2.01.00991 Alfa;analitica;1.1.2.01.00991
+805;2001;Conta de exemplo 1.1.2.01.00992 Alfa;analitica;1.1.2.01.00992
+806;1934;Conta de exemplo 1.1.2.01.00993 Alfa;analitica;1.1.2.01.00993
+807;1634;Conta de exemplo 1.1.2.01.00994 Alfa;analitica;1.1.2.01.00994
+808;1034;Conta de exemplo 1.1.2.01.00997 Alfa B;analitica;1.1.2.01.00997
+809;813;Conta de exemplo 1.1.2.01.00998;analitica;1.1.2.01.00998
+810;1548;Conta de exemplo 1.1.2.01.01000 Alfa Beta G;analitica;1.1.2.01.01000
+811;1546;Conta de exemplo 1.1.2.01.01001 Al;analitica;1.1.2.01.01001
+812;1416;Conta de exemplo 1.1.2.01.01002 Alfa Be;analitica;1.1.2.01.01002
+813;1539;Conta de exemplo 1.1.2.01.01003 Alfa B;analitica;1.1.2.01.01003
+814;756;Conta de exemplo 1.1.2.01.01004;analitica;1.1.2.01.01004
+815;1307;Conta de exemplo 1.1.2.01.01005 Alfa Beta;analitica;1.1.2.01.01005
+816;1389;Conta de exemplo 1.1.2.01.01006;analitica;1.1.2.01.01006
+817;2117;Conta de exemplo 1.1.2.01.01007 Al;analitica;1.1.2.01.01007
+818;1577;Conta de exemplo 1.1.2.01.01008 Alfa Beta Gama;analitica;1.1.2.01.01008
+819;814;Conta de exemplo 1.1.2.01.01010;analitica;1.1.2.01.01010
+820;2167;Conta de exemplo 1.1.2.01.01011;analitica;1.1.2.01.01011
+821;541;Conta de exemplo 1.1.2.01.01012;analitica;1.1.2.01.01012
+822;757;Conta de exemplo 1.1.2.01.01013;analitica;1.1.2.01.01013
+823;626;Conta de exemplo 1.1.2.01.01015 Alfa Be;analitica;1.1.2.01.01015
+824;759;Conta de exemplo 1.1.2.01.01017 Alfa B;analitica;1.1.2.01.01017
+825;1635;Conta de exemplo 1.1.2.01.01018 Al;analitica;1.1.2.01.01018
+826;1732;Conta de exemplo 1.1.2.01.01019;analitica;1.1.2.01.01019
+827;1807;Conta de exemplo 1.1.2.01.01020;analitica;1.1.2.01.01020
+828;1791;Conta de exemplo 1.1.2.01.01021;analitica;1.1.2.01.01021
+829;1790;Conta de exemplo 1.1.2.01.01022;analitica;1.1.2.01.01022
+830;1172;Conta de exemplo 1.1.2.01.01023 Alfa Bet;analitica;1.1.2.01.01023
+831;1709;Conta de exemplo 1.1.2.01.01024;analitica;1.1.2.01.01024
+832;1707;Conta de exemplo 1.1.2.01.01025;analitica;1.1.2.01.01025
+833;760;Conta de exemplo 1.1.2.01.01026 Al;analitica;1.1.2.01.01026
+834;1328;Conta de exemplo 1.1.2.01.01027 Alfa Bet;analitica;1.1.2.01.01027
+835;1594;Conta de exemplo 1.1.2.01.01028 Alfa;analitica;1.1.2.01.01028
+836;1374;Conta de exemplo 1.1.2.01.01029 Alfa Beta Gama Delta Éps;analitica;1.1.2.01.01029
+837;761;Conta de exemplo 1.1.2.01.01030 Alfa Bet;analitica;1.1.2.01.01030
+838;1666;Conta de exemplo 1.1.2.01.01031 Alfa Beta Gama;analitica;1.1.2.01.01031
+839;603;Conta de exemplo 1.1.2.01.01032;analitica;1.1.2.01.01032
+840;632;Conta de exemplo 1.1.2.01.01035 Al;analitica;1.1.2.01.01035
+841;762;Conta de exemplo 1.1.2.01.01037 Alfa Be;analitica;1.1.2.01.01037
+842;2107;Conta de exemplo 1.1.2.01.01038 Alfa Beta Gama Delta Épsil;analitica;1.1.2.01.01038
+843;1914;Conta de exemplo 1.1.2.01.01039 Alfa;analitica;1.1.2.01.01039
+844;1628;Conta de exemplo 1.1.2.01.01040 Alfa;analitica;1.1.2.01.01040
+845;1672;Conta de exemplo 1.1.2.01.01041 Alfa Bet;analitica;1.1.2.01.01041
+846;2028;Conta de exemplo 1.1.2.01.01042 Alfa Bet;analitica;1.1.2.01.01042
+847;1915;Conta de exemplo 1.1.2.01.01043 Al;analitica;1.1.2.01.01043
+848;1629;Conta de exemplo 1.1.2.01.01044 Al;analitica;1.1.2.01.01044
+849;1671;Conta de exemplo 1.1.2.01.01045 Alfa Bet;analitica;1.1.2.01.01045
+850;2026;Conta de exemplo 1.1.2.01.01046 Alfa Bet;analitica;1.1.2.01.01046
+851;1482;Conta de exemplo 1.1.2.01.01047 Alfa B;analitica;1.1.2.01.01047
+852;2104;Conta de exemplo 1.1.2.01.01048;analitica;1.1.2.01.01048
+853;2106;Conta de exemplo 1.1.2.01.01049;analitica;1.1.2.01.01049
+854;2103;Conta de exemplo 1.1.2.01.01050;analitica;1.1.2.01.01050
+855;2105;Conta de exemplo 1.1.2.01.01051;analitica;1.1.2.01.01051
+856;1543;Conta de exemplo 1.1.2.01.01052;analitica;1.1.2.01.01052
+857;1194;Conta de exemplo 1.1.2.01.01054 Alfa Be;analitica;1.1.2.01.01054
+858;906;Conta de exemplo 1.1.2.01.01057 Alfa Beta;analitica;1.1.2.01.01057
+859;1731;Conta de exemplo 1.1.2.01.01058;analitica;1.1.2.01.01058
+860;568;Conta de exemplo 1.1.2.01.01060 Alfa Bet;analitica;1.1.2.01.01060
+861;1689;Conta de exemplo 1.1.2.01.01062;analitica;1.1.2.01.01062
+862;2051;Conta de exemplo 1.1.2.01.01063;analitica;1.1.2.01.01063
+863;1972;Conta de exemplo 1.1.2.01.01064;analitica;1.1.2.01.01064
+864;765;Conta de exemplo 1.1.2.01.01065;analitica;1.1.2.01.01065
+865;2129;Conta de exemplo 1.1.2.01.01066;analitica;1.1.2.01.01066
+866;1609;Conta de exemplo 1.1.2.01.01067;analitica;1.1.2.01.01067
+867;1301;Conta de exemplo 1.1.2.01.01068;analitica;1.1.2.01.01068
+868;1630;Conta de exemplo 1.1.2.01.01069;analitica;1.1.2.01.01069
+869;766;Conta de exemplo 1.1.2.01.01070 Alfa Be;analitica;1.1.2.01.01070
+870;1554;Conta de exemplo 1.1.2.01.01071;analitica;1.1.2.01.01071
+871;1589;Conta de exemplo 1.1.2.01.01072;analitica;1.1.2.01.01072
+872;2017;Conta de exemplo 1.1.2.01.01073 Alfa Beta;analitica;1.1.2.01.01073
+873;1419;Conta de exemplo 1.1.2.01.01074 Alfa Beta G;analitica;1.1.2.01.01074
+874;931;Conta de exemplo 1.1.2.01.01076;analitica;1.1.2.01.01076
+875;801;Conta de exemplo 1.1.2.01.01077 Alf;analitica;1.1.2.01.01077
+876;802;Conta de exemplo 1.1.2.01.01078;analitica;1.1.2.01.01078
+877;578;Conta de exemplo 1.1.2.01.01079 Al;analitica;1.1.2.01.01079
+878;1579;Conta de exemplo 1.1.2.01.01081 Alfa Bet;analitica;1.1.2.01.01081
+879;605;Conta de exemplo 1.1.2.01.01083 Alfa Bet;analitica;1.1.2.01.01083
+880;574;Conta de exemplo 1.1.2.01.01086;analitica;1.1.2.01.01086
+881;1939;Conta de exemplo 1.1.2.01.01088;analitica;1.1.2.01.01088
+882;1276;Conta de exemplo 1.1.2.01.01089;analitica;1.1.2.01.01089
+883;795;Conta de exemplo 1.1.2.01.01091 Alf;analitica;1.1.2.01.01091
+884;635;Conta de exemplo 1.1.2.01.01093;analitica;1.1.2.01.01093
+885;2128;Conta de exemplo 1.1.2.01.01094 Alfa Beta Gama De;analitica;1.1.2.01.01094
+886;1783;Conta de exemplo 1.1.2.01.01095;analitica;1.1.2.01.01095
+887;1797;Conta de exemplo 1.1.2.01.01096 Alfa;analitica;1.1.2.01.01096
+888;1941;Conta de exemplo 1.1.2.01.01097 Alfa;analitica;1.1.2.01.01097
+889;1575;Conta de exemplo 1.1.2.01.01098 Alfa Beta Gama De;analitica;1.1.2.01.01098
+890;769;Conta de exemplo 1.1.2.01.01099;analitica;1.1.2.01.01099
+891;1485;Conta de exemplo 1.1.2.01.01100;analitica;1.1.2.01.01100
+892;1341;Conta de exemplo 1.1.2.01.01101 Al;analitica;1.1.2.01.01101
+893;1759;Conta de exemplo 1.1.2.01.01102 Alf;analitica;1.1.2.01.01102
+894;607;Conta de exemplo 1.1.2.01.01103 Alfa Be;analitica;1.1.2.01.01103
+895;1771;Conta de exemplo 1.1.2.01.01106 Alfa Beta Gama;analitica;1.1.2.01.01106
+896;770;Conta de exemplo 1.1.2.01.01107;analitica;1.1.2.01.01107
+897;1705;Conta de exemplo 1.1.2.01.01108 Alfa Bet;analitica;1.1.2.01.01108
+898;1576;Conta de exemplo 1.1.2.01.01109 Alfa Be;analitica;1.1.2.01.01109
+899;1942;Conta de exemplo 1.1.2.01.01110 Alfa Be;analitica;1.1.2.01.01110
+900;829;Conta de exemplo 1.1.2.01.01112 Alfa;analitica;1.1.2.01.01112
+901;2108;Conta de exemplo 1.1.2.01.01114;analitica;1.1.2.01.01114
+902;545;Conta de exemplo 1.1.2.01.01115 Alfa Bet;analitica;1.1.2.01.01115
+903;2120;Conta de exemplo 1.1.2.01.01117;analitica;1.1.2.01.01117
+904;563;Conta de exemplo 1.1.2.01.01118 Alfa Be;analitica;1.1.2.01.01118
+905;561;Conta de exemplo 1.1.2.01.01119 Alfa B;analitica;1.1.2.01.01119
+906;1440;Conta de exemplo 1.1.2.01.01121;analitica;1.1.2.01.01121
+907;647;Conta de exemplo 1.1.2.01.01123 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.01123
+908;565;Conta de exemplo 1.1.2.01.01125 Alfa Bet;analitica;1.1.2.01.01125
+909;2110;Conta de exemplo 1.1.2.01.01126 Alfa Beta Gama Delta;analitica;1.1.2.01.01126
+910;608;Conta de exemplo 1.1.2.01.01127 Alfa Bet;analitica;1.1.2.01.01127
+911;587;Conta de exemplo 1.1.2.01.01129 Alfa Bet;analitica;1.1.2.01.01129
+912;1431;Conta de exemplo 1.1.2.01.01130;analitica;1.1.2.01.01130
+913;915;Conta de exemplo 1.1.2.01.01133 Alfa Be;analitica;1.1.2.01.01133
+914;853;Conta de exemplo 1.1.2.01.01135;analitica;1.1.2.01.01135
+915;526;Conta de exemplo 1.1.2.01.01138;analitica;1.1.2.01.01138
+916;2030;Conta de exemplo 1.1.2.01.01139 Alfa Beta Gama;analitica;1.1.2.01.01139
+917;1523;Conta de exemplo 1.1.2.01.01140 Alfa Beta Gama;analitica;1.1.2.01.01140
+918;1879;Conta de exemplo 1.1.2.01.01141 Alfa Beta Gam;analitica;1.1.2.01.01141
+919;1522;Conta de exemplo 1.1.2.01.01142 Alfa Beta Gam;analitica;1.1.2.01.01142
+920;1563;Conta de exemplo 1.1.2.01.01143 Alfa B;analitica;1.1.2.01.01143
+921;1944;Conta de exemplo 1.1.2.01.01144 Alfa B;analitica;1.1.2.01.01144
+922;817;Conta de exemplo 1.1.2.01.01145 Alfa Beta Gama Delta Épsil;analitica;1.1.2.01.01145
+923;1945;Conta de exemplo 1.1.2.01.01146 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.01146
+924;1574;Conta de exemplo 1.1.2.01.01147 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.01147
+925;569;Conta de exemplo 1.1.2.01.01148 Al;analitica;1.1.2.01.01148
+926;773;Conta de exemplo 1.1.2.01.01149 Alfa;analitica;1.1.2.01.01149
+927;1946;Conta de exemplo 1.1.2.01.01150 Alfa;analitica;1.1.2.01.01150
+928;1690;Conta de exemplo 1.1.2.01.01152 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.01152
+929;2052;Conta de exemplo 1.1.2.01.01153 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.01153
+930;1947;Conta de exemplo 1.1.2.01.01156 Alfa Bet;analitica;1.1.2.01.01156
+931;1948;Conta de exemplo 1.1.2.01.01157 Alfa Bet;analitica;1.1.2.01.01157
+932;1031;Conta de exemplo 1.1.2.01.01158 Alfa Beta Gama D;analitica;1.1.2.01.01158
+933;1351;Conta de exemplo 1.1.2.01.01159 Alfa Beta Gama D;analitica;1.1.2.01.01159
+934;2172;Conta de exemplo 1.1.2.01.01160 Alfa B;analitica;1.1.2.01.01160
+935;2125;Conta de exemplo 1.1.2.01.01161 Alfa Beta Gama;analitica;1.1.2.01.01161
+936;2124;Conta de exemplo 1.1.2.01.01162 Alfa Beta Gam;analitica;1.1.2.01.01162
+937;1708;Conta de exemplo 1.1.2.01.01163;analitica;1.1.2.01.01163
+938;570;Conta de exemplo 1.1.2.01.01164 Alfa;analitica;1.1.2.01.01164
+939;774;Conta de exemplo 1.1.2.01.01165;analitica;1.1.2.01.01165
+940;775;Conta de exemplo 1.1.2.01.01166 Alfa Bet;analitica;1.1.2.01.01166
+941;1587;Conta de exemplo 1.1.2.01.01167;analitica;1.1.2.01.01167
+942;1949;Conta de exemplo 1.1.2.01.01168;analitica;1.1.2.01.01168
+943;1586;Conta de exemplo 1.1.2.01.01169 Alfa B;analitica;1.1.2.01.01169
+944;1950;Conta de exemplo 1.1.2.01.01170 Alfa B;analitica;1.1.2.01.01170
+945;1215;Conta de exemplo 1.1.2.01.01171;analitica;1.1.2.01.01171
+946;1664;Conta de exemplo 1.1.2.01.01173 Alfa Beta;analitica;1.1.2.01.01173
+947;909;Conta de exemplo 1.1.2.01.01174;analitica;1.1.2.01.01174
+948;1308;Conta de exemplo 1.1.2.01.01177 Alfa Beta Gama;analitica;1.1.2.01.01177
+949;1741;Conta de exemplo 1.1.2.01.01178;analitica;1.1.2.01.01178
+950;945;Conta de exemplo 1.1.2.01.01180 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.01180
+951;1702;Conta de exemplo 1.1.2.01.01183 Alfa Beta G;analitica;1.1.2.01.01183
+952;571;Conta de exemplo 1.1.2.01.01186;analitica;1.1.2.01.01186
+953;1558;Conta de exemplo 1.1.2.01.01187;analitica;1.1.2.01.01187
+954;1974;Conta de exemplo 1.1.2.01.01188;analitica;1.1.2.01.01188
+955;1809;Conta de exemplo 1.1.2.01.01189;analitica;1.1.2.01.01189
+956;807;Conta de exemplo 1.1.2.01.01190 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.01190
+957;1693;Conta de exemplo 1.1.2.01.01191 Alfa Beta Gama Del;analitica;1.1.2.01.01191
+958;2053;Conta de exemplo 1.1.2.01.01192 Alfa Beta Gama Del;analitica;1.1.2.01.01192
+959;2115;Conta de exemplo 1.1.2.01.01193;analitica;1.1.2.01.01193
+960;779;Conta de exemplo 1.1.2.01.01194;analitica;1.1.2.01.01194
+961;780;Conta de exemplo 1.1.2.01.01195;analitica;1.1.2.01.01195
+962;781;Conta de exemplo 1.1.2.01.01196;analitica;1.1.2.01.01196
+963;782;Conta de exemplo 1.1.2.01.01197 Alfa Bet;analitica;1.1.2.01.01197
+964;589;Conta de exemplo 1.1.2.01.01198 Alfa Bet;analitica;1.1.2.01.01198
+965;1176;Conta de exemplo 1.1.2.01.01201;analitica;1.1.2.01.01201
+966;783;Conta de exemplo 1.1.2.01.01202 Alfa Bet;analitica;1.1.2.01.01202
+967;1733;Conta de exemplo 1.1.2.01.01203 A;analitica;1.1.2.01.01203
+968;1466;Conta de exemplo 1.1.2.01.01204 Alfa Bet;analitica;1.1.2.01.01204
+969;1521;Conta de exemplo 1.1.2.01.01205;analitica;1.1.2.01.01205
+970;784;Conta de exemplo 1.1.2.01.01207;analitica;1.1.2.01.01207
+971;1403;Conta de exemplo 1.1.2.01.01208 A;analitica;1.1.2.01.01208
+972;1951;Conta de exemplo 1.1.2.01.01209 A;analitica;1.1.2.01.01209
+973;2162;Conta de exemplo 1.1.2.01.01210;analitica;1.1.2.01.01210
+974;572;Conta de exemplo 1.1.2.01.01211;analitica;1.1.2.01.01211
+975;824;Conta de exemplo 1.1.2.01.01213 Alfa Beta Gama;analitica;1.1.2.01.01213
+976;1680;Conta de exemplo 1.1.2.01.01214 Alfa Beta;analitica;1.1.2.01.01214
+977;2033;Conta de exemplo 1.1.2.01.01215 Alfa Beta;analitica;1.1.2.01.01215
+978;1744;Conta de exemplo 1.1.2.01.01216;analitica;1.1.2.01.01216
+979;1906;Conta de exemplo 1.1.2.01.01217 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.01217
+980;1561;Conta de exemplo 1.1.2.01.01218 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.01218
+981;1753;Conta de exemplo 1.1.2.01.01219 Alfa Beta Gama Delta Épsil;analitica;1.1.2.01.01219
+982;2173;Conta de exemplo 1.1.2.01.01220 Alfa Be;analitica;1.1.2.01.01220
+983;847;Conta de exemplo 1.1.2.01.01221 A;analitica;1.1.2.01.01221
+984;1178;Conta de exemplo 1.1.2.01.01222 A;analitica;1.1.2.01.01222
+985;1459;Conta de exemplo 1.1.2.01.01223;analitica;1.1.2.01.01223
+986;1525;Conta de exemplo 1.1.2.01.01224 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.01224
+987;1583;Conta de exemplo 1.1.2.01.01225 Alf;analitica;1.1.2.01.01225
+988;785;Conta de exemplo 1.1.2.01.01226 Alf;analitica;1.1.2.01.01226
+989;2044;Conta de exemplo 1.1.2.01.01227 Alf;analitica;1.1.2.01.01227
+990;2077;Conta de exemplo 1.1.2.01.01228 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.01228
+991;1540;Conta de exemplo 1.1.2.01.01229 Alfa Beta Gama;analitica;1.1.2.01.01229
+992;786;Conta de exemplo 1.1.2.01.01231;analitica;1.1.2.01.01231
+993;922;Conta de exemplo 1.1.2.01.01232;analitica;1.1.2.01.01232
+994;787;Conta de exemplo 1.1.2.01.01233;analitica;1.1.2.01.01233
+995;1386;Conta de exemplo 1.1.2.01.01234;analitica;1.1.2.01.01234
+996;788;Conta de exemplo 1.1.2.01.01235 Alfa;analitica;1.1.2.01.01235
+997;859;Conta de exemplo 1.1.2.01.01236 Al;analitica;1.1.2.01.01236
+998;843;Conta de exemplo 1.1.2.01.01237 Alfa B;analitica;1.1.2.01.01237
+999;2003;Conta de exemplo 1.1.2.01.01238 Alfa Beta Gama Delta É;analitica;1.1.2.01.01238
+1000;1294;Conta de exemplo 1.1.2.01.01239;analitica;1.1.2.01.01239
+1001;2102;Conta de exemplo 1.1.2.01.01240;analitica;1.1.2.01.01240
+1002;1975;Conta de exemplo 1.1.2.01.01241;analitica;1.1.2.01.01241
+1003;1631;Conta de exemplo 1.1.2.01.01242 Al;analitica;1.1.2.01.01242
+1004;1952;Conta de exemplo 1.1.2.01.01243 Al;analitica;1.1.2.01.01243
+1005;789;Conta de exemplo 1.1.2.01.01244 Al;analitica;1.1.2.01.01244
+1006;2141;Conta de exemplo 1.1.2.01.01245 Alfa Beta;analitica;1.1.2.01.01245
+1007;1549;Conta de exemplo 1.1.2.01.01246;analitica;1.1.2.01.01246
+1008;924;Conta de exemplo 1.1.2.01.01248 Alfa Beta Gama Delta Épsilon;analitica;1.1.2.01.01248
+1009;1391;Conta de exemplo 1.1.2.01.01251 Alf;analitica;1.1.2.01.01251
+1010;573;Conta de exemplo 1.1.2.01.01252 Alfa B;analitica;1.1.2.01.01252
+1011;1551;Conta de exemplo 1.1.2.01.01253 Alfa Beta Gam;analitica;1.1.2.01.01253
+1012;1953;Conta de exemplo 1.1.2.01.01254 Alfa Beta Gam;analitica;1.1.2.01.01254
+1013;612;Conta de exemplo 1.1.2.01.01257 Alfa Beta Gama D;analitica;1.1.2.01.01257
+1014;878;Conta de exemplo 1.1.2.01.01258;analitica;1.1.2.01.01258
+1015;1607;Conta de exemplo 1.1.2.01.01259 Al;analitica;1.1.2.01.01259
+1016;1976;Conta de exemplo 1.1.2.01.01260 Al;analitica;1.1.2.01.01260
+1017;1582;Conta de exemplo 1.1.2.01.01261 Alfa Beta G;analitica;1.1.2.01.01261
+1018;791;Conta de exemplo 1.1.2.01.01263 Alfa;analitica;1.1.2.01.01263
+1019;2041;Conta de exemplo 1.1.2.01.01264;analitica;1.1.2.01.01264
+1020;792;Conta de exemplo 1.1.2.01.01265;analitica;1.1.2.01.01265
+1021;1002;Conta de exemplo 1.1.2.01.01267 Alfa;analitica;1.1.2.01.01267
+1022;1933;Conta de exemplo 1.1.2.01.01268;analitica;1.1.2.01.01268
+1023;1572;Conta de exemplo 1.1.2.01.01269;analitica;1.1.2.01.01269
+1024;1988;Conta de exemplo 1.1.2.01.01270 Alfa Beta Gama Del;analitica;1.1.2.01.01270
+1025;1535;Conta de exemplo 1.1.2.01.01271 Alfa Beta Gama Delta Épsil;analitica;1.1.2.01.01271
+1026;1954;Conta de exemplo 1.1.2.01.01272 Alfa Beta Gama Delta Épsil;analitica;1.1.2.01.01272
+1027;16;Grupo de exemplo 1.1.2.02;sintetica;1.1.2.02
+1028;17;Grupo de exemplo 1.1.2.03 Alfa Bet;sintetica;1.1.2.03
+1029;18;Grupo de exemplo 1.1.3;sintetica;1.1.3
+1030;19;Grupo de exemplo 1.1.3.01;sintetica;1.1.3.01
+1031;1284;Conta de exemplo 1.1.3.01.001;analitica;1.1.3.01.001
+1032;20;Grupo de exemplo 1.1.3.02;sintetica;1.1.3.02
+1033;21;Grupo de exemplo 1.1.3.03;sintetica;1.1.3.03
+1034;22;Grupo de exemplo 1.1.3.04;sintetica;1.1.3.04
+1035;23;Grupo de exemplo 1.1.3.05 Al;sintetica;1.1.3.05
+1036;1320;Conta de exemplo 1.1.3.05.001;analitica;1.1.3.05.001
+1037;24;Grupo de exemplo 1.1.3.06;sintetica;1.1.3.06
+1038;25;Conta de exemplo 1.1.3.06.001;analitica;1.1.3.06.001
+1039;26;Conta de exemplo 1.1.3.06.002;analitica;1.1.3.06.002
+1040;898;Conta de exemplo 1.1.3.06.003;analitica;1.1.3.06.003
+1041;1144;Conta de exemplo 1.1.3.06.004;analitica;1.1.3.06.004
+1042;27;Grupo de exemplo 1.1.3.07;sintetica;1.1.3.07
+1043;895;Conta de exemplo 1.1.3.07.001;analitica;1.1.3.07.001
+1044;28;Grupo de exemplo 1.1.3.08 Alfa;sintetica;1.1.3.08
+1045;29;Conta de exemplo 1.1.3.08.001;analitica;1.1.3.08.001
+1046;30;Conta de exemplo 1.1.3.08.002;analitica;1.1.3.08.002
+1047;31;Conta de exemplo 1.1.3.08.003;analitica;1.1.3.08.003
+1048;32;Conta de exemplo 1.1.3.08.004 Alfa B;analitica;1.1.3.08.004
+1049;33;Conta de exemplo 1.1.3.08.005 Alfa;analitica;1.1.3.08.005
+1050;34;Conta de exemplo 1.1.3.08.006 Alfa Beta;analitica;1.1.3.08.006
+1051;35;Conta de exemplo 1.1.3.08.007 Alfa Bet;analitica;1.1.3.08.007
+1052;36;Conta de exemplo 1.1.3.08.008;analitica;1.1.3.08.008
+1053;37;Conta de exemplo 1.1.3.08.009;analitica;1.1.3.08.009
+1054;38;Conta de exemplo 1.1.3.08.010;analitica;1.1.3.08.010
+1055;39;Conta de exemplo 1.1.3.08.011;analitica;1.1.3.08.011
+1056;40;Conta de exemplo 1.1.3.08.012;analitica;1.1.3.08.012
+1057;41;Conta de exemplo 1.1.3.08.013;analitica;1.1.3.08.013
+1058;42;Conta de exemplo 1.1.3.08.014 Alfa Bet;analitica;1.1.3.08.014
+1059;43;Conta de exemplo 1.1.3.08.015 Alf;analitica;1.1.3.08.015
+1060;476;Conta de exemplo 1.1.3.08.016;analitica;1.1.3.08.016
+1061;44;Grupo de exemplo 1.1.3.09 Alf;sintetica;1.1.3.09
+1062;45;Conta de exemplo 1.1.3.09.001 Alfa Beta;analitica;1.1.3.09.001
+1063;46;Grupo de exemplo 1.1.4;sintetica;1.1.4
+1064;47;Grupo de exemplo 1.1.4.01 Alfa Beta Gam;sintetica;1.1.4.01
+1065;48;Conta de exemplo 1.1.4.01.001;analitica;1.1.4.01.001
+1066;49;Grupo de exemplo 1.1.4.03;sintetica;1.1.4.03
+1067;50;Grupo de exemplo 1.1.4.04;sintetica;1.1.4.04
+1068;51;Conta de exemplo 1.1.4.04.001;analitica;1.1.4.04.001
+1069;52;Conta de exemplo 1.1.4.04.002;analitica;1.1.4.04.002
+1070;53;Grupo de exemplo 1.1.5;sintetica;1.1.5
+1071;54;Grupo de exemplo 1.1.5.01 Alfa;sintetica;1.1.5.01
+1072;55;Conta de exemplo 1.1.5.01.001;analitica;1.1.5.01.001
+1073;56;Conta de exemplo 1.1.5.01.002;analitica;1.1.5.01.002
+1074;57;Conta de exemplo 1.1.5.01.003;analitica;1.1.5.01.003
+1075;58;Conta de exemplo 1.1.5.01.004 Alfa Bet;analitica;1.1.5.01.004
+1076;59;Conta de exemplo 1.1.5.01.005;analitica;1.1.5.01.005
+1077;60;Conta de exemplo 1.1.5.01.006;analitica;1.1.5.01.006
+1078;61;Grupo de exemplo 1.1.5.02;sintetica;1.1.5.02
+1079;62;Conta de exemplo 1.1.5.02.001;analitica;1.1.5.02.001
+1080;63;Conta de exemplo 1.1.5.02.002;analitica;1.1.5.02.002
+1081;64;Grupo de exemplo 1.1.5.03 Alfa Beta;sintetica;1.1.5.03
+1082;65;Grupo de exemplo 1.1.6 Alfa Be;sintetica;1.1.6
+1083;66;Grupo de exemplo 1.1.6.01 A;sintetica;1.1.6.01
+1084;67;Conta de exemplo 1.1.6.01.001;analitica;1.1.6.01.001
+1085;68;Conta de exemplo 1.1.6.01.002;analitica;1.1.6.01.002
+1086;501;Grupo de exemplo 1.2;sintetica;1.2
+1087;69;Grupo de exemplo 1.2.1 Alfa Be;sintetica;1.2.1
+1088;70;Grupo de exemplo 1.2.1.01;sintetica;1.2.1.01
+1089;71;Conta de exemplo 1.2.1.01.001;analitica;1.2.1.01.001
+1090;76;Grupo de exemplo 1.2.1.02;sintetica;1.2.1.02
+1091;77;Conta de exemplo 1.2.1.02.001;analitica;1.2.1.02.001
+1092;78;Conta de exemplo 1.2.1.02.002;analitica;1.2.1.02.002
+1093;79;Conta de exemplo 1.2.1.02.003 Alfa Be;analitica;1.2.1.02.003
+1094;80;Conta de exemplo 1.2.1.02.004 Alfa Beta G;analitica;1.2.1.02.004
+1095;81;Conta de exemplo 1.2.1.02.005;analitica;1.2.1.02.005
+1096;82;Conta de exemplo 1.2.1.02.006;analitica;1.2.1.02.006
+1097;83;Conta de exemplo 1.2.1.02.007;analitica;1.2.1.02.007
+1098;84;Conta de exemplo 1.2.1.02.008;analitica;1.2.1.02.008
+1099;85;Conta de exemplo 1.2.1.02.009;analitica;1.2.1.02.009
+1100;86;Conta de exemplo 1.2.1.02.010 Al;analitica;1.2.1.02.010
+1101;88;Grupo de exemplo 1.2.2;sintetica;1.2.2
+1102;89;Grupo de exemplo 1.2.2.01 Alfa Beta Gama Delta Éps;sintetica;1.2.2.01
+1103;90;Conta de exemplo 1.2.2.01.001 Al;analitica;1.2.2.01.001
+1104;91;Conta de exemplo 1.2.2.01.002;analitica;1.2.2.01.002
+1105;92;Conta de exemplo 1.2.2.01.003 Alfa Bet;analitica;1.2.2.01.003
+1106;93;Conta de exemplo 1.2.2.01.004 Alfa Beta;analitica;1.2.2.01.004
+1107;94;Conta de exemplo 1.2.2.01.005 Alfa Be;analitica;1.2.2.01.005
+1108;95;Grupo de exemplo 1.2.2.02 Alfa Beta Gama;sintetica;1.2.2.02
+1109;96;Grupo de exemplo 1.2.2.03 Alfa B;sintetica;1.2.2.03
+1110;97;Grupo de exemplo 1.2.2.04 Alfa Beta;sintetica;1.2.2.04
+1111;98;Conta de exemplo 1.2.2.04.001;analitica;1.2.2.04.001
+1112;99;Conta de exemplo 1.2.2.04.002;analitica;1.2.2.04.002
+1113;100;Grupo de exemplo 1.2.2.05 Alf;sintetica;1.2.2.05
+1114;101;Grupo de exemplo 1.2.2.06 Alfa B;sintetica;1.2.2.06
+1115;102;Conta de exemplo 1.2.2.06.001;analitica;1.2.2.06.001
+1116;103;Conta de exemplo 1.2.2.06.002;analitica;1.2.2.06.002
+1117;104;Grupo de exemplo 1.2.2.07 Alfa Beta;sintetica;1.2.2.07
+1118;105;Conta de exemplo 1.2.2.07.001 Alfa Beta Gama Delta Éps;analitica;1.2.2.07.001
+1119;106;Conta de exemplo 1.2.2.07.002 Alfa Beta Gama;analitica;1.2.2.07.002
+1120;107;Conta de exemplo 1.2.2.07.003 Alfa B;analitica;1.2.2.07.003
+1121;108;Conta de exemplo 1.2.2.07.004 Alfa Beta;analitica;1.2.2.07.004
+1122;109;Conta de exemplo 1.2.2.07.005 Al;analitica;1.2.2.07.005
+1123;110;Conta de exemplo 1.2.2.07.006 Alfa B;analitica;1.2.2.07.006
+1124;111;Grupo de exemplo 1.2.3;sintetica;1.2.3
+1125;112;Grupo de exemplo 1.2.3.01;sintetica;1.2.3.01
+1126;113;Conta de exemplo 1.2.3.01.001;analitica;1.2.3.01.001
+1127;114;Conta de exemplo 1.2.3.01.002;analitica;1.2.3.01.002
+1128;115;Conta de exemplo 1.2.3.01.003;analitica;1.2.3.01.003
+1129;116;Grupo de exemplo 1.2.3.02;sintetica;1.2.3.02
+1130;117;Conta de exemplo 1.2.3.02.001;analitica;1.2.3.02.001
+1131;118;Grupo de exemplo 1.2.3.03 Alfa Beta;sintetica;1.2.3.03
+1132;119;Conta de exemplo 1.2.3.03.001;analitica;1.2.3.03.001
+1133;120;Grupo de exemplo 1.2.3.04;sintetica;1.2.3.04
+1134;121;Conta de exemplo 1.2.3.04.001;analitica;1.2.3.04.001
+1135;122;Grupo de exemplo 1.2.3.05;sintetica;1.2.3.05
+1136;879;Conta de exemplo 1.2.3.05.001;analitica;1.2.3.05.001
+1137;124;Grupo de exemplo 1.2.3.06;sintetica;1.2.3.06
+1138;900;Conta de exemplo 1.2.3.06.001;analitica;1.2.3.06.001
+1139;125;Grupo de exemplo 1.2.3.07 Alfa Beta Gama Delta Épsilo;sintetica;1.2.3.07
+1140;126;Conta de exemplo 1.2.3.07.001;analitica;1.2.3.07.001
+1141;127;Conta de exemplo 1.2.3.07.002 Alfa Beta;analitica;1.2.3.07.002
+1142;128;Conta de exemplo 1.2.3.07.003 Alfa Beta Gama Delta Épsil;analitica;1.2.3.07.003
+1143;129;Conta de exemplo 1.2.3.07.004;analitica;1.2.3.07.004
+1144;130;Conta de exemplo 1.2.3.07.005 Alfa Bet;analitica;1.2.3.07.005
+1145;131;Conta de exemplo 1.2.3.07.006 Alfa Beta;analitica;1.2.3.07.006
+1146;901;Conta de exemplo 1.2.3.07.007 Alfa Beta Ga;analitica;1.2.3.07.007
+1147;1813;Grupo de exemplo 1.2.3.08;sintetica;1.2.3.08
+1148;1814;Conta de exemplo 1.2.3.08.001;analitica;1.2.3.08.001
+1149;1836;Conta de exemplo 1.2.3.08.002;analitica;1.2.3.08.002
+1150;502;Grupo de exemplo 1.2.4;sintetica;1.2.4
+1151;123;Grupo de exemplo 1.2.4.01 A;sintetica;1.2.4.01
+1152;899;Conta de exemplo 1.2.4.01.001;analitica;1.2.4.01.001
+1153;149;Grupo de exemplo 2;sintetica;2
+1154;150;Grupo de exemplo 2.1;sintetica;2.1
+1155;382;Grupo de exemplo 2.1.1 Alfa;sintetica;2.1.1
+1156;151;Grupo de exemplo 2.1.1.01;sintetica;2.1.1.01
+1157;152;Conta de exemplo 2.1.1.01.001;analitica;2.1.1.01.001
+1158;153;Grupo de exemplo 2.1.1.02;sintetica;2.1.1.02
+1159;154;Grupo de exemplo 2.1.1.03;sintetica;2.1.1.03
+1160;155;Conta de exemplo 2.1.1.03.001 Alfa Beta;analitica;2.1.1.03.001
+1161;156;Grupo de exemplo 2.1.1.04 A;sintetica;2.1.1.04
+1162;157;Grupo de exemplo 2.1.1.05;sintetica;2.1.1.05
+1163;158;Grupo de exemplo 2.1.1.06 Alfa Beta Gam;sintetica;2.1.1.06
+1164;159;Grupo de exemplo 2.1.1.07 Alfa Beta G;sintetica;2.1.1.07
+1165;160;Grupo de exemplo 2.1.2;sintetica;2.1.2
+1166;161;Grupo de exemplo 2.1.2.01 Alfa B;sintetica;2.1.2.01
+1167;162;Grupo de exemplo 2.1.2.02 A;sintetica;2.1.2.02
+1168;163;Grupo de exemplo 2.1.2.03;sintetica;2.1.2.03
+1169;164;Grupo de exemplo 2.1.3;sintetica;2.1.3
+1170;165;Grupo de exemplo 2.1.3.01;sintetica;2.1.3.01
+1171;1861;Conta de exemplo 2.1.3.01.00001;analitica;2.1.3.01.00001
+1172;1833;Conta de exemplo 2.1.3.01.00002 Alfa Beta Gama;analitica;2.1.3.01.00002
+1173;1834;Conta de exemplo 2.1.3.01.00003;analitica;2.1.3.01.00003
+1174;2046;Conta de exemplo 2.1.3.01.00004 Alfa;analitica;2.1.3.01.00004
+1175;1365;Conta de exemplo 2.1.3.01.00005;analitica;2.1.3.01.00005
+1176;1960;Conta de exemplo 2.1.3.01.00006 Alfa B;analitica;2.1.3.01.00006
+1177;1977;Conta de exemplo 2.1.3.01.00007;analitica;2.1.3.01.00007
+1178;1829;Conta de exemplo 2.1.3.01.00008;analitica;2.1.3.01.00008
+1179;2054;Conta de exemplo 2.1.3.01.00009;analitica;2.1.3.01.00009
+1180;1656;Conta de exemplo 2.1.3.01.00010;analitica;2.1.3.01.00010
+1181;1256;Conta de exemplo 2.1.3.01.00011 Alfa Beta Gama Del;analitica;2.1.3.01.00011
+1182;1978;Conta de exemplo 2.1.3.01.00012;analitica;2.1.3.01.00012
+1183;1655;Conta de exemplo 2.1.3.01.00013 Alfa Beta;analitica;2.1.3.01.00013
+1184;1470;Conta de exemplo 2.1.3.01.00014 Alfa;analitica;2.1.3.01.00014
+1185;1236;Conta de exemplo 2.1.3.01.00015 Alfa Bet;analitica;2.1.3.01.00015
+1186;1393;Conta de exemplo 2.1.3.01.00016;analitica;2.1.3.01.00016
+1187;1704;Conta de exemplo 2.1.3.01.00017;analitica;2.1.3.01.00017
+1188;2178;Conta de exemplo 2.1.3.01.00018;analitica;2.1.3.01.00018
+1189;1955;Conta de exemplo 2.1.3.01.00019;analitica;2.1.3.01.00019
+1190;1625;Conta de exemplo 2.1.3.01.00020 A;analitica;2.1.3.01.00020
+1191;2034;Conta de exemplo 2.1.3.01.00021 Alf;analitica;2.1.3.01.00021
+1192;1261;Conta de exemplo 2.1.3.01.00022;analitica;2.1.3.01.00022
+1193;1222;Conta de exemplo 2.1.3.01.00023;analitica;2.1.3.01.00023
+1194;1687;Conta de exemplo 2.1.3.01.00024;analitica;2.1.3.01.00024
+1195;1517;Conta de exemplo 2.1.3.01.00025;analitica;2.1.3.01.00025
+1196;2007;Conta de exemplo 2.1.3.01.00026 Alfa;analitica;2.1.3.01.00026
+1197;1225;Conta de exemplo 2.1.3.01.00027;analitica;2.1.3.01.00027
+1198;1251;Conta de exemplo 2.1.3.01.00028 Alfa Beta;analitica;2.1.3.01.00028
+1199;1531;Conta de exemplo 2.1.3.01.00029 Alfa Beta Gama Delta;analitica;2.1.3.01.00029
+1200;1518;Conta de exemplo 2.1.3.01.00030;analitica;2.1.3.01.00030
+1201;1956;Conta de exemplo 2.1.3.01.00031 Alfa Beta;analitica;2.1.3.01.00031
+1202;1866;Conta de exemplo 2.1.3.01.00032;analitica;2.1.3.01.00032
+1203;1420;Conta de exemplo 2.1.3.01.00033;analitica;2.1.3.01.00033
+1204;1597;Conta de exemplo 2.1.3.01.00034;analitica;2.1.3.01.00034
+1205;2063;Conta de exemplo 2.1.3.01.00035;analitica;2.1.3.01.00035
+1206;2035;Conta de exemplo 2.1.3.01.00036 Alfa;analitica;2.1.3.01.00036
+1207;1841;Conta de exemplo 2.1.3.01.00037;analitica;2.1.3.01.00037
+1208;1345;Conta de exemplo 2.1.3.01.00038 Alfa Bet;analitica;2.1.3.01.00038
+1209;1496;Conta de exemplo 2.1.3.01.00039 Alfa Beta Gama Delta É;analitica;2.1.3.01.00039
+1210;1271;Conta de exemplo 2.1.3.01.00040 Alfa Bet;analitica;2.1.3.01.00040
+1211;1218;Conta de exemplo 2.1.3.01.00041;analitica;2.1.3.01.00041
+1212;1254;Conta de exemplo 2.1.3.01.00042;analitica;2.1.3.01.00042
+1213;1359;Conta de exemplo 2.1.3.01.00043 Al;analitica;2.1.3.01.00043
+1214;2036;Conta de exemplo 2.1.3.01.00044 A;analitica;2.1.3.01.00044
+1215;1227;Conta de exemplo 2.1.3.01.00045;analitica;2.1.3.01.00045
+1216;1613;Conta de exemplo 2.1.3.01.00046;analitica;2.1.3.01.00046
+1217;1267;Conta de exemplo 2.1.3.01.00047 Al;analitica;2.1.3.01.00047
+1218;2064;Conta de exemplo 2.1.3.01.00048;analitica;2.1.3.01.00048
+1219;1843;Conta de exemplo 2.1.3.01.00049;analitica;2.1.3.01.00049
+1220;1515;Conta de exemplo 2.1.3.01.00050 Alfa Bet;analitica;2.1.3.01.00050
+1221;1989;Conta de exemplo 2.1.3.01.00051;analitica;2.1.3.01.00051
+1222;1990;Conta de exemplo 2.1.3.01.00052;analitica;2.1.3.01.00052
+1223;1302;Conta de exemplo 2.1.3.01.00053;analitica;2.1.3.01.00053
+1224;1371;Conta de exemplo 2.1.3.01.00054 Alfa B;analitica;2.1.3.01.00054
+1225;1257;Conta de exemplo 2.1.3.01.00055 Alfa Beta Gama Delta Ép;analitica;2.1.3.01.00055
+1226;1821;Conta de exemplo 2.1.3.01.00056 Alfa Beta Gam;analitica;2.1.3.01.00056
+1227;1264;Conta de exemplo 2.1.3.01.00057;analitica;2.1.3.01.00057
+1228;2037;Conta de exemplo 2.1.3.01.00058;analitica;2.1.3.01.00058
+1229;1830;Conta de exemplo 2.1.3.01.00059 Alfa;analitica;2.1.3.01.00059
+1230;1831;Conta de exemplo 2.1.3.01.00060;analitica;2.1.3.01.00060
+1231;1822;Conta de exemplo 2.1.3.01.00061 A;analitica;2.1.3.01.00061
+1232;2018;Conta de exemplo 2.1.3.01.00062;analitica;2.1.3.01.00062
+1233;1372;Conta de exemplo 2.1.3.01.00063;analitica;2.1.3.01.00063
+1234;1817;Conta de exemplo 2.1.3.01.00064 A;analitica;2.1.3.01.00064
+1235;2070;Conta de exemplo 2.1.3.01.00065;analitica;2.1.3.01.00065
+1236;1344;Conta de exemplo 2.1.3.01.00066;analitica;2.1.3.01.00066
+1237;1473;Conta de exemplo 2.1.3.01.00067;analitica;2.1.3.01.00067
+1238;1263;Conta de exemplo 2.1.3.01.00068 Alfa Be;analitica;2.1.3.01.00068
+1239;1384;Conta de exemplo 2.1.3.01.00069;analitica;2.1.3.01.00069
+1240;644;Conta de exemplo 2.1.3.01.00070 Alfa Bet;analitica;2.1.3.01.00070
+1241;1469;Conta de exemplo 2.1.3.01.00071 Al;analitica;2.1.3.01.00071
+1242;1602;Conta de exemplo 2.1.3.01.00072 Al;analitica;2.1.3.01.00072
+1243;1477;Conta de exemplo 2.1.3.01.00073 Alfa B;analitica;2.1.3.01.00073
+1244;1980;Conta de exemplo 2.1.3.01.00074 Alfa Beta Gama Delta Épsilon;analitica;2.1.3.01.00074
+1245;1958;Conta de exemplo 2.1.3.01.00075;analitica;2.1.3.01.00075
+1246;594;Conta de exemplo 2.1.3.01.00076 Al;analitica;2.1.3.01.00076
+1247;1844;Conta de exemplo 2.1.3.01.00077 Alfa Beta Gama Delta;analitica;2.1.3.01.00077
+1248;1959;Conta de exemplo 2.1.3.01.00078;analitica;2.1.3.01.00078
+1249;1494;Conta de exemplo 2.1.3.01.00079 Alfa Bet;analitica;2.1.3.01.00079
+1250;1566;Conta de exemplo 2.1.3.01.00080 Alfa Beta G;analitica;2.1.3.01.00080
+1251;1283;Conta de exemplo 2.1.3.01.00081 Alfa Beta Gama;analitica;2.1.3.01.00081
+1252;1474;Conta de exemplo 2.1.3.01.00082 Alfa;analitica;2.1.3.01.00082
+1253;1346;Conta de exemplo 2.1.3.01.00083 Alfa Beta Gama Del;analitica;2.1.3.01.00083
+1254;1291;Conta de exemplo 2.1.3.01.00084 Alfa Bet;analitica;2.1.3.01.00084
+1255;2019;Conta de exemplo 2.1.3.01.00085 Alfa B;analitica;2.1.3.01.00085
+1256;1532;Conta de exemplo 2.1.3.01.00086;analitica;2.1.3.01.00086
+1257;1516;Conta de exemplo 2.1.3.01.00087;analitica;2.1.3.01.00087
+1258;1819;Conta de exemplo 2.1.3.01.00088;analitica;2.1.3.01.00088
+1259;1846;Conta de exemplo 2.1.3.01.00089;analitica;2.1.3.01.00089
+1260;1292;Conta de exemplo 2.1.3.01.00090 Alfa;analitica;2.1.3.01.00090
+1261;1678;Conta de exemplo 2.1.3.01.00091;analitica;2.1.3.01.00091
+1262;1220;Conta de exemplo 2.1.3.01.00092;analitica;2.1.3.01.00092
+1263;2055;Conta de exemplo 2.1.3.01.00093 Alfa Beta Gama Delta Épsilon;analitica;2.1.3.01.00093
+1264;1847;Conta de exemplo 2.1.3.01.00094;analitica;2.1.3.01.00094
+1265;1852;Conta de exemplo 2.1.3.01.00095 Alfa Beta Gama;analitica;2.1.3.01.00095
+1266;166;Conta de exemplo 2.1.3.01.00096;analitica;2.1.3.01.00096
+1267;2008;Conta de exemplo 2.1.3.01.00097;analitica;2.1.3.01.00097
+1268;634;Conta de exemplo 2.1.3.01.00098;analitica;2.1.3.01.00098
+1269;1588;Conta de exemplo 2.1.3.01.00099 Alfa Beta Gama Delt;analitica;2.1.3.01.00099
+1270;1238;Conta de exemplo 2.1.3.01.00100;analitica;2.1.3.01.00100
+1271;1478;Conta de exemplo 2.1.3.01.00101;analitica;2.1.3.01.00101
+1272;1981;Conta de exemplo 2.1.3.01.00102;analitica;2.1.3.01.00102
+1273;1385;Conta de exemplo 2.1.3.01.00103;analitica;2.1.3.01.00103
+1274;1495;Conta de exemplo 2.1.3.01.00104 Alfa;analitica;2.1.3.01.00104
+1275;1569;Conta de exemplo 2.1.3.01.00105 Alfa B;analitica;2.1.3.01.00105
+1276;2020;Conta de exemplo 2.1.3.01.00106 Alfa Beta Gama;analitica;2.1.3.01.00106
+1277;1348;Conta de exemplo 2.1.3.01.00107 Alfa Beta Gama Delta Épsi;analitica;2.1.3.01.00107
+1278;1471;Conta de exemplo 2.1.3.01.00108;analitica;2.1.3.01.00108
+1279;2065;Conta de exemplo 2.1.3.01.00109;analitica;2.1.3.01.00109
+1280;1281;Conta de exemplo 2.1.3.01.00110 Alfa Beta G;analitica;2.1.3.01.00110
+1281;1234;Conta de exemplo 2.1.3.01.00111 Alfa Bet;analitica;2.1.3.01.00111
+1282;1373;Conta de exemplo 2.1.3.01.00112 Alfa;analitica;2.1.3.01.00112
+1283;1537;Conta de exemplo 2.1.3.01.00113;analitica;2.1.3.01.00113
+1284;1570;Conta de exemplo 2.1.3.01.00114;analitica;2.1.3.01.00114
+1285;167;Conta de exemplo 2.1.3.01.00115;analitica;2.1.3.01.00115
+1286;1358;Conta de exemplo 2.1.3.01.00116 Al;analitica;2.1.3.01.00116
+1287;1414;Conta de exemplo 2.1.3.01.00117 Alfa Beta Gama Delt;analitica;2.1.3.01.00117
+1288;1337;Conta de exemplo 2.1.3.01.00118;analitica;2.1.3.01.00118
+1289;593;Conta de exemplo 2.1.3.01.00119;analitica;2.1.3.01.00119
+1290;1568;Conta de exemplo 2.1.3.01.00120;analitica;2.1.3.01.00120
+1291;1848;Conta de exemplo 2.1.3.01.00121;analitica;2.1.3.01.00121
+1292;1842;Conta de exemplo 2.1.3.01.00122;analitica;2.1.3.01.00122
+1293;1850;Conta de exemplo 2.1.3.01.00123;analitica;2.1.3.01.00123
+1294;1849;Conta de exemplo 2.1.3.01.00124 Alfa Beta;analitica;2.1.3.01.00124
+1295;1282;Conta de exemplo 2.1.3.01.00125;analitica;2.1.3.01.00125
+1296;1611;Conta de exemplo 2.1.3.01.00126 Alfa;analitica;2.1.3.01.00126
+1297;1865;Conta de exemplo 2.1.3.01.00127 Alfa Bet;analitica;2.1.3.01.00127
+1298;1571;Conta de exemplo 2.1.3.01.00128;analitica;2.1.3.01.00128
+1299;2057;Conta de exemplo 2.1.3.01.00129;analitica;2.1.3.01.00129
+1300;1688;Conta de exemplo 2.1.3.01.00130;analitica;2.1.3.01.00130
+1301;1961;Conta de exemplo 2.1.3.01.00131;analitica;2.1.3.01.00131
+1302;1685;Conta de exemplo 2.1.3.01.00132 Alfa Beta Gama Delta É;analitica;2.1.3.01.00132
+1303;1596;Conta de exemplo 2.1.3.01.00133;analitica;2.1.3.01.00133
+1304;1851;Conta de exemplo 2.1.3.01.00134;analitica;2.1.3.01.00134
+1305;2066;Conta de exemplo 2.1.3.01.00135;analitica;2.1.3.01.00135
+1306;2179;Conta de exemplo 2.1.3.01.00136;analitica;2.1.3.01.00136
+1307;1869;Conta de exemplo 2.1.3.01.00137;analitica;2.1.3.01.00137
+1308;1244;Conta de exemplo 2.1.3.01.00138 Alfa Bet;analitica;2.1.3.01.00138
+1309;1370;Conta de exemplo 2.1.3.01.00139 Alfa Beta Gama Delta Épsilon;analitica;2.1.3.01.00139
+1310;1991;Conta de exemplo 2.1.3.01.00140;analitica;2.1.3.01.00140
+1311;1259;Conta de exemplo 2.1.3.01.00141;analitica;2.1.3.01.00141
+1312;1268;Conta de exemplo 2.1.3.01.00142 Alfa Beta Gama Delta Épsilon;analitica;2.1.3.01.00142
+1313;2029;Conta de exemplo 2.1.3.01.00143;analitica;2.1.3.01.00143
+1314;1615;Conta de exemplo 2.1.3.01.00144 Alfa;analitica;2.1.3.01.00144
+1315;893;Conta de exemplo 2.1.3.01.00145;analitica;2.1.3.01.00145
+1316;1826;Conta de exemplo 2.1.3.01.00146 Alfa Beta Gama De;analitica;2.1.3.01.00146
+1317;1472;Conta de exemplo 2.1.3.01.00147 Alfa B;analitica;2.1.3.01.00147
+1318;1508;Conta de exemplo 2.1.3.01.00148;analitica;2.1.3.01.00148
+1319;1853;Conta de exemplo 2.1.3.01.00149 Alfa Beta Gama;analitica;2.1.3.01.00149
+1320;1381;Conta de exemplo 2.1.3.01.00150;analitica;2.1.3.01.00150
+1321;1652;Conta de exemplo 2.1.3.01.00151 Alfa Beta Gama Delta Épsilon;analitica;2.1.3.01.00151
+1322;1249;Conta de exemplo 2.1.3.01.00152 Alfa Beta;analitica;2.1.3.01.00152
+1323;1982;Conta de exemplo 2.1.3.01.00153;analitica;2.1.3.01.00153
+1324;1832;Conta de exemplo 2.1.3.01.00154;analitica;2.1.3.01.00154
+1325;1867;Conta de exemplo 2.1.3.01.00155;analitica;2.1.3.01.00155
+1326;1854;Conta de exemplo 2.1.3.01.00156;analitica;2.1.3.01.00156
+1327;1855;Conta de exemplo 2.1.3.01.00157 Alfa Beta Ga;analitica;2.1.3.01.00157
+1328;1962;Conta de exemplo 2.1.3.01.00158;analitica;2.1.3.01.00158
+1329;1280;Conta de exemplo 2.1.3.01.00159 Alf;analitica;2.1.3.01.00159
+1330;1556;Conta de exemplo 2.1.3.01.00160;analitica;2.1.3.01.00160
+1331;1816;Conta de exemplo 2.1.3.01.00161;analitica;2.1.3.01.00161
+1332;1315;Conta de exemplo 2.1.3.01.00162;analitica;2.1.3.01.00162
+1333;1856;Conta de exemplo 2.1.3.01.00163;analitica;2.1.3.01.00163
+1334;1363;Conta de exemplo 2.1.3.01.00164 Al;analitica;2.1.3.01.00164
+1335;1845;Conta de exemplo 2.1.3.01.00165;analitica;2.1.3.01.00165
+1336;1599;Conta de exemplo 2.1.3.01.00166;analitica;2.1.3.01.00166
+1337;2047;Conta de exemplo 2.1.3.01.00167;analitica;2.1.3.01.00167
+1338;1637;Conta de exemplo 2.1.3.01.00168;analitica;2.1.3.01.00168
+1339;1823;Conta de exemplo 2.1.3.01.00169;analitica;2.1.3.01.00169
+1340;2009;Conta de exemplo 2.1.3.01.00170;analitica;2.1.3.01.00170
+1341;1565;Conta de exemplo 2.1.3.01.00171 Alfa Beta Gama Delta;analitica;2.1.3.01.00171
+1342;1360;Conta de exemplo 2.1.3.01.00172;analitica;2.1.3.01.00172
+1343;1221;Conta de exemplo 2.1.3.01.00173;analitica;2.1.3.01.00173
+1344;890;Conta de exemplo 2.1.3.01.00174;analitica;2.1.3.01.00174
+1345;1500;Conta de exemplo 2.1.3.01.00175 Alfa;analitica;2.1.3.01.00175
+1346;1595;Conta de exemplo 2.1.3.01.00176 Alfa Be;analitica;2.1.3.01.00176
+1347;1412;Conta de exemplo 2.1.3.01.00177;analitica;2.1.3.01.00177
+1348;1598;Conta de exemplo 2.1.3.01.00178;analitica;2.1.3.01.00178
+1349;1979;Conta de exemplo 2.1.3.01.00179 A;analitica;2.1.3.01.00179
+1350;1963;Conta de exemplo 2.1.3.01.00180;analitica;2.1.3.01.00180
+1351;1224;Conta de exemplo 2.1.3.01.00181;analitica;2.1.3.01.00181
+1352;1983;Conta de exemplo 2.1.3.01.00182;analitica;2.1.3.01.00182
+1353;1366;Conta de exemplo 2.1.3.01.00183;analitica;2.1.3.01.00183
+1354;1246;Conta de exemplo 2.1.3.01.00184;analitica;2.1.3.01.00184
+1355;1964;Conta de exemplo 2.1.3.01.00185;analitica;2.1.3.01.00185
+1356;2045;Conta de exemplo 2.1.3.01.00186 Alfa Beta;analitica;2.1.3.01.00186
+1357;1493;Conta de exemplo 2.1.3.01.00187 A;analitica;2.1.3.01.00187
+1358;1395;Conta de exemplo 2.1.3.01.00188;analitica;2.1.3.01.00188
+1359;1314;Conta de exemplo 2.1.3.01.00189 A;analitica;2.1.3.01.00189
+1360;1857;Conta de exemplo 2.1.3.01.00190;analitica;2.1.3.01.00190
+1361;2010;Conta de exemplo 2.1.3.01.00191;analitica;2.1.3.01.00191
+1362;2181;Conta de exemplo 2.1.3.01.00192 A;analitica;2.1.3.01.00192
+1363;1858;Conta de exemplo 2.1.3.01.00193;analitica;2.1.3.01.00193
+1364;1603;Conta de exemplo 2.1.3.01.00194 Alfa Be;analitica;2.1.3.01.00194
+1365;1859;Conta de exemplo 2.1.3.01.00195 Alfa Beta Ga;analitica;2.1.3.01.00195
+1366;1258;Conta de exemplo 2.1.3.01.00196 Alfa Bet;analitica;2.1.3.01.00196
+1367;1278;Conta de exemplo 2.1.3.01.00197 Alfa Be;analitica;2.1.3.01.00197
+1368;2011;Conta de exemplo 2.1.3.01.00198;analitica;2.1.3.01.00198
+1369;1217;Conta de exemplo 2.1.3.01.00199 Alfa Beta Gama Delta Épsilon;analitica;2.1.3.01.00199
+1370;1860;Conta de exemplo 2.1.3.01.00200;analitica;2.1.3.01.00200
+1371;1510;Conta de exemplo 2.1.3.01.00201 Alfa Beta Gama Delta É;analitica;2.1.3.01.00201
+1372;1965;Conta de exemplo 2.1.3.01.00202;analitica;2.1.3.01.00202
+1373;1612;Conta de exemplo 2.1.3.01.00203;analitica;2.1.3.01.00203
+1374;892;Conta de exemplo 2.1.3.01.00204;analitica;2.1.3.01.00204
+1375;1252;Conta de exemplo 2.1.3.01.00205 Alfa;analitica;2.1.3.01.00205
+1376;2067;Conta de exemplo 2.1.3.01.00206;analitica;2.1.3.01.00206
+1377;1394;Conta de exemplo 2.1.3.01.00207 Alfa Bet;analitica;2.1.3.01.00207
+1378;1509;Conta de exemplo 2.1.3.01.00208 Alfa Be;analitica;2.1.3.01.00208
+1379;2058;Conta de exemplo 2.1.3.01.00209;analitica;2.1.3.01.00209
+1380;1862;Conta de exemplo 2.1.3.01.00210;analitica;2.1.3.01.00210
+1381;1825;Conta de exemplo 2.1.3.01.00211 Alfa Bet;analitica;2.1.3.01.00211
+1382;2056;Conta de exemplo 2.1.3.01.00212;analitica;2.1.3.01.00212
+1383;1600;Conta de exemplo 2.1.3.01.00213;analitica;2.1.3.01.00213
+1384;1467;Conta de exemplo 2.1.3.01.00214 Alfa Bet;analitica;2.1.3.01.00214
+1385;2068;Conta de exemplo 2.1.3.01.00215;analitica;2.1.3.01.00215
+1386;1638;Conta de exemplo 2.1.3.01.00216;analitica;2.1.3.01.00216
+1387;1361;Conta de exemplo 2.1.3.01.00217 Alfa;analitica;2.1.3.01.00217
+1388;1863;Conta de exemplo 2.1.3.01.00218;analitica;2.1.3.01.00218
+1389;1219;Conta de exemplo 2.1.3.01.00219;analitica;2.1.3.01.00219
+1390;1347;Conta de exemplo 2.1.3.01.00220;analitica;2.1.3.01.00220
+1391;2182;Conta de exemplo 2.1.3.01.00221;analitica;2.1.3.01.00221
+1392;1233;Conta de exemplo 2.1.3.01.00222 Alfa;analitica;2.1.3.01.00222
+1393;1501;Conta de exemplo 2.1.3.01.00223;analitica;2.1.3.01.00223
+1394;1818;Conta de exemplo 2.1.3.01.00224 Alfa;analitica;2.1.3.01.00224
+1395;1349;Conta de exemplo 2.1.3.01.00225 Alfa Bet;analitica;2.1.3.01.00225
+1396;2059;Conta de exemplo 2.1.3.01.00226;analitica;2.1.3.01.00226
+1397;1534;Conta de exemplo 2.1.3.01.00227;analitica;2.1.3.01.00227
+1398;1827;Conta de exemplo 2.1.3.01.00228;analitica;2.1.3.01.00228
+1399;1735;Conta de exemplo 2.1.3.01.00229;analitica;2.1.3.01.00229
+1400;1643;Conta de exemplo 2.1.3.01.00230 Alfa Bet;analitica;2.1.3.01.00230
+1401;1835;Conta de exemplo 2.1.3.01.00231;analitica;2.1.3.01.00231
+1402;1533;Conta de exemplo 2.1.3.01.00232;analitica;2.1.3.01.00232
+1403;1413;Conta de exemplo 2.1.3.01.00233 Alfa Beta Gama Delta;analitica;2.1.3.01.00233
+1404;1270;Conta de exemplo 2.1.3.01.00234;analitica;2.1.3.01.00234
+1405;1864;Conta de exemplo 2.1.3.01.00235 Alfa Beta Gama D;analitica;2.1.3.01.00235
+1406;1411;Conta de exemplo 2.1.3.01.00236 Alf;analitica;2.1.3.01.00236
+1407;1992;Conta de exemplo 2.1.3.01.00237 Alfa Be;analitica;2.1.3.01.00237
+1408;1511;Conta de exemplo 2.1.3.01.00238;analitica;2.1.3.01.00238
+1409;2021;Conta de exemplo 2.1.3.01.00239;analitica;2.1.3.01.00239
+1410;1686;Conta de exemplo 2.1.3.01.00240;analitica;2.1.3.01.00240
+1411;1247;Conta de exemplo 2.1.3.01.00241;analitica;2.1.3.01.00241
+1412;1364;Conta de exemplo 2.1.3.01.00242 Alfa Be;analitica;2.1.3.01.00242
+1413;2180;Conta de exemplo 2.1.3.01.00243 Alfa Beta Gama Del;analitica;2.1.3.01.00243
+1414;1269;Conta de exemplo 2.1.3.01.00244;analitica;2.1.3.01.00244
+1415;1528;Conta de exemplo 2.1.3.01.00245;analitica;2.1.3.01.00245
+1416;1824;Conta de exemplo 2.1.3.01.00246;analitica;2.1.3.01.00246
+1417;1820;Conta de exemplo 2.1.3.01.00247;analitica;2.1.3.01.00247
+1418;1279;Conta de exemplo 2.1.3.01.00248 Alfa;analitica;2.1.3.01.00248
+1419;1298;Conta de exemplo 2.1.3.01.00249 Alfa Beta Gama Del;analitica;2.1.3.01.00249
+1420;1828;Conta de exemplo 2.1.3.01.00250 Alfa Beta Gama Del;analitica;2.1.3.01.00250
+1421;1499;Conta de exemplo 2.1.3.01.00251 Alfa Beta Gama Delta Épsilon;analitica;2.1.3.01.00251
+1422;2038;Conta de exemplo 2.1.3.01.00252 Al;analitica;2.1.3.01.00252
+1423;2069;Conta de exemplo 2.1.3.01.00253 Alfa Beta Gama Delta Épsilo;analitica;2.1.3.01.00253
+1424;645;Conta de exemplo 2.1.3.01.00254 Alfa Bet;analitica;2.1.3.01.00254
+1425;1312;Conta de exemplo 2.1.3.01.00255 Alfa Bet;analitica;2.1.3.01.00255
+1426;1476;Conta de exemplo 2.1.3.01.00256;analitica;2.1.3.01.00256
+1427;1505;Conta de exemplo 2.1.3.01.00257 Alf;analitica;2.1.3.01.00257
+1428;1966;Conta de exemplo 2.1.3.01.00258 Alfa Beta Gama Delta Éps;analitica;2.1.3.01.00258
+1429;1223;Conta de exemplo 2.1.3.01.00259 A;analitica;2.1.3.01.00259
+1430;1993;Conta de exemplo 2.1.3.01.00260;analitica;2.1.3.01.00260
+1431;1167;Conta de exemplo 2.1.3.01.00261;analitica;2.1.3.01.00261
+1432;1396;Conta de exemplo 2.1.3.01.00262 Alfa Beta Gama;analitica;2.1.3.01.00262
+1433;1250;Conta de exemplo 2.1.3.01.00264 Alfa Beta Gama Delta;analitica;2.1.3.01.00264
+1434;1868;Conta de exemplo 2.1.3.01.00265;analitica;2.1.3.01.00265
+1435;1601;Conta de exemplo 2.1.3.01.00266 Alfa Beta Gama Delta É;analitica;2.1.3.01.00266
+1436;1874;Conta de exemplo 2.1.3.01.00267;analitica;2.1.3.01.00267
+1437;1417;Conta de exemplo 2.1.3.01.00268;analitica;2.1.3.01.00268
+1438;1468;Conta de exemplo 2.1.3.01.00269;analitica;2.1.3.01.00269
+1439;1967;Conta de exemplo 2.1.3.01.00270;analitica;2.1.3.01.00270
+1440;1506;Conta de exemplo 2.1.3.01.00271;analitica;2.1.3.01.00271
+1441;1872;Conta de exemplo 2.1.3.01.00272 Alfa Beta Gama De;analitica;2.1.3.01.00272
+1442;1226;Conta de exemplo 2.1.3.01.00273;analitica;2.1.3.01.00273
+1443;1645;Conta de exemplo 2.1.3.01.00274;analitica;2.1.3.01.00274
+1444;1870;Conta de exemplo 2.1.3.01.00275;analitica;2.1.3.01.00275
+1445;1265;Conta de exemplo 2.1.3.01.00276;analitica;2.1.3.01.00276
+1446;1968;Conta de exemplo 2.1.3.01.00277;analitica;2.1.3.01.00277
+1447;2012;Conta de exemplo 2.1.3.01.00278 Alfa Beta;analitica;2.1.3.01.00278
+1448;885;Conta de exemplo 2.1.3.01.00279;analitica;2.1.3.01.00279
+1449;2013;Conta de exemplo 2.1.3.01.00280 Al;analitica;2.1.3.01.00280
+1450;1871;Conta de exemplo 2.1.3.01.00281 Alfa Beta Gama Del;analitica;2.1.3.01.00281
+1451;1248;Conta de exemplo 2.1.3.01.00282 Al;analitica;2.1.3.01.00282
+1452;1415;Conta de exemplo 2.1.3.01.00283;analitica;2.1.3.01.00283
+1453;1957;Conta de exemplo 2.1.3.01.00284 Alfa Beta Gama;analitica;2.1.3.01.00284
+1454;1644;Conta de exemplo 2.1.3.01.00285 Alfa Beta Gama;analitica;2.1.3.01.00285
+1455;2048;Conta de exemplo 2.1.3.01.00286 A;analitica;2.1.3.01.00286
+1456;2177;Conta de exemplo 2.1.3.01.00287 A;analitica;2.1.3.01.00287
+1457;1241;Conta de exemplo 2.1.3.01.00288;analitica;2.1.3.01.00288
+1458;1235;Conta de exemplo 2.1.3.01.00289 Alfa Bet;analitica;2.1.3.01.00289
+1459;1336;Conta de exemplo 2.1.3.01.00290;analitica;2.1.3.01.00290
+1460;1873;Conta de exemplo 2.1.3.01.00291;analitica;2.1.3.01.00291
+1461;1875;Conta de exemplo 2.1.3.01.00292;analitica;2.1.3.01.00292
+1462;1475;Conta de exemplo 2.1.3.01.00293;analitica;2.1.3.01.00293
+1463;2022;Conta de exemplo 2.1.3.01.00294;analitica;2.1.3.01.00294
+1464;1242;Conta de exemplo 2.1.3.01.00295;analitica;2.1.3.01.00295
+1465;1669;Conta de exemplo 2.1.3.01.00296;analitica;2.1.3.01.00296
+1466;1876;Conta de exemplo 2.1.3.01.00297 Al;analitica;2.1.3.01.00297
+1467;1646;Conta de exemplo 2.1.3.01.00298;analitica;2.1.3.01.00298
+1468;168;Grupo de exemplo 2.1.3.02;sintetica;2.1.3.02
+1469;169;Grupo de exemplo 2.1.4;sintetica;2.1.4
+1470;170;Grupo de exemplo 2.1.4.01 Alfa Beta;sintetica;2.1.4.01
+1471;171;Conta de exemplo 2.1.4.01.001;analitica;2.1.4.01.001
+1472;172;Conta de exemplo 2.1.4.01.002;analitica;2.1.4.01.002
+1473;173;Conta de exemplo 2.1.4.01.003;analitica;2.1.4.01.003
+1474;174;Conta de exemplo 2.1.4.01.004;analitica;2.1.4.01.004
+1475;175;Conta de exemplo 2.1.4.01.005 Alfa Beta;analitica;2.1.4.01.005
+1476;176;Conta de exemplo 2.1.4.01.006;analitica;2.1.4.01.006
+1477;177;Conta de exemplo 2.1.4.01.007;analitica;2.1.4.01.007
+1478;178;Conta de exemplo 2.1.4.01.008;analitica;2.1.4.01.008
+1479;179;Conta de exemplo 2.1.4.01.009;analitica;2.1.4.01.009
+1480;180;Conta de exemplo 2.1.4.01.010;analitica;2.1.4.01.010
+1481;181;Conta de exemplo 2.1.4.01.011;analitica;2.1.4.01.011
+1482;182;Conta de exemplo 2.1.4.01.012;analitica;2.1.4.01.012
+1483;183;Conta de exemplo 2.1.4.01.013;analitica;2.1.4.01.013
+1484;184;Conta de exemplo 2.1.4.01.014;analitica;2.1.4.01.014
+1485;479;Conta de exemplo 2.1.4.01.015;analitica;2.1.4.01.015
+1486;481;Conta de exemplo 2.1.4.01.016 Alfa;analitica;2.1.4.01.016
+1487;483;Conta de exemplo 2.1.4.01.017;analitica;2.1.4.01.017
+1488;485;Conta de exemplo 2.1.4.01.018;analitica;2.1.4.01.018
+1489;487;Conta de exemplo 2.1.4.01.019;analitica;2.1.4.01.019
+1490;488;Conta de exemplo 2.1.4.01.020;analitica;2.1.4.01.020
+1491;489;Conta de exemplo 2.1.4.01.021 Alfa Be;analitica;2.1.4.01.021
+1492;490;Conta de exemplo 2.1.4.01.022;analitica;2.1.4.01.022
+1493;491;Conta de exemplo 2.1.4.01.023 Al;analitica;2.1.4.01.023
+1494;2079;Conta de exemplo 2.1.4.01.024;analitica;2.1.4.01.024
+1495;185;Grupo de exemplo 2.1.5 Alfa Beta Gama Del;sintetica;2.1.5
+1496;186;Grupo de exemplo 2.1.5.01;sintetica;2.1.5.01
+1497;187;Conta de exemplo 2.1.5.01.001;analitica;2.1.5.01.001
+1498;188;Conta de exemplo 2.1.5.01.002;analitica;2.1.5.01.002
+1499;189;Conta de exemplo 2.1.5.01.003;analitica;2.1.5.01.003
+1500;230;Conta de exemplo 2.1.5.01.004;analitica;2.1.5.01.004
+1501;190;Grupo de exemplo 2.1.5.02;sintetica;2.1.5.02
+1502;191;Conta de exemplo 2.1.5.02.001;analitica;2.1.5.02.001
+1503;192;Conta de exemplo 2.1.5.02.002;analitica;2.1.5.02.002
+1504;494;Conta de exemplo 2.1.5.02.003;analitica;2.1.5.02.003
+1505;193;Grupo de exemplo 2.1.5.03;sintetica;2.1.5.03
+1506;194;Conta de exemplo 2.1.5.03.001;analitica;2.1.5.03.001
+1507;195;Conta de exemplo 2.1.5.03.002;analitica;2.1.5.03.002
+1508;196;Conta de exemplo 2.1.5.03.003 Al;analitica;2.1.5.03.003
+1509;197;Conta de exemplo 2.1.5.03.004 Alfa Be;analitica;2.1.5.03.004
+1510;198;Conta de exemplo 2.1.5.03.005 Al;analitica;2.1.5.03.005
+1511;199;Conta de exemplo 2.1.5.03.006 Alfa Be;analitica;2.1.5.03.006
+1512;495;Conta de exemplo 2.1.5.03.007 A;analitica;2.1.5.03.007
+1513;496;Conta de exemplo 2.1.5.03.008 Alfa B;analitica;2.1.5.03.008
+1514;200;Grupo de exemplo 2.1.6;sintetica;2.1.6
+1515;201;Grupo de exemplo 2.1.6.01;sintetica;2.1.6.01
+1516;880;Conta de exemplo 2.1.6.01.001;analitica;2.1.6.01.001
+1517;202;Grupo de exemplo 2.1.6.02;sintetica;2.1.6.02
+1518;881;Conta de exemplo 2.1.6.02.001;analitica;2.1.6.02.001
+1519;882;Conta de exemplo 2.1.6.02.002;analitica;2.1.6.02.002
+1520;1317;Conta de exemplo 2.1.6.02.003;analitica;2.1.6.02.003
+1521;1318;Conta de exemplo 2.1.6.02.004;analitica;2.1.6.02.004
+1522;203;Grupo de exemplo 2.1.6.03 Alfa Beta Gama;sintetica;2.1.6.03
+1523;204;Grupo de exemplo 2.1.6.04;sintetica;2.1.6.04
+1524;1296;Conta de exemplo 2.1.6.04.001;analitica;2.1.6.04.001
+1525;205;Grupo de exemplo 2.1.6.05;sintetica;2.1.6.05
+1526;206;Grupo de exemplo 2.1.6.06;sintetica;2.1.6.06
+1527;207;Grupo de exemplo 2.1.7 Alfa Beta Gama Delta Épsilon Zeta;sintetica;2.1.7
+1528;208;Grupo de exemplo 2.1.7.01;sintetica;2.1.7.01
+1529;209;Conta de exemplo 2.1.7.01.001;analitica;2.1.7.01.001
+1530;210;Conta de exemplo 2.1.7.01.002;analitica;2.1.7.01.002
+1531;211;Grupo de exemplo 2.1.7.02;sintetica;2.1.7.02
+1532;212;Conta de exemplo 2.1.7.02.001 Alfa Beta;analitica;2.1.7.02.001
+1533;213;Conta de exemplo 2.1.7.02.002 Alfa;analitica;2.1.7.02.002
+1534;214;Conta de exemplo 2.1.7.02.003;analitica;2.1.7.02.003
+1535;215;Grupo de exemplo 2.1.7.03 A;sintetica;2.1.7.03
+1536;216;Conta de exemplo 2.1.7.03.001 Alfa;analitica;2.1.7.03.001
+1537;503;Grupo de exemplo 2.2 A;sintetica;2.2
+1538;217;Grupo de exemplo 2.2.1 Alfa Be;sintetica;2.2.1
+1539;218;Grupo de exemplo 2.2.1.01;sintetica;2.2.1.01
+1540;219;Conta de exemplo 2.2.1.01.001;analitica;2.2.1.01.001
+1541;220;Conta de exemplo 2.2.1.01.002;analitica;2.2.1.01.002
+1542;222;Conta de exemplo 2.2.1.01.003;analitica;2.2.1.01.003
+1543;1812;Conta de exemplo 2.2.1.01.004;analitica;2.2.1.01.004
+1544;221;Grupo de exemplo 2.2.1.02;sintetica;2.2.1.02
+1545;1810;Conta de exemplo 2.2.1.02.001;analitica;2.2.1.02.001
+1546;225;Grupo de exemplo 2.2.1.03 Alfa Beta G;sintetica;2.2.1.03
+1547;226;Grupo de exemplo 2.2.1.04 Alfa Beta Gam;sintetica;2.2.1.04
+1548;223;Conta de exemplo 2.2.1.04.001;analitica;2.2.1.04.001
+1549;224;Grupo de exemplo 2.2.1.05;sintetica;2.2.1.05
+1550;227;Grupo de exemplo 2.2.1.06;sintetica;2.2.1.06
+1551;228;Conta de exemplo 2.2.1.06.001;analitica;2.2.1.06.001
+1552;229;Conta de exemplo 2.2.1.06.002;analitica;2.2.1.06.002
+1553;236;Grupo de exemplo 2.2.1.07;sintetica;2.2.1.07
+1554;237;Conta de exemplo 2.2.1.07.001;analitica;2.2.1.07.001
+1555;242;Grupo de exemplo 2.3;sintetica;2.3
+1556;243;Grupo de exemplo 2.3.1;sintetica;2.3.1
+1557;244;Grupo de exemplo 2.3.1.01;sintetica;2.3.1.01
+1558;245;Conta de exemplo 2.3.1.01.001;analitica;2.3.1.01.001
+1559;246;Grupo de exemplo 2.3.1.02;sintetica;2.3.1.02
+1560;247;Conta de exemplo 2.3.1.02.001;analitica;2.3.1.02.001
+1561;249;Grupo de exemplo 2.3.2;sintetica;2.3.2
+1562;251;Conta de exemplo 2.3.2.01;analitica;2.3.2.01
+1563;252;Conta de exemplo 2.3.2.02 Alfa Beta Gam;analitica;2.3.2.02
+1564;253;Conta de exemplo 2.3.2.03 Alfa;analitica;2.3.2.03
+1565;250;Conta de exemplo 2.3.2.04 Alfa Beta Gama;analitica;2.3.2.04
+1566;254;Grupo de exemplo 2.3.3;sintetica;2.3.3
+1567;256;Conta de exemplo 2.3.3.01 Alfa;analitica;2.3.3.01
+1568;255;Conta de exemplo 2.3.3.02 Alfa;analitica;2.3.3.02
+1569;257;Grupo de exemplo 2.3.4;sintetica;2.3.4
+1570;259;Conta de exemplo 2.3.4.01;analitica;2.3.4.01
+1571;260;Conta de exemplo 2.3.4.02;analitica;2.3.4.02
+1572;261;Grupo de exemplo 2.3.4.03 Al;sintetica;2.3.4.03
+1573;883;Conta de exemplo 2.3.4.03.001;analitica;2.3.4.03.001
+1574;1503;Conta de exemplo 2.3.4.03.002;analitica;2.3.4.03.002
+1575;262;Conta de exemplo 2.3.4.04;analitica;2.3.4.04
+1576;263;Conta de exemplo 2.3.4.05 Alfa;analitica;2.3.4.05
+1577;258;Conta de exemplo 2.3.4.06;analitica;2.3.4.06
+1578;264;Grupo de exemplo 2.3.5 Alfa Be;sintetica;2.3.5
+1579;265;Grupo de exemplo 2.3.5.01 Alfa;sintetica;2.3.5.01
+1580;266;Conta de exemplo 2.3.5.01.001;analitica;2.3.5.01.001
+1581;267;Conta de exemplo 2.3.5.01.002;analitica;2.3.5.01.002
+1582;268;Conta de exemplo 2.3.5.01.003;analitica;2.3.5.01.003
+1583;1382;Conta de exemplo 2.3.5.01.004 Al;analitica;2.3.5.01.004
+1584;269;Grupo de exemplo 3 Alfa Beta Gama Delta;sintetica;3
+1585;500;Grupo de exemplo 3.1;sintetica;3.1
+1586;270;Grupo de exemplo 3.1.1 Al;sintetica;3.1.1
+1587;271;Grupo de exemplo 3.1.1.01;sintetica;3.1.1.01
+1588;272;Conta de exemplo 3.1.1.01.001;analitica;3.1.1.01.001
+1589;273;Grupo de exemplo 3.1.1.02;sintetica;3.1.1.02
+1590;274;Conta de exemplo 3.1.1.02.001;analitica;3.1.1.02.001
+1591;275;Conta de exemplo 3.1.1.02.002;analitica;3.1.1.02.002
+1592;276;Conta de exemplo 3.1.1.02.003;analitica;3.1.1.02.003
+1593;277;Conta de exemplo 3.1.1.02.004;analitica;3.1.1.02.004
+1594;278;Conta de exemplo 3.1.1.02.005;analitica;3.1.1.02.005
+1595;279;Conta de exemplo 3.1.1.02.006;analitica;3.1.1.02.006
+1596;280;Conta de exemplo 3.1.1.02.007;analitica;3.1.1.02.007
+1597;281;Conta de exemplo 3.1.1.02.008;analitica;3.1.1.02.008
+1598;282;Conta de exemplo 3.1.1.02.009 Alfa Beta G;analitica;3.1.1.02.009
+1599;497;Conta de exemplo 3.1.1.02.010;analitica;3.1.1.02.010
+1600;894;Conta de exemplo 3.1.1.02.011;analitica;3.1.1.02.011
+1601;896;Conta de exemplo 3.1.1.02.012;analitica;3.1.1.02.012
+1602;897;Conta de exemplo 3.1.1.02.013;analitica;3.1.1.02.013
+1603;902;Conta de exemplo 3.1.1.02.014;analitica;3.1.1.02.014
+1604;1728;Conta de exemplo 3.1.1.02.015;analitica;3.1.1.02.015
+1605;1729;Conta de exemplo 3.1.1.02.016;analitica;3.1.1.02.016
+1606;1811;Conta de exemplo 3.1.1.02.017;analitica;3.1.1.02.017
+1607;283;Grupo de exemplo 3.1.2 Alfa;sintetica;3.1.2
+1608;284;Grupo de exemplo 3.1.2.01;sintetica;3.1.2.01
+1609;867;Conta de exemplo 3.1.2.01.001;analitica;3.1.2.01.001
+1610;868;Conta de exemplo 3.1.2.01.002;analitica;3.1.2.01.002
+1611;869;Conta de exemplo 3.1.2.01.003;analitica;3.1.2.01.003
+1612;884;Conta de exemplo 3.1.2.01.004;analitica;3.1.2.01.004
+1613;891;Conta de exemplo 3.1.2.01.005;analitica;3.1.2.01.005
+1614;285;Grupo de exemplo 3.1.2.02 Alf;sintetica;3.1.2.02
+1615;886;Conta de exemplo 3.1.2.02.001;analitica;3.1.2.02.001
+1616;887;Conta de exemplo 3.1.2.02.002;analitica;3.1.2.02.002
+1617;888;Conta de exemplo 3.1.2.02.003;analitica;3.1.2.02.003
+1618;889;Conta de exemplo 3.1.2.02.004;analitica;3.1.2.02.004
+1619;287;Grupo de exemplo 3.1.2.03 Alfa B;sintetica;3.1.2.03
+1620;286;Grupo de exemplo 3.1.2.04;sintetica;3.1.2.04
+1621;864;Conta de exemplo 3.1.2.04.001 Alfa;analitica;3.1.2.04.001
+1622;865;Conta de exemplo 3.1.2.04.002 Al;analitica;3.1.2.04.002
+1623;866;Conta de exemplo 3.1.2.04.003;analitica;3.1.2.04.003
+1624;288;Grupo de exemplo 3.1.2.05;sintetica;3.1.2.05
+1625;862;Conta de exemplo 3.1.2.05.001;analitica;3.1.2.05.001
+1626;863;Conta de exemplo 3.1.2.05.002;analitica;3.1.2.05.002
+1627;289;Grupo de exemplo 3.1.2.06 Alfa Beta Ga;sintetica;3.1.2.06
+1628;291;Conta de exemplo 3.1.2.06.001;analitica;3.1.2.06.001
+1629;290;Grupo de exemplo 3.1.2.07 Alfa;sintetica;3.1.2.07
+1630;292;Conta de exemplo 3.1.2.07.001;analitica;3.1.2.07.001
+1631;293;Grupo de exemplo 3.1.3 Alfa Beta Gama;sintetica;3.1.3
+1632;294;Grupo de exemplo 3.1.3.01;sintetica;3.1.3.01
+1633;295;Grupo de exemplo 3.2;sintetica;3.2
+1634;296;Grupo de exemplo 3.2.1;sintetica;3.2.1
+1635;297;Grupo de exemplo 3.2.1.01;sintetica;3.2.1.01
+1636;298;Conta de exemplo 3.2.1.01.001;analitica;3.2.1.01.001
+1637;299;Conta de exemplo 3.2.1.01.002;analitica;3.2.1.01.002
+1638;300;Conta de exemplo 3.2.1.01.003;analitica;3.2.1.01.003
+1639;301;Conta de exemplo 3.2.1.01.004;analitica;3.2.1.01.004
+1640;302;Conta de exemplo 3.2.1.01.005;analitica;3.2.1.01.005
+1641;303;Conta de exemplo 3.2.1.01.006;analitica;3.2.1.01.006
+1642;304;Conta de exemplo 3.2.1.01.007;analitica;3.2.1.01.007
+1643;305;Conta de exemplo 3.2.1.01.008;analitica;3.2.1.01.008
+1644;306;Conta de exemplo 3.2.1.01.009;analitica;3.2.1.01.009
+1645;498;Conta de exemplo 3.2.1.01.010;analitica;3.2.1.01.010
+1646;307;Grupo de exemplo 3.2.1.02;sintetica;3.2.1.02
+1647;308;Conta de exemplo 3.2.1.02.001;analitica;3.2.1.02.001
+1648;309;Grupo de exemplo 3.2.1.03;sintetica;3.2.1.03
+1649;310;Conta de exemplo 3.2.1.03.002;analitica;3.2.1.03.002
+1650;311;Grupo de exemplo 3.2.1.04;sintetica;3.2.1.04
+1651;312;Conta de exemplo 3.2.1.04.001;analitica;3.2.1.04.001
+1652;313;Conta de exemplo 3.2.1.04.002;analitica;3.2.1.04.002
+1653;314;Grupo de exemplo 3.2.1.05 Alfa Beta G;sintetica;3.2.1.05
+1654;315;Conta de exemplo 3.2.1.05.001;analitica;3.2.1.05.001
+1655;316;Conta de exemplo 3.2.1.05.002;analitica;3.2.1.05.002
+1656;317;Conta de exemplo 3.2.1.05.003;analitica;3.2.1.05.003
+1657;318;Conta de exemplo 3.2.1.05.004;analitica;3.2.1.05.004
+1658;319;Grupo de exemplo 3.2.1.06;sintetica;3.2.1.06
+1659;320;Conta de exemplo 3.2.1.06.001;analitica;3.2.1.06.001
+1660;321;Conta de exemplo 3.2.1.06.002;analitica;3.2.1.06.002
+1661;322;Conta de exemplo 3.2.1.06.003;analitica;3.2.1.06.003
+1662;323;Conta de exemplo 3.2.1.06.004 A;analitica;3.2.1.06.004
+1663;324;Conta de exemplo 3.2.1.06.005;analitica;3.2.1.06.005
+1664;325;Conta de exemplo 3.2.1.06.006 Al;analitica;3.2.1.06.006
+1665;326;Conta de exemplo 3.2.1.06.007;analitica;3.2.1.06.007
+1666;2078;Conta de exemplo 3.2.1.06.008;analitica;3.2.1.06.008
+1667;327;Grupo de exemplo 3.2.1.07 Alfa Be;sintetica;3.2.1.07
+1668;328;Conta de exemplo 3.2.1.07.001 Alfa;analitica;3.2.1.07.001
+1669;329;Grupo de exemplo 3.2.2 A;sintetica;3.2.2
+1670;330;Grupo de exemplo 3.2.2.01;sintetica;3.2.2.01
+1671;331;Conta de exemplo 3.2.2.01.001;analitica;3.2.2.01.001
+1672;332;Conta de exemplo 3.2.2.01.002;analitica;3.2.2.01.002
+1673;333;Conta de exemplo 3.2.2.01.003;analitica;3.2.2.01.003
+1674;334;Conta de exemplo 3.2.2.01.004;analitica;3.2.2.01.004
+1675;335;Conta de exemplo 3.2.2.01.005;analitica;3.2.2.01.005
+1676;336;Conta de exemplo 3.2.2.01.006;analitica;3.2.2.01.006
+1677;337;Conta de exemplo 3.2.2.01.007;analitica;3.2.2.01.007
+1678;338;Conta de exemplo 3.2.2.01.008;analitica;3.2.2.01.008
+1679;339;Conta de exemplo 3.2.2.01.009 Alfa Beta G;analitica;3.2.2.01.009
+1680;492;Conta de exemplo 3.2.2.01.010;analitica;3.2.2.01.010
+1681;499;Conta de exemplo 3.2.2.01.011;analitica;3.2.2.01.011
+1682;1240;Conta de exemplo 3.2.2.01.012;analitica;3.2.2.01.012
+1683;1305;Conta de exemplo 3.2.2.01.013;analitica;3.2.2.01.013
+1684;340;Grupo de exemplo 3.2.2.02;sintetica;3.2.2.02
+1685;341;Conta de exemplo 3.2.2.02.001;analitica;3.2.2.02.001
+1686;342;Conta de exemplo 3.2.2.02.002 Alfa;analitica;3.2.2.02.002
+1687;343;Conta de exemplo 3.2.2.02.003;analitica;3.2.2.02.003
+1688;344;Conta de exemplo 3.2.2.02.004 Al;analitica;3.2.2.02.004
+1689;345;Grupo de exemplo 3.2.2.03 Alfa;sintetica;3.2.2.03
+1690;346;Conta de exemplo 3.2.2.03.001;analitica;3.2.2.03.001
+1691;347;Conta de exemplo 3.2.2.03.002;analitica;3.2.2.03.002
+1692;348;Conta de exemplo 3.2.2.03.003;analitica;3.2.2.03.003
+1693;349;Conta de exemplo 3.2.2.03.004;analitica;3.2.2.03.004
+1694;350;Conta de exemplo 3.2.2.03.005;analitica;3.2.2.03.005
+1695;351;Conta de exemplo 3.2.2.03.006;analitica;3.2.2.03.006
+1696;352;Conta de exemplo 3.2.2.03.007;analitica;3.2.2.03.007
+1697;1239;Conta de exemplo 3.2.2.03.008;analitica;3.2.2.03.008
+1698;1266;Conta de exemplo 3.2.2.03.009;analitica;3.2.2.03.009
+1699;1355;Conta de exemplo 3.2.2.03.010;analitica;3.2.2.03.010
+1700;1232;Conta de exemplo 3.2.2.03.011;analitica;3.2.2.03.011
+1701;353;Grupo de exemplo 3.2.2.04;sintetica;3.2.2.04
+1702;354;Conta de exemplo 3.2.2.04.001;analitica;3.2.2.04.001
+1703;355;Conta de exemplo 3.2.2.04.002;analitica;3.2.2.04.002
+1704;356;Conta de exemplo 3.2.2.04.003;analitica;3.2.2.04.003
+1705;357;Conta de exemplo 3.2.2.04.004 A;analitica;3.2.2.04.004
+1706;358;Conta de exemplo 3.2.2.04.005;analitica;3.2.2.04.005
+1707;359;Conta de exemplo 3.2.2.04.006;analitica;3.2.2.04.006
+1708;360;Conta de exemplo 3.2.2.04.007;analitica;3.2.2.04.007
+1709;361;Conta de exemplo 3.2.2.04.008;analitica;3.2.2.04.008
+1710;362;Conta de exemplo 3.2.2.04.009;analitica;3.2.2.04.009
+1711;363;Conta de exemplo 3.2.2.04.010;analitica;3.2.2.04.010
+1712;364;Conta de exemplo 3.2.2.04.011;analitica;3.2.2.04.011
+1713;365;Conta de exemplo 3.2.2.04.012;analitica;3.2.2.04.012
+1714;366;Conta de exemplo 3.2.2.04.013;analitica;3.2.2.04.013
+1715;493;Conta de exemplo 3.2.2.04.014;analitica;3.2.2.04.014
+1716;1165;Conta de exemplo 3.2.2.04.015;analitica;3.2.2.04.015
+1717;1237;Conta de exemplo 3.2.2.04.017;analitica;3.2.2.04.017
+1718;1243;Conta de exemplo 3.2.2.04.018;analitica;3.2.2.04.018
+1719;1245;Conta de exemplo 3.2.2.04.019 Al;analitica;3.2.2.04.019
+1720;1253;Conta de exemplo 3.2.2.04.020;analitica;3.2.2.04.020
+1721;1255;Conta de exemplo 3.2.2.04.021;analitica;3.2.2.04.021
+1722;1297;Conta de exemplo 3.2.2.04.022;analitica;3.2.2.04.022
+1723;1262;Conta de exemplo 3.2.2.04.023;analitica;3.2.2.04.023
+1724;1306;Conta de exemplo 3.2.2.04.024;analitica;3.2.2.04.024
+1725;1313;Conta de exemplo 3.2.2.04.025;analitica;3.2.2.04.025
+1726;1319;Conta de exemplo 3.2.2.04.026;analitica;3.2.2.04.026
+1727;1418;Conta de exemplo 3.2.2.04.027;analitica;3.2.2.04.027
+1728;1229;Conta de exemplo 3.2.2.04.028;analitica;3.2.2.04.028
+1729;1316;Conta de exemplo 3.2.2.04.029;analitica;3.2.2.04.029
+1730;1330;Conta de exemplo 3.2.2.04.030;analitica;3.2.2.04.030
+1731;1331;Conta de exemplo 3.2.2.04.031;analitica;3.2.2.04.031
+1732;1332;Conta de exemplo 3.2.2.04.032;analitica;3.2.2.04.032
+1733;1333;Conta de exemplo 3.2.2.04.033 Alfa B;analitica;3.2.2.04.033
+1734;1620;Conta de exemplo 3.2.2.04.034;analitica;3.2.2.04.034
+1735;1840;Conta de exemplo 3.2.2.04.035;analitica;3.2.2.04.035
+1736;376;Grupo de exemplo 3.2.2.06 Al;sintetica;3.2.2.06
+1737;377;Conta de exemplo 3.2.2.06.001 Alfa Beta G;analitica;3.2.2.06.001
+1738;378;Conta de exemplo 3.2.2.06.002;analitica;3.2.2.06.002
+1739;379;Conta de exemplo 3.2.2.06.003;analitica;3.2.2.06.003
+1740;1352;Grupo de exemplo 3.2.2.07;sintetica;3.2.2.07
+1741;1353;Conta de exemplo 3.2.2.07.001;analitica;3.2.2.07.001
+1742;1354;Conta de exemplo 3.2.2.07.002;analitica;3.2.2.07.002
+1743;1383;Grupo de exemplo 3.2.3;sintetica;3.2.3
+1744;367;Grupo de exemplo 3.2.3.01;sintetica;3.2.3.01
+1745;368;Conta de exemplo 3.2.3.01.001;analitica;3.2.3.01.001
+1746;369;Conta de exemplo 3.2.3.01.002;analitica;3.2.3.01.002
+1747;370;Conta de exemplo 3.2.3.01.003;analitica;3.2.3.01.003
+1748;371;Conta de exemplo 3.2.3.01.004;analitica;3.2.3.01.004
+1749;372;Conta de exemplo 3.2.3.01.005;analitica;3.2.3.01.005
+1750;373;Conta de exemplo 3.2.3.01.006;analitica;3.2.3.01.006
+1751;374;Conta de exemplo 3.2.3.01.007;analitica;3.2.3.01.007
+1752;375;Conta de exemplo 3.2.3.01.008 Alfa Beta;analitica;3.2.3.01.008
+1753;380;Grupo de exemplo 3.3 Alfa;sintetica;3.3
+1754;381;Grupo de exemplo 3.3.1 Alfa;sintetica;3.3.1
+1755;383;Grupo de exemplo 3.3.1.01 Alfa Beta Gama Delta Éps;sintetica;3.3.1.01
+1756;384;Conta de exemplo 3.3.1.01.001 Alfa Beta;analitica;3.3.1.01.001
+1757;385;Grupo de exemplo 3.3.1.02 Alfa Beta Gama;sintetica;3.3.1.02
+1758;386;Conta de exemplo 3.3.1.02.001;analitica;3.3.1.02.001
+1759;387;Conta de exemplo 3.3.1.02.002 Alfa Bet;analitica;3.3.1.02.002
+1760;388;Conta de exemplo 3.3.1.02.003 Alfa Beta;analitica;3.3.1.02.003
+1761;389;Conta de exemplo 3.3.1.02.004 A;analitica;3.3.1.02.004
+1762;390;Grupo de exemplo 3.3.1.03 Alfa Beta Gama;sintetica;3.3.1.03
+1763;391;Conta de exemplo 3.3.1.03.001 Alfa;analitica;3.3.1.03.001
+1764;392;Grupo de exemplo 3.3.1.04 Alfa Be;sintetica;3.3.1.04
+1765;393;Conta de exemplo 3.3.1.04.001 Alfa;analitica;3.3.1.04.001
+1766;394;Conta de exemplo 3.3.1.04.002;analitica;3.3.1.04.002
+1767;395;Conta de exemplo 3.3.1.04.003;analitica;3.3.1.04.003
+1768;396;Grupo de exemplo 3.3.1.05 Alfa Be;sintetica;3.3.1.05
+1769;397;Conta de exemplo 3.3.1.05.001 Alfa Beta Gama Delta;analitica;3.3.1.05.001
+1770;398;Conta de exemplo 3.3.1.05.002 Alfa Beta G;analitica;3.3.1.05.002
+1771;399;Conta de exemplo 3.3.1.05.003 Al;analitica;3.3.1.05.003
+1772;400;Grupo de exemplo 3.3.1.06 Alfa;sintetica;3.3.1.06
+1773;401;Conta de exemplo 3.3.1.06.001;analitica;3.3.1.06.001
+1774;1356;Grupo de exemplo 3.3.1.07;sintetica;3.3.1.07
+1775;1357;Conta de exemplo 3.3.1.07.001;analitica;3.3.1.07.001
+1776;402;Grupo de exemplo 4 Alfa Beta G;sintetica;4
+1777;403;Grupo de exemplo 4.1;sintetica;4.1
+1778;404;Grupo de exemplo 4.1.1 Alfa Beta G;sintetica;4.1.1
+1779;405;Grupo de exemplo 4.1.1.01 Alfa Beta Gama Delta Ép;sintetica;4.1.1.01
+1780;406;Conta de exemplo 4.1.1.01.001;analitica;4.1.1.01.001
+1781;407;Conta de exemplo 4.1.1.01.002 Alfa B;analitica;4.1.1.01.002
+1782;408;Conta de exemplo 4.1.1.01.003;analitica;4.1.1.01.003
+1783;409;Conta de exemplo 4.1.1.01.004 Alfa Beta;analitica;4.1.1.01.004
+1784;410;Grupo de exemplo 4.1.1.02 Alfa B;sintetica;4.1.1.02
+1785;411;Conta de exemplo 4.1.1.02.001;analitica;4.1.1.02.001
+1786;412;Conta de exemplo 4.1.1.02.002;analitica;4.1.1.02.002
+1787;413;Grupo de exemplo 4.1.2 Alfa B;sintetica;4.1.2
+1788;414;Grupo de exemplo 4.1.2.01 Alf;sintetica;4.1.2.01
+1789;415;Conta de exemplo 4.1.2.01.001 Alfa;analitica;4.1.2.01.001
+1790;416;Conta de exemplo 4.1.2.01.002 Alfa Beta;analitica;4.1.2.01.002
+1791;417;Conta de exemplo 4.1.2.01.003 Alfa Be;analitica;4.1.2.01.003
+1792;418;Conta de exemplo 4.1.2.01.004 Alfa Beta;analitica;4.1.2.01.004
+1793;419;Grupo de exemplo 4.1.2.02 Al;sintetica;4.1.2.02
+1794;420;Conta de exemplo 4.1.2.02.001;analitica;4.1.2.02.001
+1795;421;Conta de exemplo 4.1.2.02.002 Alfa Beta;analitica;4.1.2.02.002
+1796;422;Conta de exemplo 4.1.2.02.003 Al;analitica;4.1.2.02.003
+1797;423;Conta de exemplo 4.1.2.02.004 Alfa Beta;analitica;4.1.2.02.004
+1798;424;Grupo de exemplo 4.1.2.03 Alfa Beta;sintetica;4.1.2.03
+1799;425;Conta de exemplo 4.1.2.03.001;analitica;4.1.2.03.001
+1800;426;Conta de exemplo 4.1.2.03.002;analitica;4.1.2.03.002
+1801;427;Conta de exemplo 4.1.2.03.003;analitica;4.1.2.03.003
+1802;428;Conta de exemplo 4.1.2.03.004;analitica;4.1.2.03.004
+1803;429;Conta de exemplo 4.1.2.03.005;analitica;4.1.2.03.005
+1804;477;Conta de exemplo 4.1.2.03.006;analitica;4.1.2.03.006
+1805;478;Conta de exemplo 4.1.2.03.007;analitica;4.1.2.03.007
+1806;480;Conta de exemplo 4.1.2.03.008;analitica;4.1.2.03.008
+1807;482;Conta de exemplo 4.1.2.03.009;analitica;4.1.2.03.009
+1808;484;Conta de exemplo 4.1.2.03.010;analitica;4.1.2.03.010
+1809;486;Conta de exemplo 4.1.2.03.011;analitica;4.1.2.03.011
+1810;430;Grupo de exemplo 4.1.3;sintetica;4.1.3
+1811;431;Grupo de exemplo 4.1.3.01;sintetica;4.1.3.01
+1812;432;Conta de exemplo 4.1.3.01.001;analitica;4.1.3.01.001
+1813;433;Conta de exemplo 4.1.3.01.002;analitica;4.1.3.01.002
+1814;434;Conta de exemplo 4.1.3.01.003;analitica;4.1.3.01.003
+1815;435;Conta de exemplo 4.1.3.01.004;analitica;4.1.3.01.004
+1816;475;Conta de exemplo 4.1.3.01.005;analitica;4.1.3.01.005
+1817;436;Grupo de exemplo 4.1.3.02;sintetica;4.1.3.02
+1818;437;Conta de exemplo 4.1.3.02.001;analitica;4.1.3.02.001
+1819;438;Conta de exemplo 4.1.3.02.002;analitica;4.1.3.02.002
+1820;439;Grupo de exemplo 4.1.4;sintetica;4.1.4
+1821;440;Grupo de exemplo 4.1.4.01 Alfa Beta Gama;sintetica;4.1.4.01
+1822;441;Grupo de exemplo 4.1.4.02;sintetica;4.1.4.02
+1823;442;Grupo de exemplo 4.1.5 Alfa;sintetica;4.1.5
+1824;443;Grupo de exemplo 4.1.5.01;sintetica;4.1.5.01
+1825;444;Conta de exemplo 4.1.5.01.001;analitica;4.1.5.01.001
+1826;445;Conta de exemplo 4.1.5.01.002;analitica;4.1.5.01.002
+1827;446;Conta de exemplo 4.1.5.01.003 Alfa;analitica;4.1.5.01.003
+1828;447;Conta de exemplo 4.1.5.01.004;analitica;4.1.5.01.004
+1829;448;Conta de exemplo 4.1.5.01.005;analitica;4.1.5.01.005
+1830;449;Grupo de exemplo 4.2 Alfa;sintetica;4.2
+1831;450;Grupo de exemplo 4.2.1 Alfa;sintetica;4.2.1
+1832;451;Grupo de exemplo 4.2.1.01 Alfa Beta Gama Delta Éps;sintetica;4.2.1.01
+1833;452;Conta de exemplo 4.2.1.01.001 Alfa Beta;analitica;4.2.1.01.001
+1834;453;Grupo de exemplo 4.2.1.02 Alfa Bet;sintetica;4.2.1.02
+1835;454;Conta de exemplo 4.2.1.02.001;analitica;4.2.1.02.001
+1836;455;Conta de exemplo 4.2.1.02.002 Alfa Bet;analitica;4.2.1.02.002
+1837;456;Conta de exemplo 4.2.1.02.003 Alfa Beta;analitica;4.2.1.02.003
+1838;457;Conta de exemplo 4.2.1.02.004 A;analitica;4.2.1.02.004
+1839;458;Grupo de exemplo 4.2.1.03 Alfa Beta Ga;sintetica;4.2.1.03
+1840;459;Conta de exemplo 4.2.1.03.002;analitica;4.2.1.03.002
+1841;460;Grupo de exemplo 5;sintetica;5
+1842;461;Grupo de exemplo 5.1 Alfa Beta Gama Del;sintetica;5.1
+1843;462;Grupo de exemplo 5.1.1 Alfa;sintetica;5.1.1
+1844;463;Grupo de exemplo 5.1.1.01 Al;sintetica;5.1.1.01
+1845;464;Conta de exemplo 5.1.1.01.001;analitica;5.1.1.01.001
+1846;465;Grupo de exemplo 5.1.2 Alfa B;sintetica;5.1.2
+1847;466;Grupo de exemplo 5.1.2.01 Alf;sintetica;5.1.2.01
+1848;467;Conta de exemplo 5.1.2.01.001;analitica;5.1.2.01.001
+1849;468;Grupo de exemplo 5.1.3 Alfa Bet;sintetica;5.1.3
+1850;469;Grupo de exemplo 5.1.3.01 Alfa;sintetica;5.1.3.01
+1851;470;Conta de exemplo 5.1.3.01.001 A;analitica;5.1.3.01.001
+1852;471;Grupo de exemplo 5.1.4 Alfa Beta G;sintetica;5.1.4
+1853;472;Grupo de exemplo 5.1.4.01 Alfa Bet;sintetica;5.1.4.01
+1854;473;Conta de exemplo 5.1.4.01.001;analitica;5.1.4.01.001
+1855;474;Conta de exemplo 5.1.4.01.002 Alfa;analitica;5.1.4.01.002

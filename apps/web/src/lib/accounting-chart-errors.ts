@@ -55,6 +55,25 @@ export function accountingLineReasonLabel(reason: string): string {
   return ACCOUNTING_LINE_REASON_LABELS[reason] ?? reason;
 }
 
+/**
+ * Os papéis de coluna que o reconhecimento por CONTEÚDO usa (86e3ydjyq,
+ * `client_accounting_chart/recognizer.py::ColumnRole`), vocabulário FECHADO.
+ * Valor fora dele (backend mais novo) sai cru, nunca some.
+ */
+export const ACCOUNTING_COLUMN_ROLE_LABELS: Record<string, string> = {
+  codigo: 'Código',
+  classificacao: 'Classificação',
+  tipo: 'Tipo (S ou A)',
+  grau: 'Grau',
+  nome: 'Nome',
+  natureza: 'Natureza',
+  documento: 'CNPJ/CPF',
+};
+
+export function accountingColumnRoleLabel(role: string): string {
+  return ACCOUNTING_COLUMN_ROLE_LABELS[role] ?? role;
+}
+
 export interface AccountingInvalidLine {
   line: number;
   reason: string;
@@ -82,6 +101,14 @@ export type AccountingChartRefusal =
        */
       unexpectedColumnCount: number;
       foundColumnCount: number;
+      /**
+       * O que o reconhecimento por CONTEÚDO achou (86e3ydjyq): os papéis
+       * reconhecidos, os que faltam e, entre eles, os empatados (duas colunas que
+       * podem ser o mesmo papel). Vocabulário NOSSO, nunca texto do arquivo.
+       */
+      recognizedRoles: string[];
+      missingRoles: string[];
+      ambiguousRoles: string[];
     }
   | {
       code: 'LINHAS_INVALIDAS';
@@ -130,6 +157,9 @@ export function readAccountingChartRefusal(error: unknown): AccountingChartRefus
         repeatedColumns: readStringList(details.repeatedColumns),
         unexpectedColumnCount: readCount(details.unexpectedColumnCount),
         foundColumnCount: readCount(details.foundColumnCount),
+        recognizedRoles: readStringList(details.recognizedRoles),
+        missingRoles: readStringList(details.missingRoles),
+        ambiguousRoles: readStringList(details.ambiguousRoles),
       };
     case 'LINHAS_INVALIDAS': {
       const lines = readLines(details.lines);
@@ -137,6 +167,49 @@ export function readAccountingChartRefusal(error: unknown): AccountingChartRefus
       return { code, userMessage, lines, total };
     }
   }
+}
+
+/** Uma coluna do bloco de contas, como a etapa de mapeamento a mostra (86e3ydjz4). */
+export interface ChartMappingColumn {
+  indice: number;
+  /** O texto do cabeçalho acima do bloco (exceção declarada), ou `null`. */
+  cabecalho: string | null;
+  formaDetectada: string;
+  preenchimento: number;
+  papelSugerido: string | null;
+}
+
+export interface ChartMappingRequired {
+  userMessage: string;
+  columns: ChartMappingColumn[];
+}
+
+/**
+ * O 422 `MAPEAMENTO_NECESSARIO` (86e3ydjz4): o servidor achou o bloco de contas mas não
+ * decidiu código, nome ou tipo. Não é recusa: a gaveta abre a etapa "Diga o que é cada
+ * coluna". Coluna fora da forma é descartada; sem coluna legível → `null`.
+ */
+export function readChartMappingRequired(error: unknown): ChartMappingRequired | null {
+  if (!(error instanceof ApiError) || error.code !== 'MAPEAMENTO_NECESSARIO') return null;
+  const raw = error.details.colunas;
+  if (!Array.isArray(raw)) return null;
+  const columns: ChartMappingColumn[] = [];
+  for (const item of raw as unknown[]) {
+    if (typeof item !== 'object' || item === null) continue;
+    const { indice, cabecalho, formaDetectada, preenchimento, papelSugerido } = item as Record<
+      string,
+      unknown
+    >;
+    if (typeof indice !== 'number' || typeof formaDetectada !== 'string') continue;
+    columns.push({
+      indice,
+      cabecalho: typeof cabecalho === 'string' ? cabecalho : null,
+      formaDetectada,
+      preenchimento: typeof preenchimento === 'number' ? preenchimento : 0,
+      papelSugerido: typeof papelSugerido === 'string' ? papelSugerido : null,
+    });
+  }
+  return columns.length > 0 ? { userMessage: error.userMessage, columns } : null;
 }
 
 /**

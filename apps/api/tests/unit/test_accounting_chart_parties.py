@@ -31,6 +31,8 @@ from app.core.exceptions import (
     FileHeaderMismatchError,
     FileInvalidError,
     FileLinesInvalidError,
+    PartyTypeMismatchError,
+    PartyTypeRequiredError,
 )
 from app.db.models.client_accounting_account import AccountingPartyType
 from app.modules.client_accounting_chart.parties import (
@@ -227,15 +229,29 @@ class TestPoliticaEmDuasCamadas:
 
 
 class TestRecusasDoArquivo:
-    def test_sem_titulo_e_relatorio_nao_reconhecido(self) -> None:
+    def test_sem_titulo_o_tipo_e_perguntado(self) -> None:
+        """Desde 86e3ydjzy, o relatório sem título não é recusa: o tipo é perguntado."""
         content = build_parties_xlsx(
             "cliente", _rows("cliente", (685, VALID_CNPJS[0], "A")), title=""
         )
-        with pytest.raises(FileInvalidError) as caught:
+        with pytest.raises(PartyTypeRequiredError):
             parse_parties_report(content)
-        assert caught.value.details == {"reason": "relatorio_nao_reconhecido"}
+        report = parse_parties_report(content, party_type=AccountingPartyType.FORNECEDOR)
+        assert report.party_type is AccountingPartyType.FORNECEDOR
 
-    def test_sem_cnpj_da_empresa_e_empresa_nao_identificada(self) -> None:
+    def test_com_titulo_o_titulo_manda_e_o_tipo_divergente_e_recusado(self) -> None:
+        content = build_parties_xlsx("cliente", _rows("cliente", (685, VALID_CNPJS[0], "A")))
+        assert (
+            parse_parties_report(content, party_type=AccountingPartyType.CLIENTE).party_type
+            is AccountingPartyType.CLIENTE
+        )
+        with pytest.raises(PartyTypeMismatchError):
+            parse_parties_report(content, party_type=AccountingPartyType.FORNECEDOR)
+
+    def test_rotulo_do_cnpj_sem_valor_continua_recusando(self) -> None:
+        """O rótulo `C.N.P.J.:` está no banner e o valor não é um CNPJ: recusa, como
+        sempre. Só a AUSÊNCIA do rótulo entra sem conferir (86e3ydjzy, coberto em
+        `test_accounting_chart_recognizer.py`)."""
         content = build_parties_xlsx(
             "cliente", _rows("cliente", (685, VALID_CNPJS[0], "A")), company=None
         )
@@ -334,4 +350,7 @@ class TestEspelhos:
             "documento_ausente",
             "documento_invalido",
             "conta_compartilhada",
+            # 86e3ydjzy: só no vínculo pela coluna de documento do plano.
+            "documento_repetido",
+            "conta_sintetica",
         }

@@ -40,6 +40,8 @@ import {
   setAccountingPartyLink,
   setSourceAccountBinding,
   updateAccountingAccount,
+  type AccountingChartImportRequest,
+  type AccountingPartiesImportRequest,
   type ListAccountingChartParams,
   type ListAccountingPartiesParams,
 } from '@/lib/api/client-accounting-chart';
@@ -88,8 +90,8 @@ export function useAccountingChartList(
 
 export function useImportAccountingChart(clientId: string) {
   const qc = useQueryClient();
-  return useMutation<AccountingChartImportResult, Error, File>({
-    mutationFn: (file) => importAccountingChart(clientId, file),
+  return useMutation<AccountingChartImportResult, Error, AccountingChartImportRequest>({
+    mutationFn: (request) => importAccountingChart(clientId, request),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: accountingChartKeys.all(clientId) });
       void qc.invalidateQueries({ queryKey: clientMappingKeys.all(clientId) });
@@ -99,8 +101,8 @@ export function useImportAccountingChart(clientId: string) {
 
 /** Prévia da importação (86e3qhhrm): não grava, então não invalida nada. */
 export function usePreviewAccountingChartImport(clientId: string) {
-  return useMutation<AccountingChartImportPreview, Error, File>({
-    mutationFn: (file) => previewAccountingChartImport(clientId, file),
+  return useMutation<AccountingChartImportPreview, Error, AccountingChartImportRequest>({
+    mutationFn: (request) => previewAccountingChartImport(clientId, request),
   });
 }
 
@@ -174,8 +176,8 @@ export function useAccountingPartiesList(
 /** Importa uma relação do Domínio (86e3qhhrn): o vínculo mora na conta, então a árvore inteira invalida. */
 export function useImportAccountingParties(clientId: string) {
   const qc = useQueryClient();
-  return useMutation<AccountingPartiesImportResult, Error, File>({
-    mutationFn: (file) => importAccountingParties(clientId, file),
+  return useMutation<AccountingPartiesImportResult, Error, AccountingPartiesImportRequest>({
+    mutationFn: (request) => importAccountingParties(clientId, request),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: accountingChartKeys.all(clientId) });
     },
