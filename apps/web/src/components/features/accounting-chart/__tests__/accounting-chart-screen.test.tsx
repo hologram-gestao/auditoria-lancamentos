@@ -69,6 +69,8 @@ const listState: ListState = {
 let planTotal = 0;
 /** A sonda ainda não respondeu (a lista pode ter chegado antes). */
 let probeLoading = false;
+/** 86e3ydjze: a última importação que a sonda devolve (o selo "não está 100%"). */
+let lastImportState: AccountingChartLastImport | null = null;
 const importState = { mutateAsync: vi.fn(), isPending: false };
 const partiesListState = {
   data: {
@@ -104,6 +106,7 @@ vi.mock('@/hooks/use-client-accounting-chart', () => ({
         data: {
           data: [],
           pagination: { page: 1, pageSize: 1, total: planTotal, totalPages: planTotal },
+          ultimaImportacao: lastImportState,
         },
         isLoading: false,
       };
@@ -153,6 +156,7 @@ import type {
   AccountingChartListResponse,
   AuthenticatedUser,
   SourceAccountEntry,
+  AccountingChartLastImport,
 } from '@/lib/contracts';
 import { assertNoA11yViolations } from '@/test/a11y';
 
@@ -228,6 +232,7 @@ function preview(
     ausentes: [],
     listLimit: 200,
     tipoDerivado: null,
+    linhasComProblema: [],
     ...overrides,
   };
 }
@@ -270,6 +275,7 @@ beforeAll(() => {
 beforeEach(() => {
   currentSearch = '';
   probeLoading = false;
+  lastImportState = null;
   authState.user = manager;
   clientDetailState.data = {
     closed_at: null,
@@ -1133,6 +1139,131 @@ describe('importação', () => {
 
     await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith('Erro inesperado.'));
+  });
+});
+
+describe('linhas de fora e o selo "não está 100%" (86e3ydjze)', () => {
+  const problemPreview = () =>
+    preview({
+      layout: 'reconhecido',
+      contas: 1848,
+      contasNovas: 1848,
+      contasAlteradas: 0,
+      contasSemMudanca: 0,
+      linhasComProblema: [
+        { linha: 10, motivo: 'codigo_vazio' },
+        { linha: 12, motivo: 'tipo_invalido' },
+      ],
+    });
+
+  async function reviewWithProblems() {
+    withoutPlan();
+    previewState.mutateAsync = vi.fn().mockResolvedValue(problemPreview());
+    importState.mutateAsync = vi.fn().mockResolvedValue({
+      contas: 1848,
+      contasNovas: 1848,
+      contasAlteradas: 0,
+      contasAusentes: 0,
+      contasExcluidas: 2,
+    });
+    render(<AccountingChartScreen clientId="c1" />);
+    const user = userEvent.setup({ applyAccept: false });
+    await user.click(screen.getByRole('button', { name: /Importar planilha/ }));
+    const dialog = await screen.findByRole('dialog');
+    await user.upload(within(dialog).getByLabelText('Planilha (.csv, .xlsx ou .xls)'), csvFile());
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+    return { user, dialog };
+  }
+
+  it('a prévia lista linha × motivo e o confirmar diz quantas ficam de fora', async () => {
+    const { dialog } = await reviewWithProblems();
+    const box = await within(dialog).findByTestId('accounting-chart-preview-problem-lines');
+    expect(box).toHaveTextContent('2 linhas da planilha têm problema e ficam de fora');
+    const rows = within(box).getAllByRole('row');
+    expect(rows[1]).toHaveTextContent('10Código reduzido vazio');
+    expect(rows[2]).toHaveTextContent(/12Tipo diferente/);
+    expect(within(dialog).getByRole('button', { name: 'Importar sem as 2 linhas' })).toBeEnabled();
+  });
+
+  it('confirmar manda EXATAMENTE as linhas da prévia e o resultado diz quantas ficaram de fora', async () => {
+    const { user, dialog } = await reviewWithProblems();
+    await user.click(
+      await within(dialog).findByRole('button', { name: 'Importar sem as 2 linhas' }),
+    );
+    await waitFor(() =>
+      expect(importState.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ excludedLines: [10, 12] }),
+      ),
+    );
+    expect(await screen.findByTestId('accounting-chart-import-excluded')).toHaveTextContent(
+      '2 linhas da planilha ficaram de fora.',
+    );
+  });
+
+  it('sem linha com problema, o pedido não leva a lista', async () => {
+    withoutPlan();
+    importState.mutateAsync = vi.fn().mockResolvedValue({
+      contas: 3,
+      contasNovas: 1,
+      contasAlteradas: 1,
+      contasAusentes: 0,
+      contasExcluidas: 0,
+    });
+    render(<AccountingChartScreen clientId="c1" />);
+    const user = userEvent.setup({ applyAccept: false });
+    await user.click(screen.getByRole('button', { name: /Importar planilha/ }));
+    const dialog = await screen.findByRole('dialog');
+    await user.upload(within(dialog).getByLabelText('Planilha (.csv, .xlsx ou .xls)'), csvFile());
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+    await user.click(await within(dialog).findByRole('button', { name: 'Confirmar importação' }));
+    await waitFor(() =>
+      expect(importState.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ excludedLines: null }),
+      ),
+    );
+  });
+
+  it('com linha de fora na última importação, o selo aparece; o tooltip e o diálogo dizem quais', async () => {
+    lastImportState = {
+      importadaEm: '2026-11-03T15:30:00Z',
+      layout: 'reconhecido',
+      contas: 1848,
+      linhasExcluidas: [
+        { linha: 10, motivo: 'codigo_vazio' },
+        { linha: 12, motivo: 'tipo_invalido' },
+      ],
+    };
+    render(<AccountingChartScreen clientId="c1" />);
+    const badge = screen.getByTestId('accounting-chart-incomplete-badge');
+    expect(badge).toHaveTextContent('Plano não está 100%');
+    expect(badge).toHaveAccessibleName(
+      /^Plano não está 100%: O plano importado em 03\/11\/2026 às \d{2}h30 não está 100%: 2 linhas ficaram de fora\. Ver as linhas\.$/,
+    );
+    expect(badge).not.toHaveAttribute('title');
+
+    const user = userEvent.setup();
+    await user.hover(badge);
+    expect((await screen.findAllByText(/Clique para ver quais\./)).length).toBeGreaterThan(0);
+
+    await user.click(badge);
+    const dialog = await screen.findByRole('dialog', { name: 'O plano importado não está 100%' });
+    expect(within(dialog).getAllByRole('row')).toHaveLength(3);
+    expect(dialog).toHaveTextContent('Corrija o arquivo e importe de novo para tirar este aviso.');
+  });
+
+  it('última importação inteira (ou nenhuma registrada): sem selo', () => {
+    lastImportState = {
+      importadaEm: '2026-11-03T15:30:00Z',
+      layout: 'modelo',
+      contas: 3,
+      linhasExcluidas: [],
+    };
+    const { unmount } = render(<AccountingChartScreen clientId="c1" />);
+    expect(screen.queryByTestId('accounting-chart-incomplete-badge')).not.toBeInTheDocument();
+    unmount();
+    lastImportState = null;
+    render(<AccountingChartScreen clientId="c1" />);
+    expect(screen.queryByTestId('accounting-chart-incomplete-badge')).not.toBeInTheDocument();
   });
 });
 

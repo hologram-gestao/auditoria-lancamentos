@@ -671,6 +671,7 @@ class UsageEventService:
         contas_alteradas: int,
         contas_ausentes: int,
         layout: ChartImportLayout,
+        contas_excluidas: int = 0,
     ) -> bool:
         """S16 — a importação do plano contábil deu certo. Sem `session_id`, sem dedup.
 
@@ -688,6 +689,7 @@ class UsageEventService:
                 contas_alteradas=contas_alteradas,
                 contas_ausentes=contas_ausentes,
                 layout=layout,
+                contas_excluidas=contas_excluidas,
             ),
         )
         if props is None:

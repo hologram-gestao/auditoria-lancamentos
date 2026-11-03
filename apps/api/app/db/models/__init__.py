@@ -45,6 +45,7 @@ from app.db.models.client_accounting_account import (
     accounting_account_party_type_check,
     accounting_account_type_check,
 )
+from app.db.models.client_accounting_chart_import import ClientAccountingChartImport
 from app.db.models.client_assignment import (
     UQ_CLIENT_ASSIGNMENT_CLIENT_USER,
     UQ_CLIENT_ASSIGNMENT_PRIMARY,
@@ -374,6 +375,7 @@ __all__ = [
     "ChartOfAccountsStatus",
     "Client",
     "ClientAccountingAccount",
+    "ClientAccountingChartImport",
     "ClientAssignment",
     "ClientCategory",
     "ClientCategoryTone",

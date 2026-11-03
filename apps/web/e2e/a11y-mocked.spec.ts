@@ -688,7 +688,10 @@ const FILE_REFUSALS: Record<'cabecalho' | 'linhas', Record<string, unknown>> = {
  * cenário "sem plano" e o desfecho da importação são trocados por teste.
  */
 let accountingChartEmpty = false;
-let accountingImportOutcome: 'sucesso' | 'linhas' | 'dominio' | 'mapeamento' = 'sucesso';
+let accountingImportOutcome: 'sucesso' | 'linhas' | 'dominio' | 'mapeamento' | 'linhas-de-fora' =
+  'sucesso';
+/** 86e3ydjze — a última importação deixou linhas de fora (o selo "não está 100%"). */
+let accountingLastImportIncomplete = false;
 /** 86e3qhhrn — a importação da relação de clientes/fornecedores: sucesso ou recusa. */
 let partiesImportOutcome: 'sucesso' | 'linhas' = 'sucesso';
 /** 86e3qhhrr — a prévia da planilha da Omie: pronta (com aviso de cadastro) ou com problemas. */
@@ -2753,6 +2756,18 @@ async function fulfillApi(route: Route): Promise<void> {
   }
   if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/import/preview`) {
     if (enviouXls(route)) return recusarXls(route);
+    if (accountingImportOutcome === 'linhas-de-fora') {
+      return json({
+        ...ACCOUNTING_PREVIEW_FIRST,
+        layout: 'reconhecido',
+        contas: 4,
+        contasNovas: 4,
+        linhasComProblema: [
+          { linha: 10, motivo: 'codigo_vazio' },
+          { linha: 12, motivo: 'tipo_invalido' },
+        ],
+      });
+    }
     if (accountingImportOutcome === 'mapeamento') {
       if (!(route.request().postData() ?? '').includes('name="mapeamento"')) {
         return route.fulfill({
@@ -2892,6 +2907,17 @@ async function fulfillApi(route: Route): Promise<void> {
           total: contas.length,
           totalPages: contas.length === 0 ? 0 : Math.ceil(contas.length / pageSize),
         },
+        ultimaImportacao: accountingLastImportIncomplete
+          ? {
+              importadaEm: '2026-11-03T15:30:00Z',
+              layout: 'reconhecido',
+              contas: 4,
+              linhasExcluidas: [
+                { linha: 10, motivo: 'codigo_vazio' },
+                { linha: 12, motivo: 'tipo_invalido' },
+              ],
+            }
+          : null,
       }),
     });
   }
@@ -4153,6 +4179,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   // S16: o cliente TEM plano contábil e a importação dá certo, por padrão.
   accountingChartEmpty = false;
   accountingImportOutcome = 'sucesso';
+  accountingLastImportIncomplete = false;
   partiesImportOutcome = 'sucesso';
   omieExportOutcome = 'pronta';
   mappingAccountingDestination = false;
@@ -12247,6 +12274,58 @@ for (const vp of VIEWPORTS) {
       await expect(derivado).toContainText('2 contas marcadas como sintéticas pela hierarquia');
       await shot(page, `plano-contabil-mapeamento-previa-${slugPC}`);
       await analyze(page, `plano contábil — prévia do mapeamento (${vp.label})`);
+    });
+
+    test('linhas com problema na prévia e o selo "Plano não está 100%" (86e3ydjze)', async ({
+      page,
+    }) => {
+      accountingChartEmpty = true;
+      accountingImportOutcome = 'linhas-de-fora';
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+
+      await page.getByRole('button', { name: 'Importar planilha' }).click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      await gaveta.getByLabel('Planilha (.csv, .xlsx ou .xls)').setInputFiles(PLANILHA_PLANO);
+      await gaveta.getByRole('button', { name: 'Revisar mudanças', exact: true }).click();
+      const linhas = gaveta.getByTestId('accounting-chart-preview-problem-lines');
+      await expect(linhas).toContainText('2 linhas da planilha têm problema e ficam de fora');
+      await expect(linhas.getByRole('row')).toHaveCount(3);
+      const confirmar = gaveta.getByRole('button', { name: 'Importar sem as 2 linhas' });
+      await exigirDentroDaViewport(page, confirmar, `${vp.label}: "Importar sem as 2 linhas"`);
+      await shot(page, `plano-contabil-linhas-de-fora-${slugPC}`);
+      await analyze(page, `plano contábil — prévia com linhas de fora (${vp.label})`);
+      await gaveta.getByRole('button', { name: 'Voltar' }).click();
+      await gaveta.getByRole('button', { name: 'Cancelar' }).click();
+
+      // A tela com a última importação incompleta: o selo vermelho ao lado do título.
+      accountingChartEmpty = false;
+      accountingLastImportIncomplete = true;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+      const selo = page.getByTestId('accounting-chart-incomplete-badge');
+      await expect(selo).toHaveText('Plano não está 100%');
+      await exigirDentroDaViewport(page, selo, `${vp.label}: selo do plano incompleto`);
+      expect(
+        await measuredContrast(page, '[data-testid="accounting-chart-incomplete-badge"]'),
+      ).toBeGreaterThanOrEqual(4.5);
+      // Foco do teclado abre o tooltip (o mesmo do hover).
+      await selo.focus();
+      await expect(page.getByRole('tooltip')).toContainText(
+        'não está 100%: 2 linhas ficaram de fora',
+      );
+      await analyze(page, `plano contábil — selo com tooltip (${vp.label})`);
+      await selo.click();
+      const dialogo = page.getByRole('dialog', { name: 'O plano importado não está 100%' });
+      await aguardarAnimacao(dialogo);
+      await expect(dialogo.getByRole('row')).toHaveCount(3);
+      await exigirDentroDaViewport(
+        page,
+        dialogo.getByRole('button', { name: 'Fechar' }).last(),
+        `${vp.label}: "Fechar" do diálogo das linhas`,
+      );
+      await shot(page, `plano-contabil-selo-incompleto-${slugPC}`);
+      await analyze(page, `plano contábil — diálogo das linhas de fora (${vp.label})`);
     });
   });
 }

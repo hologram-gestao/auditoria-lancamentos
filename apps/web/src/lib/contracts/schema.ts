@@ -603,7 +603,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Importa (ou reimporta) o plano de contas contábil do cliente a partir de uma planilha no MODELO DA PLATAFORMA — tudo ou nada. Modelo: CSV UTF-8 separado por `;`, XLSX ou XLS (primeira aba), cabeçalho na linha 1 com as colunas `codigo_reduzido`, `nome` e `tipo` (obrigatórias) e `classificacao` (opcional), em qualquer ordem e sem outras colunas; `tipo` é `analitica` ou `sintetica`; código reduzido com letras, dígitos, `.` e `-` (até 20), nome até 200 caracteres, classificação até 40. Exemplo: `codigo_reduzido;nome;tipo` / `649;Banco conta movimento;analitica`. Também aceita o plano de contas EXPORTADO do Domínio em XLSX ou no XLS que o sistema grava, reconhecido pelo cabeçalho `Código`/`T`/`Classificação`/`Nome`/`Grau` nas 10 primeiras linhas e convertido para o modelo (código, `S` = sintética e vazio = analítica, classificação, nome e grau, que tem de ser a profundidade da classificação); o CSV nativo do Domínio não é aceito. Planilha (XLSX ou XLS) que não é nenhum dos dois é lida pelo CONTEÚDO das colunas (layout `reconhecido`): inteiro sem repetição é o código, `1.1.2` a classificação, `S`/`A` o tipo, inteiro igual à profundidade da classificação o grau e texto o nome; natureza, CNPJ e qualquer outra coluna são ignorados, e o nome da coluna só desempata. Quando o conteúdo não decide código, nome ou tipo, a resposta é 422 `MAPEAMENTO_NECESSARIO` com `details.colunas` (`indice`, `cabecalho`, `formaDetectada`, `preenchimento`, `papelSugerido`: o cabeçalho é o único texto do arquivo que sai, nunca um valor de célula) e o pedido seguinte manda o campo `mapeamento`. A reimportação casa por código e só adiciona e atualiza: conta nova entra ativa, conta existente atualiza nome, tipo e classificação, e a conta que não veio na planilha continua como estava (nunca é inativada nem apagada) e ganha o selo `absentSince`, que sai quando ela volta. A situação da conta não muda pela planilha. Antes de gravar, `POST …/import/preview` mostra o que muda. Responde as contagens `contas`, `contasNovas`, `contasAlteradas` e `contasAusentes`. O nome é cifrado com a chave do cliente. Requer `manage_client_accounting_chart` (plataforma, admin e gerente da carteira; usuários do cliente recebem 403 e a negação fica na trilha). Cliente encerrado: 409. Recusas, todas 422 e sem gravar nada: `FORMATO_NAO_SUPORTADO` (não é CSV nem XLSX pelo CONTEÚDO), `ARQUIVO_INVALIDO` (não abre, ou planilha sem nenhuma conta com `details.reason=sem_contas`), `CABECALHO_DIVERGENTE` (`details.missingColumns`/`repeatedColumns` — só colunas do MODELO — mais `details.unexpectedColumnCount`/`foundColumnCount` e, do reconhecimento por conteúdo, `recognizedRoles`/`missingRoles`/`ambiguousRoles` em papéis `codigo`, `classificacao`, `tipo`, `grau` e `nome`) e `LINHAS_INVALIDAS` (`details.lines=[{line, reason}]` com `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, `codigo_repetido`, `nome_vazio`, `nome_longo`, `tipo_invalido`, `classificacao_longa` e, no export do Domínio, também `codigo_ausente`, `classificacao_ausente`, `grau_ausente`, `grau_divergente`, `linha_irreconhecivel` e `conta_fora_do_bloco` (linha com cara de conta depois do fim das contas: o arquivo inteiro é recusado), e `details.total`) — a resposta nunca traz o conteúdo de uma célula. */
+        /** Importa (ou reimporta) o plano de contas contábil do cliente a partir de uma planilha no MODELO DA PLATAFORMA — tudo ou nada. Modelo: CSV UTF-8 separado por `;`, XLSX ou XLS (primeira aba), cabeçalho na linha 1 com as colunas `codigo_reduzido`, `nome` e `tipo` (obrigatórias) e `classificacao` (opcional), em qualquer ordem e sem outras colunas; `tipo` é `analitica` ou `sintetica`; código reduzido com letras, dígitos, `.` e `-` (até 20), nome até 200 caracteres, classificação até 40. Exemplo: `codigo_reduzido;nome;tipo` / `649;Banco conta movimento;analitica`. Também aceita o plano de contas EXPORTADO do Domínio em XLSX ou no XLS que o sistema grava, reconhecido pelo cabeçalho `Código`/`T`/`Classificação`/`Nome`/`Grau` nas 10 primeiras linhas e convertido para o modelo (código, `S` = sintética e vazio = analítica, classificação, nome e grau, que tem de ser a profundidade da classificação); o CSV nativo do Domínio não é aceito. Planilha (XLSX ou XLS) que não é nenhum dos dois é lida pelo CONTEÚDO das colunas (layout `reconhecido`): inteiro sem repetição é o código, `1.1.2` a classificação, `S`/`A` o tipo, inteiro igual à profundidade da classificação o grau e texto o nome; natureza, CNPJ e qualquer outra coluna são ignorados, e o nome da coluna só desempata. Quando o conteúdo não decide código, nome ou tipo, a resposta é 422 `MAPEAMENTO_NECESSARIO` com `details.colunas` (`indice`, `cabecalho`, `formaDetectada`, `preenchimento`, `papelSugerido`: o cabeçalho é o único texto do arquivo que sai, nunca um valor de célula) e o pedido seguinte manda o campo `mapeamento`. Linha com problema não recusa mais o arquivo inteiro: a prévia a lista em `linhasComProblema` e a importação só grava SEM ela quando o campo `linhasExcluidas` traz exatamente a mesma lista (sem o campo, ou diferente, é o 422 `LINHAS_INVALIDAS`); o arquivo inteiro continua recusado com código repetido ou com mais de 20% das linhas com problema. A importação fica registrada, e a lista do plano devolve a última em `ultimaImportacao`. A reimportação casa por código e só adiciona e atualiza: conta nova entra ativa, conta existente atualiza nome, tipo e classificação, e a conta que não veio na planilha continua como estava (nunca é inativada nem apagada) e ganha o selo `absentSince`, que sai quando ela volta. A situação da conta não muda pela planilha. Antes de gravar, `POST …/import/preview` mostra o que muda. Responde as contagens `contas`, `contasNovas`, `contasAlteradas` e `contasAusentes`. O nome é cifrado com a chave do cliente. Requer `manage_client_accounting_chart` (plataforma, admin e gerente da carteira; usuários do cliente recebem 403 e a negação fica na trilha). Cliente encerrado: 409. Recusas, todas 422 e sem gravar nada: `FORMATO_NAO_SUPORTADO` (não é CSV nem XLSX pelo CONTEÚDO), `ARQUIVO_INVALIDO` (não abre, ou planilha sem nenhuma conta com `details.reason=sem_contas`), `CABECALHO_DIVERGENTE` (`details.missingColumns`/`repeatedColumns` — só colunas do MODELO — mais `details.unexpectedColumnCount`/`foundColumnCount` e, do reconhecimento por conteúdo, `recognizedRoles`/`missingRoles`/`ambiguousRoles` em papéis `codigo`, `classificacao`, `tipo`, `grau` e `nome`) e `LINHAS_INVALIDAS` (`details.lines=[{line, reason}]` com `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, `codigo_repetido`, `nome_vazio`, `nome_longo`, `tipo_invalido`, `classificacao_longa` e, no export do Domínio, também `codigo_ausente`, `classificacao_ausente`, `grau_ausente`, `grau_divergente`, `linha_irreconhecivel` e `conta_fora_do_bloco` (linha com cara de conta depois do fim das contas: o arquivo inteiro é recusado), e `details.total`) — a resposta nunca traz o conteúdo de uma célula. */
         post: operations["import_accounting_chart_api_v1_clients__client_id__accounting_chart_import_post"];
         delete?: never;
         options?: never;
@@ -2481,6 +2481,8 @@ export interface components {
             /** Data */
             data: components["schemas"]["AccountingAccountResponse"][];
             pagination: components["schemas"]["PaginationMeta"];
+            /** @description A última importação registrada do plano (desde 03/11/2026), ou `null`. Só contagens, linhas e motivos fechados: nenhum nome nem célula. */
+            ultimaImportacao?: components["schemas"]["ChartLastImport"] | null;
         };
         /** AccountingFileGenerationEnvelope */
         AccountingFileGenerationEnvelope: {
@@ -3053,6 +3055,11 @@ export interface components {
              * @description Opcional. O que é cada coluna, quando a planilha pediu (`MAPEAMENTO_NECESSARIO`): JSON `{"colunas": {"codigo": 0, "classificacao": 1, "tipo": 2, "grau": 3, "nome": 5}, "tipoPelaHierarquia": false}` (índice 0 = primeira coluna). `codigo` e `nome` são obrigatórios; `tipo` também, salvo com `tipoPelaHierarquia: true`, que exige a `classificacao` e marca como sintética a conta que tem outra abaixo. Com ele, a planilha é lida pelos papéis escolhidos (layout `mapeado`). Forma inválida: 400.
              */
             mapeamento?: string | null;
+            /**
+             * Linhasexcluidas
+             * @description Opcional, só na importação. As linhas que a pessoa confirmou deixar DE FORA, como a prévia as devolveu em `linhasComProblema`: JSON `[12, 40]`. O servidor recalcula as linhas com problema do MESMO arquivo e só grava se o conjunto for IGUAL; diferença é 422 `LINHAS_INVALIDAS` e nada é gravado. Forma inválida: 400.
+             */
+            linhasExcluidas?: string | null;
         };
         /** Body_import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post */
         Body_import_accounting_parties_api_v1_clients__client_id__accounting_chart_parties_import_post: {
@@ -3236,6 +3243,12 @@ export interface components {
              * @description Contas do cliente que não vieram nesta planilha: continuam como estavam (nunca são inativadas nem apagadas) e ganham o selo `absentSince`.
              */
             contasAusentes: number;
+            /**
+             * Contasexcluidas
+             * @description Linhas da planilha que ficaram DE FORA por confirmação (`linhasExcluidas`); com elas, a tela do plano mostra o selo "não está 100%".
+             * @default 0
+             */
+            contasExcluidas: number;
         };
         /**
          * ChartImportPreviewEnvelope
@@ -3308,8 +3321,33 @@ export interface components {
              * @description O teto de cada lista; as contagens são as reais.
              */
             listLimit: number;
+            /**
+             * Linhascomproblema
+             * @description As linhas da planilha que NÃO entram (86e3ydjze), em ordem de linha, com o motivo fechado. Vazia = a planilha entra inteira. Para importar sem elas, a importação manda a MESMA lista em `linhasExcluidas`.
+             */
+            linhasComProblema: components["schemas"]["ChartProblemLine"][];
             /** @description Só quando o mapeamento pediu o tipo pela hierarquia (`tipoPelaHierarquia`): quantas contas ficaram sintéticas (têm conta abaixo) e quantas analíticas. `null` nos outros casos. */
             tipoDerivado: components["schemas"]["ChartDerivedTypes"] | null;
+        };
+        /**
+         * ChartLastImport
+         * @description A última importação do plano (86e3ydjze): o que a tela lê para o selo.
+         */
+        ChartLastImport: {
+            /**
+             * Importadaem
+             * Format: date-time
+             */
+            importadaEm: string;
+            /** Layout */
+            layout: string;
+            /** Contas */
+            contas: number;
+            /**
+             * Linhasexcluidas
+             * @description As linhas que ficaram DE FORA por confirmação na prévia. Vazia = o plano importado está inteiro; com itens, a tela mostra o selo "não está 100%".
+             */
+            linhasExcluidas: components["schemas"]["ChartProblemLine"][];
         };
         /**
          * ChartOfAccountEntryResponse
@@ -3523,6 +3561,22 @@ export interface components {
             type: components["schemas"]["AccountingAccountType"];
             /** Classification */
             classification?: string | null;
+        };
+        /**
+         * ChartProblemLine
+         * @description Uma linha da planilha que fica (ou ficou) DE FORA: só o número e o motivo fechado.
+         */
+        ChartProblemLine: {
+            /**
+             * Linha
+             * @description A linha física da planilha, como no Excel.
+             */
+            linha: number;
+            /**
+             * Motivo
+             * @description Motivo no vocabulário fechado da importação (`codigo_vazio`, `nome_vazio`, `tipo_invalido`, `grau_divergente`, `conta_fora_do_bloco`…).
+             */
+            motivo: string;
         };
         /**
          * CheckDuplicateResponse

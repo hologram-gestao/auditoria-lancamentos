@@ -207,6 +207,29 @@ No plano exportado do Domínio, `reason` também pode ser `codigo_ausente`,
 contam). Classificação repetida não é recusa: o Domínio aceita duas contas com a mesma
 classificação e códigos reduzidos diferentes, e a chave da conta é o código reduzido.
 
+## Linhas com problema: de fora por confirmação, e o selo (86e3ydjze)
+
+Desde 03/11/2026 uma linha fora do padrão não recusa mais o arquivo inteiro, nos quatro
+caminhos (modelo, Domínio, conteúdo e mapeamento):
+
+- a **prévia** devolve `linhasComProblema: [{linha, motivo}]` (os motivos são os da tabela
+  acima, nenhum novo; nunca a célula) e as contagens já sem essas linhas;
+- a **importação** só grava sem elas quando o campo multipart `linhasExcluidas` (JSON,
+  `[10, 12]`) traz EXATAMENTE a lista que o servidor recalcula no mesmo arquivo. Sem o campo,
+  ou com uma lista diferente (o arquivo mudou, ou a revisão era de outro arquivo), é o 422
+  `LINHAS_INVALIDAS` de sempre e nada é gravado;
+- continuam recusando o arquivo **inteiro**: `codigo_repetido` (ambiguidade de chave) e mais
+  de **20%** das linhas com problema (`MAX_PROBLEM_LINE_RATIO`: a leitura provavelmente está
+  errada). Com tantos problemas numa coluna, ela nem chega a ser reconhecida (mais de 5% fora
+  da forma) e a resposta é o `MAPEAMENTO_NECESSARIO`; mapeada, o teto recusa;
+- cada importação que entra fica registrada em `client_accounting_chart_imports` (quem, quando,
+  layout, contagens e as linhas de fora). A lista do plano (`GET …/accounting-chart`) devolve a
+  última em `ultimaImportacao: {importadaEm, layout, contas, linhasExcluidas}`;
+- com linha de fora na última importação, a tela mostra ao lado do título o selo vermelho
+  **"Plano não está 100%"**: o tooltip diz quando e quantas, e o clique abre a lista linha ×
+  motivo. A importação seguinte sem linha de fora faz o selo sumir. A resposta da importação
+  ganhou `contasExcluidas` e o evento `plano_contabil_importado`, `contas_excluidas`.
+
 ## Validador único de conta (consumido pelas 16.2 e 16.3)
 
 `AccountingChartService.require_postable_account(client_id, account_id)`: conta de outro

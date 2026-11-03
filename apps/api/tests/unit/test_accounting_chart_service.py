@@ -97,6 +97,10 @@ class _FakeRepo:
     async def update_accounts(self, updates: list[dict[str, Any]]) -> None:
         self.updates.extend(updates)
 
+    async def record_import(self, record: Any) -> None:
+        # 86e3ydjze: o registro da importação, na mesma transação.
+        self.recorded = record
+
     async def mark_absent(
         self, client_id: UUID, *, account_ids: list[UUID], author_id: UUID
     ) -> int:

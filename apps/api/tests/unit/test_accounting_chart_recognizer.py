@@ -44,8 +44,10 @@ from app.modules.client_accounting_chart.recognizer import (
 )
 from app.modules.client_accounting_chart.schemas import ChartColumnMappingRequest
 from app.modules.client_accounting_chart.sheet import (
+    MAX_PROBLEM_LINE_RATIO,
     MODEL_COLUMNS,
     parse_chart_sheet,
+    refuse_unconfirmed_lines,
     validate_rows,
 )
 from app.modules.client_file_ingestion.reader import read_sheet_raw_rows
@@ -479,3 +481,95 @@ class TestPedidoDeMapeamento:
         mapping = request.to_mapping()
         assert mapping.type_by_hierarchy is True
         assert dict(mapping.roles) == {"codigo": 0, "classificacao": 1, "nome": 2}
+
+
+def _tract_with(**cells: Any) -> bytes:
+    """A fixture da Tract com células trocadas (`A10=None`, `C12="X"`…), em memória."""
+    wb = load_workbook(io.BytesIO(_TRACT.read_bytes()))
+    ws = wb.worksheets[0]
+    for ref, value in cells.items():
+        ws[ref] = value
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+class TestLinhasComProblema:
+    """86e3ydjze: linha com problema vai para a prévia, salvo os dois casos de sempre."""
+
+    def test_tres_linhas_com_problema_saem_da_lista_e_voltam_com_o_motivo(self) -> None:
+        content = _tract_with(A10=None, C12="X", F20=None)
+        parsed = parse_chart_sheet(content, allow_problems=True)
+        assert parsed.problems == (
+            (10, "codigo_vazio"),
+            (12, "tipo_invalido"),
+            (20, "nome_vazio"),
+        )
+        assert len(parsed.rows) == 1847
+        assert {r.line for r in parsed.rows}.isdisjoint({10, 12, 20})
+
+    def test_sem_a_permissao_continua_recusando_tudo(self) -> None:
+        with pytest.raises(FileLinesInvalidError):
+            parse_chart_sheet(_tract_with(C12="X"))
+
+    def test_codigo_repetido_recusa_o_arquivo_inteiro(self) -> None:
+        with pytest.raises(FileLinesInvalidError) as caught:
+            parse_chart_sheet(_tract_with(A12=6), allow_problems=True)
+        assert caught.value.details["lines"] == [{"line": 12, "reason": "codigo_repetido"}]
+        assert "repetido" in caught.value.user_message
+
+    #: Com 400 tipos estranhos a COLUNA de tipo deixa de ser reconhecida (mais de 5% fora
+    #: da forma); quem lê é o mapeamento, como a tela faria depois de perguntar.
+    _MAPPING = ColumnMapping(roles={"codigo": 0, "classificacao": 1, "tipo": 2, "nome": 5})
+
+    def test_acima_do_teto_recusa_o_arquivo_inteiro(self) -> None:
+        # 400 linhas com tipo estranho: 21,6% das 1850, acima do teto de 20%.
+        content = _tract_with(**{f"C{line}": "X" for line in range(6, 406)})
+        with pytest.raises(FileLinesInvalidError) as caught:
+            parse_chart_sheet(content, mapping=self._MAPPING, allow_problems=True)
+        assert caught.value.details["total"] == 400
+        assert "Mais de 20%" in caught.value.user_message
+
+    def test_o_teto_e_uma_constante_nomeada(self) -> None:
+        assert MAX_PROBLEM_LINE_RATIO == 0.20
+        # 370 = exatamente 20%: ainda passa (o teto é "acima de").
+        content = _tract_with(**{f"C{line}": "X" for line in range(6, 376)})
+        parsed = parse_chart_sheet(content, mapping=self._MAPPING, allow_problems=True)
+        assert len(parsed.problems) == 370
+
+    def test_o_dominio_tambem_vai_para_a_previa(self) -> None:
+        wb = load_workbook(io.BytesIO(_DOMINIO.read_bytes()))
+        ws = wb.worksheets[0]
+        ws["X100"] = 9
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        parsed = parse_chart_sheet(buffer.getvalue(), allow_problems=True)
+        assert parsed.layout == "dominio"
+        assert parsed.problems == ((100, "grau_divergente"),)
+        assert len(parsed.rows) == 562
+
+
+class TestConfirmacao:
+    def test_sem_confirmacao_e_com_problema_e_a_recusa_de_sempre(self) -> None:
+        with pytest.raises(FileLinesInvalidError) as caught:
+            refuse_unconfirmed_lines([(12, "tipo_invalido")], confirmed=None)
+        assert caught.value.details["lines"] == [{"line": 12, "reason": "tipo_invalido"}]
+
+    def test_a_mesma_lista_passa(self) -> None:
+        refuse_unconfirmed_lines([(12, "tipo_invalido"), (20, "nome_vazio")], confirmed=[20, 12])
+
+    @pytest.mark.parametrize("confirmed", [[12], [12, 20, 30], [], [99]])
+    def test_lista_diferente_recusa(self, confirmed: list[int]) -> None:
+        with pytest.raises(FileLinesInvalidError) as caught:
+            refuse_unconfirmed_lines(
+                [(12, "tipo_invalido"), (20, "nome_vazio")], confirmed=confirmed
+            )
+        assert "não são as que você confirmou" in caught.value.user_message
+
+    def test_confirmar_linhas_num_arquivo_sem_problema_recusa(self) -> None:
+        with pytest.raises(FileLinesInvalidError):
+            refuse_unconfirmed_lines([], confirmed=[12])
+
+    def test_sem_problema_e_sem_confirmacao_passa(self) -> None:
+        refuse_unconfirmed_lines([], confirmed=None)
+        refuse_unconfirmed_lines([], confirmed=[])

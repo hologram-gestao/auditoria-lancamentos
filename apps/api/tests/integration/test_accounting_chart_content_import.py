@@ -3,6 +3,11 @@
     POST /api/v1/clients/{client_id}/accounting-chart/import/preview
     POST /api/v1/clients/{client_id}/accounting-chart/import
 
+Sub 3 (86e3ydjze): linha com problema não derruba mais o arquivo: a prévia a lista, a
+importação só grava sem ela com a MESMA lista confirmada (`linhasExcluidas`), o registro
+da importação alimenta `ultimaImportacao` na lista (o selo da tela), some quando o arquivo
+correto entra, e sai no encerramento e na exclusão definitiva.
+
 Sub 2 (86e3ydjz4): o bloco que o conteúdo não decide responde 422
 `MAPEAMENTO_NECESSARIO` com o perfil das colunas (o cabeçalho sai, valor de célula
 nunca), e a prévia e a importação com o campo `mapeamento` leem a planilha pela escolha
@@ -27,12 +32,14 @@ from uuid import uuid4
 import pytest
 from openpyxl import Workbook, load_workbook
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from structlog.testing import capture_logs
 
 from app.core.security import hash_password
 from app.db.models import (
     Client,
     ClientAccountingAccount,
+    ClientAccountingChartImport,
     ClientAssignment,
     User,
     UserRole,
@@ -71,6 +78,7 @@ async def _seed_user(session: AsyncSession, *, role: UserRole, client_id: Any = 
 class World:
     admin: User
     client: Client
+    tenant_manager: User
 
 
 @pytest.fixture
@@ -87,6 +95,9 @@ async def world(db_session: AsyncSession) -> World:
         )
     )
     await db_session.flush()
+    w.tenant_manager = await _seed_user(
+        db_session, role=UserRole.CLIENT_MANAGER, client_id=w.client.id
+    )
     return w
 
 
@@ -307,3 +318,193 @@ class TestMapeamento:
         )
         assert resp.status_code == 400, resp.text
         assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def _tract_with(**cells: Any) -> bytes:
+    wb = load_workbook(io.BytesIO(_TRACT.read_bytes()))
+    ws = wb.worksheets[0]
+    for ref, value in cells.items():
+        ws[ref] = value
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+async def _imports(db: AsyncSession, client_id: Any) -> list[ClientAccountingChartImport]:
+    stmt = (
+        select(ClientAccountingChartImport)
+        .where(ClientAccountingChartImport.client_id == client_id)
+        .execution_options(populate_existing=True)
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def _accounts_count(db: AsyncSession, client_id: Any) -> int:
+    stmt = select(ClientAccountingAccount).where(ClientAccountingAccount.client_id == client_id)
+    return len((await db.execute(stmt)).scalars().all())
+
+
+_TWO_BROKEN = {"A10": None, "C12": "X"}
+
+
+class TestLinhasDeFora:
+    async def test_previa_lista_as_linhas_e_a_importacao_exige_a_mesma_lista(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        content = _tract_with(**_TWO_BROKEN)
+        preview = await _post_xlsx(client_with_db, f"{_url(world.client)}/import/preview", content)
+        assert preview.status_code == 200, preview.text
+        data = preview.json()["data"]
+        assert data["linhasComProblema"] == [
+            {"linha": 10, "motivo": "codigo_vazio"},
+            {"linha": 12, "motivo": "tipo_invalido"},
+        ]
+        assert data["contas"] == 1848
+
+        # Sem o campo: a recusa de sempre, nada gravado.
+        sem = await _post_xlsx(client_with_db, f"{_url(world.client)}/import", content)
+        assert sem.status_code == 422, sem.text
+        assert sem.json()["error"]["code"] == "LINHAS_INVALIDAS"
+        # Lista diferente da calculada: recusa, nada gravado.
+        outra = await _post_xlsx(
+            client_with_db, f"{_url(world.client)}/import", content, {"linhasExcluidas": "[10]"}
+        )
+        assert outra.status_code == 422, outra.text
+        assert "não são as que você confirmou" in outra.json()["error"]["userMessage"]
+        assert await _accounts_count(db_session, world.client.id) == 0
+        assert await _imports(db_session, world.client.id) == []
+
+        with capture_logs() as logs:
+            ok = await _post_xlsx(
+                client_with_db,
+                f"{_url(world.client)}/import",
+                content,
+                {"linhasExcluidas": "[12, 10]"},
+            )
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["data"]["contasNovas"] == 1848
+        assert ok.json()["data"]["contasExcluidas"] == 2
+        _no_account_name(logs)
+        [record] = await _imports(db_session, world.client.id)
+        assert record.excluded_count == 2
+        assert record.excluded_lines == [
+            {"linha": 10, "motivo": "codigo_vazio"},
+            {"linha": 12, "motivo": "tipo_invalido"},
+        ]
+        assert record.imported_by == world.admin.id
+        assert record.layout == "reconhecido"
+
+        listing = await client_with_db.get(_url(world.client), params={"pageSize": 1})
+        last = listing.json()["ultimaImportacao"]
+        assert last["contas"] == 1848
+        assert last["linhasExcluidas"] == [
+            {"linha": 10, "motivo": "codigo_vazio"},
+            {"linha": 12, "motivo": "tipo_invalido"},
+        ]
+
+        # O arquivo correto entra inteiro: a última importação não tem linha de fora.
+        again = await _post_xlsx(
+            client_with_db, f"{_url(world.client)}/import", _TRACT.read_bytes()
+        )
+        assert again.status_code == 200, again.text
+        listing = await client_with_db.get(_url(world.client), params={"pageSize": 1})
+        assert listing.json()["ultimaImportacao"]["linhasExcluidas"] == []
+
+    async def test_sem_importacao_registrada_a_lista_nao_tem_selo(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        listing = await client_with_db.get(_url(world.client))
+        assert listing.status_code == 200
+        assert listing.json()["ultimaImportacao"] is None
+
+    async def test_acima_de_20_por_cento_recusa_inteiro(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        content = _tract_with(**{f"C{line}": "X" for line in range(6, 406)})
+        # 400 tipos estranhos: a coluna de tipo nem é reconhecida (pede mapeamento) ...
+        first = await _post_xlsx(client_with_db, f"{_url(world.client)}/import/preview", content)
+        assert first.json()["error"]["code"] == "MAPEAMENTO_NECESSARIO"
+        # ... e, mapeada, as 400 linhas passam do teto: o arquivo inteiro é recusado.
+        mapping = json.dumps({"colunas": {"codigo": 0, "classificacao": 1, "tipo": 2, "nome": 5}})
+        resp = await _post_xlsx(
+            client_with_db, f"{_url(world.client)}/import/preview", content, {"mapeamento": mapping}
+        )
+        assert resp.status_code == 422, resp.text
+        error = resp.json()["error"]
+        assert error["code"] == "LINHAS_INVALIDAS"
+        assert error["details"]["total"] == 400
+        assert await _accounts_count(db_session, world.client.id) == 0
+
+    @pytest.mark.parametrize("raw", ["nao", "[0]", '["a"]', '{"x": 1}'])
+    async def test_linhas_excluidas_com_forma_invalida_e_400(
+        self, client_with_db: AsyncClient, world: World, raw: str
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        resp = await _post_xlsx(
+            client_with_db,
+            f"{_url(world.client)}/import",
+            _tract_with(**_TWO_BROKEN),
+            {"linhasExcluidas": raw},
+        )
+        assert resp.status_code == 400, resp.text
+
+    async def test_encerramento_purga_o_registro(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        content = _tract_with(**_TWO_BROKEN)
+        ok = await _post_xlsx(
+            client_with_db, f"{_url(world.client)}/import", content, {"linhasExcluidas": "[10, 12]"}
+        )
+        assert ok.status_code == 200, ok.text
+        closed = await client_with_db.post(f"/api/v1/clients/{world.client.id}/close")
+        assert closed.status_code == 204, closed.text
+        assert await _imports(db_session, world.client.id) == []
+        listing = await client_with_db.get(_url(world.client))
+        assert listing.status_code == 200
+        assert listing.json()["ultimaImportacao"] is None
+
+    async def test_exclusao_definitiva_com_autor_do_tenant(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
+    ) -> None:
+        """`imported_by` RESTRICT: o registro sai ANTES dos usuários do tenant."""
+        db_session.add(
+            ClientAccountingChartImport(
+                client_id=world.client.id,
+                imported_by=world.tenant_manager.id,
+                layout="modelo",
+                accounts=1,
+                new_accounts=1,
+                updated_accounts=0,
+                absent_accounts=0,
+                excluded_count=1,
+                excluded_lines=[{"linha": 3, "motivo": "nome_vazio"}],
+            )
+        )
+        await db_session.flush()
+        await _login(client_with_db, world.admin)
+        resp = await client_with_db.delete(f"/api/v1/clients/{world.client.id}")
+        assert resp.status_code == 204, resp.text
+        assert await _imports(db_session, world.client.id) == []
+
+    async def test_o_banco_recusa_contagem_que_nao_bate_com_a_lista(
+        self, db_session: AsyncSession, world: World
+    ) -> None:
+        db_session.add(
+            ClientAccountingChartImport(
+                client_id=world.client.id,
+                imported_by=world.admin.id,
+                layout="modelo",
+                accounts=1,
+                new_accounts=1,
+                updated_accounts=0,
+                absent_accounts=0,
+                excluded_count=2,
+                excluded_lines=[{"linha": 3, "motivo": "nome_vazio"}],
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await db_session.flush()

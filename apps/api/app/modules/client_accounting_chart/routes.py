@@ -44,6 +44,7 @@ linha `export` na trilha; o conteúdo não persiste.
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 from uuid import UUID
 
@@ -79,6 +80,7 @@ from app.modules.client_accounting_chart.recognizer import ColumnMapping
 from app.modules.client_accounting_chart.repository import AccountingChartFilters
 from app.modules.client_accounting_chart.schemas import (
     MAX_CHART_MAPPING_CHARS,
+    MAX_EXCLUDED_LINES_CHARS,
     AccountingAccountCreateRequest,
     AccountingAccountEnvelope,
     AccountingAccountResponse,
@@ -86,10 +88,12 @@ from app.modules.client_accounting_chart.schemas import (
     AccountingAccountUpdateRequest,
     AccountingChartListResponse,
     ChartColumnMappingRequest,
+    ChartExcludedLinesRequest,
     ChartImportEnvelope,
     ChartImportPayload,
     ChartImportPreviewEnvelope,
     ChartImportPreviewPayload,
+    ChartLastImport,
     OmieExportPreviewEnvelope,
     OmieExportPreviewPayload,
     PartiesImportEnvelope,
@@ -168,6 +172,7 @@ async def list_accounting_chart(
     rows, total, names = await service.list_page(
         client, filters=filters, limit=page_size, offset=(page - 1) * page_size
     )
+    last_import = await service.latest_import(client)
     return AccountingChartListResponse(
         data=[AccountingAccountResponse.from_row(row, names=names) for row in rows],
         pagination=PaginationMeta(
@@ -176,6 +181,7 @@ async def list_accounting_chart(
             total=total,
             total_pages=(total + page_size - 1) // page_size,
         ),
+        ultima_importacao=ChartLastImport.from_row(last_import) if last_import else None,
     )
 
 
@@ -192,6 +198,32 @@ MappingForm = Annotated[
     str | None,
     Form(max_length=MAX_CHART_MAPPING_CHARS, description=_MAPPING_FORM_DESCRIPTION),
 ]
+
+
+_EXCLUDED_FORM_DESCRIPTION = (
+    "Opcional, só na importação. As linhas que a pessoa confirmou deixar DE FORA, como a "
+    "prévia as devolveu em `linhasComProblema`: JSON `[12, 40]`. O servidor recalcula as "
+    "linhas com problema do MESMO arquivo e só grava se o conjunto for IGUAL; diferença é "
+    "422 `LINHAS_INVALIDAS` e nada é gravado. Forma inválida: 400."
+)
+ExcludedLinesForm = Annotated[
+    str | None,
+    Form(
+        alias="linhasExcluidas",
+        max_length=MAX_EXCLUDED_LINES_CHARS,
+        description=_EXCLUDED_FORM_DESCRIPTION,
+    ),
+]
+
+
+def _excluded_from_form(raw: str | None) -> list[int] | None:
+    """As linhas confirmadas do multipart; forma inválida é o 400 genérico."""
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return ChartExcludedLinesRequest.model_validate({"linhas": json.loads(raw)}).linhas
+    except (ValueError, ValidationError):
+        raise ValidationAppError("linhas excluídas do plano contábil inválidas") from None
 
 
 def _mapping_from_form(raw: str | None) -> ColumnMapping | None:
@@ -228,6 +260,12 @@ def _mapping_from_form(raw: str | None) -> ColumnMapping | None:
         "`formaDetectada`, `preenchimento`, `papelSugerido`: o cabeçalho é o único texto do "
         "arquivo que sai, nunca um valor de célula) e o pedido seguinte manda o campo "
         "`mapeamento`. "
+        "Linha com problema não recusa mais o arquivo inteiro: a prévia a lista em "
+        "`linhasComProblema` e a importação só grava SEM ela quando o campo "
+        "`linhasExcluidas` traz exatamente a mesma lista (sem o campo, ou diferente, é o 422 "
+        "`LINHAS_INVALIDAS`); o arquivo inteiro continua recusado com código repetido ou com "
+        "mais de 20% das linhas com problema. A importação fica registrada, e a lista do "
+        "plano devolve a última em `ultimaImportacao`. "
         "A reimportação casa por código e só adiciona e atualiza: conta "
         "nova entra ativa, conta existente atualiza nome, tipo e classificação, e a "
         "conta que não veio na planilha continua como estava (nunca é inativada nem "
@@ -266,14 +304,18 @@ async def import_accounting_chart(
         ),
     ],
     mapeamento: MappingForm = None,
+    linhas_excluidas: ExcludedLinesForm = None,
 ) -> ChartImportEnvelope:
     mapping = _mapping_from_form(mapeamento)
+    excluded = _excluded_from_form(linhas_excluidas)
     content = await read_upload_within_limit(
         file,
         declared_content_length=parse_content_length(request.headers.get("content-length")),
         max_bytes=settings.max_upload_bytes,
     )
-    result = await service.import_sheet(client, actor=actor, content=content, mapping=mapping)
+    result = await service.import_sheet(
+        client, actor=actor, content=content, mapping=mapping, excluded_lines=excluded
+    )
     return ChartImportEnvelope(data=ChartImportPayload.from_result(result))
 
 

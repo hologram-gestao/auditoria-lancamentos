@@ -98,6 +98,7 @@ import { AccountingChartModel } from './accounting-chart-model';
 import { AccountingPartiesTab } from './accounting-parties-tab';
 import { BankAccountsSection } from './bank-accounts-section';
 import { classificationDepth, indentClassFor } from './chart-hierarchy';
+import { ChartImportIncompleteBadge } from './chart-import-incomplete-badge';
 import { FilterGroup } from './filter-group';
 import { OmieChartExportAction } from './omie-chart-export-dialog';
 
@@ -258,9 +259,13 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <h1 id="accounting-chart-heading" className="text-xl font-semibold">
-            Plano contábil
-          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 id="accounting-chart-heading" className="text-xl font-semibold">
+              Plano contábil
+            </h1>
+            {/* 86e3ydjze: a última importação deixou linhas de fora (sonda sem filtro). */}
+            <ChartImportIncompleteBadge lastImport={planProbe.data?.ultimaImportacao} />
+          </div>
           <p className="text-muted-foreground max-w-3xl text-sm">
             O plano de contas do sistema contábil onde o escritório lança — diferente das Categorias
             do Omie, que são a classificação da origem. É dele que o de-para escolhe a conta de cada
@@ -330,6 +335,15 @@ export function AccountingChartScreen({ clientId }: { clientId: string }) {
             <Stat label="Alteradas" value={lastImport.contasAlteradas} />
             <Stat label="Não vieram" value={lastImport.contasAusentes} />
           </dl>
+          {(lastImport.contasExcluidas ?? 0) > 0 && (
+            <p data-testid="accounting-chart-import-excluded" className="font-medium">
+              {lastImport.contasExcluidas === 1
+                ? '1 linha da planilha ficou de fora.'
+                : `${lastImport.contasExcluidas} linhas da planilha ficaram de fora.`}{' '}
+              O aviso &quot;Plano não está 100%&quot; ao lado do título mostra quais, até você
+              importar o arquivo corrigido.
+            </p>
+          )}
         </div>
       )}
 

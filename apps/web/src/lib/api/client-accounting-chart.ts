@@ -85,12 +85,19 @@ const IMPORT_FIELD = { file: 'file' } as const satisfies Partial<Record<keyof Im
 const IMPORT_OPTION_FIELDS = {
   mapping: 'mapeamento',
 } as const satisfies Record<string, keyof ImportBody & keyof PreviewBody>;
+/** Só na importação: as linhas confirmadas para ficar de fora (86e3ydjze). */
+const EXCLUDED_LINES_FIELD = 'linhasExcluidas' as const satisfies keyof ImportBody;
 
 /** O que vai junto do arquivo na prévia e na importação do plano (épico 86e3ydjy9). */
 export interface AccountingChartImportRequest {
   file: File;
   /** A etapa "Diga o que é cada coluna" (86e3ydjz4), quando o servidor pediu. */
   mapping?: AccountingChartMappingPayload | null;
+  /**
+   * Só na importação (86e3ydjze): as linhas que a prévia listou em `linhasComProblema` e a
+   * pessoa confirmou deixar de fora. O servidor exige a MESMA lista.
+   */
+  excludedLines?: number[] | null;
 }
 
 function importForm(request: AccountingChartImportRequest): FormData {
@@ -98,6 +105,9 @@ function importForm(request: AccountingChartImportRequest): FormData {
   form.append(IMPORT_FIELD.file, request.file);
   if (request.mapping) {
     form.append(IMPORT_OPTION_FIELDS.mapping, JSON.stringify(request.mapping));
+  }
+  if (request.excludedLines && request.excludedLines.length > 0) {
+    form.append(EXCLUDED_LINES_FIELD, JSON.stringify(request.excludedLines));
   }
   return form;
 }

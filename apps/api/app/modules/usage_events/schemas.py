@@ -714,6 +714,8 @@ class PlanoContabilImportadoProps(_StrictProps):
     contas_alteradas: int = Field(ge=0)
     contas_ausentes: int = Field(ge=0)
     layout: ChartImportLayout
+    #: 86e3ydjze: linhas da planilha que ficaram de fora por confirmação na prévia.
+    contas_excluidas: int = Field(default=0, ge=0)
 
 
 #: O que a edição manual mudou (86e3nb816). Espelho de

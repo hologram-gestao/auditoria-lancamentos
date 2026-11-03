@@ -61,6 +61,7 @@ from app.db.models.client_accounting_account import (
     AccountingPartyType,
     ClientAccountingAccount,
 )
+from app.db.models.client_accounting_chart_import import ClientAccountingChartImport
 from app.modules.client_accounting_chart.diff import ChartDiff, diff_chart
 from app.modules.client_accounting_chart.export import build_chart_csv
 from app.modules.client_accounting_chart.nature import derive_nature, resolve_nature
@@ -88,6 +89,7 @@ from app.modules.client_accounting_chart.sheet import (
     ChartSheetRow,
     ParsedChartSheet,
     parse_chart_sheet,
+    refuse_unconfirmed_lines,
     validate_account,
 )
 from app.modules.client_accounting_chart.sort_key import chart_sort_key
@@ -95,7 +97,7 @@ from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.service import UsageEventService
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterable, Sequence
+    from collections.abc import Awaitable, Callable, Collection, Iterable, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -141,6 +143,8 @@ class ChartImportResult:
     #: De onde veio a planilha (`modelo` ou o export nativo do `dominio`). Vai só
     #: para a métrica, não para a resposta.
     layout: ChartLayout = "modelo"
+    #: Linhas da planilha que ficaram DE FORA por confirmação (86e3ydjze).
+    excluded: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +163,8 @@ class ChartPreview:
     absent_in_use: frozenset[UUID]
     #: Só com o tipo pela hierarquia (mapeamento, 86e3ydjz4): (sintéticas, analíticas).
     derived_types: tuple[int, int] | None = None
+    #: As linhas com problema que ficariam de fora (86e3ydjze), `(linha, motivo)`.
+    problems: tuple[tuple[int, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,6 +320,10 @@ class AccountingChartService:
 
     # ------------------------------------------------------------------ leitura
 
+    async def latest_import(self, client: Client) -> ClientAccountingChartImport | None:
+        """A última importação registrada do plano (86e3ydjze): a fonte do selo da tela."""
+        return await self._repo.latest_import(client.id)
+
     async def list_page(
         self,
         client: Client,
@@ -431,6 +441,7 @@ class AccountingChartService:
         actor: CurrentUser,
         content: bytes,
         mapping: ColumnMapping | None = None,
+        excluded_lines: Collection[int] | None = None,
     ) -> ChartImportResult:
         """Importa (ou reimporta) o plano do cliente — tudo ou nada.
 
@@ -445,7 +456,12 @@ class AccountingChartService:
         """
         _require_open(client)
         # CPU síncrona fora do event loop (limites do leitor checados antes de iterar).
-        parsed = await run_in_threadpool(parse_chart_sheet, content, mapping=mapping)
+        parsed = await run_in_threadpool(
+            parse_chart_sheet, content, mapping=mapping, allow_problems=True
+        )
+        # Linha com problema só fica de fora com a lista CONFIRMADA igual (86e3ydjze),
+        # antes de qualquer escrita: diferença é 422 e nada é gravado.
+        refuse_unconfirmed_lines(parsed.problems, confirmed=excluded_lines)
         rows = parsed.rows
 
         await self._repo.lock_client_chart(client.id)
@@ -473,15 +489,31 @@ class AccountingChartService:
         newly_absent = await self._repo.mark_absent(
             client.id, account_ids=[account.id for account in diff.absent], author_id=author_id
         )
-        await self._db.commit()
-
         result = ChartImportResult(
             accounts=len(rows),
             new=len(inserts),
             updated=len(diff.changed),
             absent=len(diff.absent),
             layout=parsed.layout,
+            excluded=len(parsed.problems),
         )
+        await self._repo.record_import(
+            ClientAccountingChartImport(
+                client_id=client.id,
+                imported_by=author_id,
+                layout=result.layout,
+                accounts=result.accounts,
+                new_accounts=result.new,
+                updated_accounts=result.updated,
+                absent_accounts=result.absent,
+                excluded_count=result.excluded,
+                excluded_lines=[
+                    {"linha": line, "motivo": reason} for line, reason in parsed.problems
+                ],
+            )
+        )
+        await self._db.commit()
+
         log.info(
             "accounting_chart_imported",
             client_id=str(client.id),
@@ -491,6 +523,7 @@ class AccountingChartService:
             new=result.new,
             updated=result.updated,
             absent=result.absent,
+            excluded=result.excluded,
             newly_absent=newly_absent,
             returned=len(diff.returned),
         )
@@ -508,7 +541,9 @@ class AccountingChartService:
         (navegação no próprio tenant, §4.7).
         """
         _require_open(client)
-        parsed = await run_in_threadpool(parse_chart_sheet, content, mapping=mapping)
+        parsed = await run_in_threadpool(
+            parse_chart_sheet, content, mapping=mapping, allow_problems=True
+        )
         existing = await self._repo.list_all(client.id)
         current = await self.decrypt_names(client, existing)
         diff = diff_chart(parsed.rows, existing, names=current.names, failed=current.failed)
@@ -526,6 +561,7 @@ class AccountingChartService:
             absent=len(diff.absent),
             absent_in_use=len(in_use),
             returned=len(diff.returned),
+            problem_lines=len(parsed.problems),
         )
         return ChartPreview(
             accounts=len(parsed.rows),
@@ -534,6 +570,7 @@ class AccountingChartService:
             names=current,
             absent_in_use=frozenset(in_use),
             derived_types=parsed.derived_types,
+            problems=parsed.problems,
         )
 
     async def export_csv(self, client: Client) -> tuple[bytes, int]:
@@ -1263,6 +1300,7 @@ class AccountingChartService:
                 contas_alteradas=result.updated,
                 contas_ausentes=result.absent,
                 layout=result.layout,
+                contas_excluidas=result.excluded,
             )
         except Exception:
             log.warning("plano_contabil_importado_emit_failed", client_id=str(client.id))

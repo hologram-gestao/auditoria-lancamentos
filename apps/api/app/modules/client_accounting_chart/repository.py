@@ -26,6 +26,7 @@ from sqlalchemy import Table, bindparam, case, func, insert, select, text, updat
 
 from app.db.models.client import Client
 from app.db.models.client_accounting_account import ClientAccountingAccount
+from app.db.models.client_accounting_chart_import import ClientAccountingChartImport
 from app.db.models.client_mapping import ClientMappingDecision
 from app.db.models.client_source_account_binding import ClientSourceAccountBinding
 
@@ -251,6 +252,27 @@ class AccountingChartRepository:
             .values(**values, updated_at=func.clock_timestamp())
         )
         await self._session.execute(stmt)
+
+    async def record_import(self, record: ClientAccountingChartImport) -> None:
+        """O registro de uma importação que entrou (86e3ydjze), na MESMA transação dela."""
+        self._session.add(record)
+        await self._session.flush()
+
+    async def latest_import(self, client_id: UUID) -> ClientAccountingChartImport | None:
+        """A última importação do cliente (a que a tela lê para o selo), ou `None`.
+
+        `client_id` no próprio WHERE: o registro de outro cliente nem é lido (§3.15).
+        """
+        stmt = (
+            select(ClientAccountingChartImport)
+            .where(ClientAccountingChartImport.client_id == client_id)
+            .order_by(
+                ClientAccountingChartImport.imported_at.desc(),
+                ClientAccountingChartImport.id.desc(),
+            )
+            .limit(1)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def mark_absent(
         self, client_id: UUID, *, account_ids: Collection[UUID], author_id: UUID

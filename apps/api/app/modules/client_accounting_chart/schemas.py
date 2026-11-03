@@ -28,11 +28,12 @@ from app.modules.client_accounting_chart.service import (
     AccountPatch,
     not_postable_reason,
 )
-from app.modules.client_file_ingestion.reader import MAX_FILE_COLUMNS
+from app.modules.client_file_ingestion.reader import MAX_FILE_COLUMNS, MAX_FILE_ROWS
 from app.modules.users.schemas import PaginationMeta
 
 if TYPE_CHECKING:
     from app.db.models.client_accounting_account import ClientAccountingAccount
+    from app.db.models.client_accounting_chart_import import ClientAccountingChartImport
     from app.modules.client_accounting_chart.service import (
         ChartImportResult,
         ChartPreview,
@@ -134,11 +135,62 @@ class AccountingAccountResponse(BaseModel):
         )
 
 
+class ChartProblemLine(BaseModel):
+    """Uma linha da planilha que fica (ou ficou) DE FORA: só o número e o motivo fechado."""
+
+    linha: int = Field(ge=1, description="A linha física da planilha, como no Excel.")
+    motivo: str = Field(
+        description=(
+            "Motivo no vocabulário fechado da importação (`codigo_vazio`, `nome_vazio`, "
+            "`tipo_invalido`, `grau_divergente`, `conta_fora_do_bloco`…)."
+        )
+    )
+
+
+class ChartLastImport(BaseModel):
+    """A última importação do plano (86e3ydjze): o que a tela lê para o selo."""
+
+    importada_em: datetime = Field(alias="importadaEm")
+    layout: str
+    contas: int = Field(ge=0)
+    linhas_excluidas: list[ChartProblemLine] = Field(
+        alias="linhasExcluidas",
+        description=(
+            "As linhas que ficaram DE FORA por confirmação na prévia. Vazia = o plano "
+            'importado está inteiro; com itens, a tela mostra o selo "não está 100%".'
+        ),
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_row(cls, row: ClientAccountingChartImport) -> ChartLastImport:
+        return cls(
+            importada_em=row.imported_at,
+            layout=row.layout,
+            contas=row.accounts,
+            linhas_excluidas=[
+                ChartProblemLine(linha=int(item["linha"]), motivo=str(item["motivo"]))
+                for item in row.excluded_lines
+            ],
+        )
+
+
 class AccountingChartListResponse(BaseModel):
     """Body de `GET /clients/{client_id}/accounting-chart`."""
 
     data: list[AccountingAccountResponse]
     pagination: PaginationMeta
+    ultima_importacao: ChartLastImport | None = Field(
+        default=None,
+        alias="ultimaImportacao",
+        description=(
+            "A última importação registrada do plano (desde 03/11/2026), ou `null`. Só "
+            "contagens, linhas e motivos fechados: nenhum nome nem célula."
+        ),
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class ChartImportPayload(BaseModel):
@@ -162,6 +214,16 @@ class ChartImportPayload(BaseModel):
         ),
     )
 
+    contas_excluidas: int = Field(
+        default=0,
+        ge=0,
+        alias="contasExcluidas",
+        description=(
+            "Linhas da planilha que ficaram DE FORA por confirmação (`linhasExcluidas`); "
+            'com elas, a tela do plano mostra o selo "não está 100%".'
+        ),
+    )
+
     model_config = ConfigDict(populate_by_name=True)
 
     @classmethod
@@ -171,6 +233,7 @@ class ChartImportPayload(BaseModel):
             contas_novas=result.new,
             contas_alteradas=result.updated,
             contas_ausentes=result.absent,
+            contas_excluidas=result.excluded,
         )
 
 
@@ -236,6 +299,22 @@ ChartLayoutName = Literal["modelo", "dominio", "reconhecido", "mapeado"]
 #: Teto do campo `mapeamento` (JSON) no multipart: cinco papéis e um booleano cabem
 #: com folga; acima disso não é um mapeamento.
 MAX_CHART_MAPPING_CHARS = 1000
+#: Teto do campo `linhasExcluidas` (JSON, lista de linhas): o leitor aceita até 10.000
+#: linhas e a importação recusa acima de 20% com problema, então 2.000 números de até
+#: 5 dígitos e a vírgula cabem com folga.
+MAX_EXCLUDED_LINES_CHARS = 16_000
+
+
+class ChartExcludedLinesRequest(BaseModel):
+    """As linhas que a pessoa confirmou deixar de fora (campo `linhasExcluidas`)."""
+
+    linhas: list[int] = Field(max_length=MAX_FILE_ROWS * 2)
+
+    @model_validator(mode="after")
+    def _positive(self) -> ChartExcludedLinesRequest:
+        if any(line < 1 for line in self.linhas):
+            raise ValueError("linha fora da planilha")
+        return self
 
 
 class ChartColumnMappingRequest(BaseModel):
@@ -334,6 +413,14 @@ class ChartImportPreviewPayload(BaseModel):
     list_limit: int = Field(
         alias="listLimit", description="O teto de cada lista; as contagens são as reais."
     )
+    linhas_com_problema: list[ChartProblemLine] = Field(
+        alias="linhasComProblema",
+        description=(
+            "As linhas da planilha que NÃO entram (86e3ydjze), em ordem de linha, com o "
+            "motivo fechado. Vazia = a planilha entra inteira. Para importar sem elas, a "
+            "importação manda a MESMA lista em `linhasExcluidas`."
+        ),
+    )
     tipo_derivado: ChartDerivedTypes | None = Field(
         alias="tipoDerivado",
         description=(
@@ -359,6 +446,9 @@ class ChartImportPreviewPayload(BaseModel):
                 if derived is not None
                 else None
             ),
+            linhas_com_problema=[
+                ChartProblemLine(linha=line, motivo=reason) for line, reason in preview.problems
+            ],
             contas=preview.accounts,
             contas_novas=len(diff.new_rows),
             contas_alteradas=len(diff.changed),

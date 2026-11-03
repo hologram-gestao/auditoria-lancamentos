@@ -84,7 +84,7 @@ from app.modules.client_file_ingestion.reader import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Collection, Sequence
 
 #: Colunas do modelo. Casadas pelo NOME normalizado (`_normalized_header`), nunca
 #: pela posição.
@@ -157,6 +157,21 @@ _RECOGNITION_TAIL = (
 _LINES_MESSAGE = (
     "A planilha tem linhas inválidas. Corrija as linhas apontadas e envie de novo — "
     "nenhuma conta foi gravada."
+)
+#: Acima desta fração das linhas do bloco com problema, a leitura provavelmente está
+#: errada (coluna trocada, layout que não é o que parece): o arquivo é recusado inteiro,
+#: nunca importado pela metade (86e3ydjze).
+MAX_PROBLEM_LINE_RATIO = 0.20
+#: Motivos que recusam o arquivo inteiro mesmo abaixo do teto: código repetido é
+#: ambiguidade de chave (qual das duas contas vale?), não uma linha a deixar de fora.
+WHOLE_FILE_REASONS: frozenset[str] = frozenset({"codigo_repetido"})
+_TOO_MANY_PROBLEMS_MESSAGE = (
+    "Mais de 20% das linhas da planilha têm problema: o arquivo provavelmente não foi lido "
+    "como você espera. Confira as linhas apontadas (ou o arquivo) — nenhuma conta foi gravada."
+)
+_REPEATED_CODE_MESSAGE = (
+    "A planilha tem código reduzido repetido: não dá para saber qual das contas vale. "
+    "Corrija as linhas apontadas e envie de novo — nenhuma conta foi gravada."
 )
 _DOMINIO_LINES_MESSAGE = (
     "O arquivo foi reconhecido como o plano de contas exportado do Domínio, mas há "
@@ -430,6 +445,10 @@ class ParsedChartSheet:
     #: Só com o tipo derivado da hierarquia (escolha explícita no mapeamento): quantas
     #: contas ficaram sintéticas e quantas analíticas, para a prévia mostrar ANTES.
     derived_types: tuple[int, int] | None = None
+    #: Só com `allow_problems` (86e3ydjze): as linhas com problema, FORA de `rows`, em
+    #: ordem de linha, `(linha, motivo)` no vocabulário fechado. A importação só grava
+    #: sem elas quando a pessoa confirmou exatamente esta lista.
+    problems: tuple[tuple[int, str], ...] = ()
 
     def __repr__(self) -> str:
         return f"<ParsedChartSheet rows={len(self.rows)} layout={self.layout}>"
@@ -455,6 +474,32 @@ def _raise_lines(problems: Sequence[tuple[int, str]], *, user_message: str) -> N
             "total": len(ordered),
         },
     )
+
+
+_UNCONFIRMED_MESSAGE = (
+    "As linhas com problema desta planilha não são as que você confirmou na revisão (o "
+    "arquivo mudou, ou a revisão é de outro arquivo). Revise de novo — nenhuma conta foi "
+    "gravada."
+)
+
+
+def refuse_unconfirmed_lines(
+    problems: Sequence[tuple[int, str]], *, confirmed: Collection[int] | None
+) -> None:
+    """A importação só grava SEM as linhas com problema que a pessoa confirmou (86e3ydjze).
+
+    Sem confirmação e com problema, a recusa de sempre (cliente da API anterior à prévia
+    com linhas). Com confirmação, o conjunto confirmado tem de ser IGUAL ao calculado
+    agora sobre o mesmo arquivo: qualquer diferença é a mesma recusa `LINHAS_INVALIDAS`,
+    e nada é gravado. Perda nunca silenciosa.
+    """
+    computed = {line for line, _ in problems}
+    if confirmed is None:
+        if computed:
+            _raise_lines(problems, user_message=_LINES_MESSAGE)
+        return
+    if set(confirmed) != computed:
+        _raise_lines(problems, user_message=_UNCONFIRMED_MESSAGE)
 
 
 def _require_accounts(valid: list[ChartSheetRow]) -> list[ChartSheetRow]:
@@ -489,19 +534,47 @@ def _raw_rows(content: bytes) -> list[tuple[int, list[Any]]]:
         _raise_invalid_file()
 
 
-def _validated(conversion: DominioConversion, *, user_message: str) -> list[ChartSheetRow]:
-    """As linhas convertidas pelo MESMO `validate_rows` do modelo; problema recusa tudo."""
+def _settle(
+    valid: list[ChartSheetRow],
+    problems: Sequence[tuple[int, str]],
+    *,
+    user_message: str,
+    allow_problems: bool,
+) -> tuple[list[ChartSheetRow], tuple[tuple[int, str], ...]]:
+    """As contas válidas e as linhas com problema — ou a recusa do arquivo inteiro.
+
+    Sem `allow_problems` (o comportamento de sempre), qualquer problema recusa. Com ele
+    (86e3ydjze), as linhas com problema voltam para a prévia, salvo dois casos que
+    continuam recusando tudo: código repetido (`WHOLE_FILE_REASONS`) e problemas acima de
+    `MAX_PROBLEM_LINE_RATIO` das linhas lidas.
+    """
+    ordered = tuple(sorted(dict(problems).items()))
+    if ordered:
+        if not allow_problems:
+            _raise_lines(ordered, user_message=user_message)
+        if any(reason in WHOLE_FILE_REASONS for _, reason in ordered):
+            _raise_lines(ordered, user_message=_REPEATED_CODE_MESSAGE)
+        if len(ordered) > MAX_PROBLEM_LINE_RATIO * (len(valid) + len(ordered)):
+            _raise_lines(ordered, user_message=_TOO_MANY_PROBLEMS_MESSAGE)
+    return _require_accounts(valid), ordered
+
+
+def _validated(
+    conversion: DominioConversion, *, user_message: str, allow_problems: bool
+) -> tuple[list[ChartSheetRow], tuple[tuple[int, str], ...]]:
+    """As linhas convertidas pelo MESMO `validate_rows` do modelo, e os problemas."""
     valid, problems = validate_rows(MODEL_COLUMNS, conversion.rows)
     all_problems: list[tuple[int, str]] = [(p.line, p.reason) for p in problems]
     all_problems += [(p.line, p.reason) for p in conversion.problems]
-    if all_problems:
-        _raise_lines(all_problems, user_message=user_message)
-    return _require_accounts(valid)
+    return _settle(valid, all_problems, user_message=user_message, allow_problems=allow_problems)
 
 
-def _parse_dominio(content: bytes, header_line: int) -> list[ChartSheetRow]:
+def _parse_dominio(content: bytes, header_line: int, *, allow_problems: bool) -> ParsedChartSheet:
     conversion = convert_dominio(_raw_rows(content), header_line)
-    return _validated(conversion, user_message=_DOMINIO_LINES_MESSAGE)
+    rows, problems = _validated(
+        conversion, user_message=_DOMINIO_LINES_MESSAGE, allow_problems=allow_problems
+    )
+    return ParsedChartSheet(rows=rows, layout="dominio", problems=problems)
 
 
 def _labels(roles: Sequence[ColumnRole]) -> str:
@@ -580,6 +653,8 @@ def _recognized(
     file_format: InputFileFormat,
     refusal: FileHeaderMismatchError,
     mapping: ColumnMapping | None,
+    *,
+    allow_problems: bool,
 ) -> ParsedChartSheet:
     """O terceiro caminho: a planilha lida pelo CONTEÚDO (86e3ydjyq) ou pelo MAPEAMENTO
     que a pessoa escolheu (86e3ydjz4).
@@ -600,7 +675,7 @@ def _recognized(
     if recognition is None or not any(c.form == "texto" for c in recognition.columns):
         raise _with_roles(refusal, None) from None
     if mapping is not None:
-        return _mapped(raw, recognition, mapping)
+        return _mapped(raw, recognition, mapping, allow_problems=allow_problems)
     if not recognition.resolved:
         raise ChartMappingRequiredError(
             f"plano contábil: mapeamento necessário ({len(recognition.open_roles)} papéis)",
@@ -608,12 +683,20 @@ def _recognized(
             details=mapping_details(recognition),
         ) from None
     conversion = convert_by_columns(raw, recognition, recognition.roles)
-    rows = _validated(conversion, user_message=_LINES_MESSAGE)
-    return ParsedChartSheet(rows=rows, layout="reconhecido", recognition=recognition)
+    rows, problems = _validated(
+        conversion, user_message=_LINES_MESSAGE, allow_problems=allow_problems
+    )
+    return ParsedChartSheet(
+        rows=rows, layout="reconhecido", recognition=recognition, problems=problems
+    )
 
 
 def _mapped(
-    raw: list[tuple[int, list[Any]]], recognition: ColumnRecognition, mapping: ColumnMapping
+    raw: list[tuple[int, list[Any]]],
+    recognition: ColumnRecognition,
+    mapping: ColumnMapping,
+    *,
+    allow_problems: bool,
 ) -> ParsedChartSheet:
     width = len(recognition.columns)
     if any(col >= width for col in mapping.roles.values()):
@@ -624,13 +707,19 @@ def _mapped(
     conversion = convert_by_columns(
         raw, recognition, roles, type_by_hierarchy=mapping.type_by_hierarchy
     )
-    rows = _validated(conversion, user_message=_LINES_MESSAGE)
+    rows, problems = _validated(
+        conversion, user_message=_LINES_MESSAGE, allow_problems=allow_problems
+    )
     derived: tuple[int, int] | None = None
     if mapping.type_by_hierarchy:
         synthetic = sum(r.account_type is AccountingAccountType.SINTETICA for r in rows)
         derived = (synthetic, len(rows) - synthetic)
     return ParsedChartSheet(
-        rows=rows, layout="mapeado", recognition=recognition, derived_types=derived
+        rows=rows,
+        layout="mapeado",
+        recognition=recognition,
+        derived_types=derived,
+        problems=problems,
     )
 
 
@@ -647,7 +736,9 @@ def _with_roles(
     )
 
 
-def parse_chart_sheet(content: bytes, *, mapping: ColumnMapping | None = None) -> ParsedChartSheet:
+def parse_chart_sheet(
+    content: bytes, *, mapping: ColumnMapping | None = None, allow_problems: bool = False
+) -> ParsedChartSheet:
     """Lê e valida a planilha INTEIRA; devolve as contas ou levanta a recusa tipada.
 
     Ordem das recusas (todas 422, nenhuma grava nada): formato pelo conteúdo
@@ -662,6 +753,10 @@ def parse_chart_sheet(content: bytes, *, mapping: ColumnMapping | None = None) -
     reconhecedor não decide é 422 `MAPEAMENTO_NECESSARIO` (86e3ydjz4), e com `mapping` (a
     escolha da pessoa) o bloco é lido pelos papéis que ela deu. Sem bloco de contas, a
     recusa de cabeçalho com os papéis reconhecidos e os que faltam.
+
+    `allow_problems` (86e3ydjze): as linhas com problema voltam em `problems`, fora de
+    `rows`, em vez de recusar, salvo código repetido e problemas acima de
+    `MAX_PROBLEM_LINE_RATIO`. Sem ele, qualquer linha com problema recusa como sempre.
     """
     # CSV ou planilha (XLSX ou XLS) pelo CONTEÚDO; PDF, HTML e o resto viram
     # `FORMATO_NAO_SUPORTADO`.
@@ -672,10 +767,10 @@ def parse_chart_sheet(content: bytes, *, mapping: ColumnMapping | None = None) -
         refusal = FileHeaderMismatchError(
             "plano contábil lido pelo mapeamento", user_message=_HEADER_MESSAGE
         )
-        return _recognized(content, file_format, refusal, mapping)
+        return _recognized(content, file_format, refusal, mapping, allow_problems=allow_problems)
     header_line = _dominio_header_line(content, file_format)
     if header_line is not None:
-        return ParsedChartSheet(rows=_parse_dominio(content, header_line), layout="dominio")
+        return _parse_dominio(content, header_line, allow_problems=allow_problems)
 
     options = ReadOptions(
         file_format=file_format,
@@ -685,11 +780,15 @@ def parse_chart_sheet(content: bytes, *, mapping: ColumnMapping | None = None) -
     try:
         table = read_table(content, options, on_header=check_header)
     except FileHeaderMismatchError as refusal:
-        return _recognized(content, file_format, refusal, mapping)
+        return _recognized(content, file_format, refusal, mapping, allow_problems=allow_problems)
     except FileInvalidError:
         _raise_invalid_file()
 
     valid, problems = validate_rows(table.columns, table.rows)
-    if problems:
-        _raise_lines([(p.line, p.reason) for p in problems], user_message=_LINES_MESSAGE)
-    return ParsedChartSheet(rows=_require_accounts(valid), layout="modelo")
+    rows, kept = _settle(
+        valid,
+        [(p.line, p.reason) for p in problems],
+        user_message=_LINES_MESSAGE,
+        allow_problems=allow_problems,
+    )
+    return ParsedChartSheet(rows=rows, layout="modelo", problems=kept)

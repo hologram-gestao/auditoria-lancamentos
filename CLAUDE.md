@@ -651,7 +651,17 @@
      (`tipoPelaHierarquia`, com a contagem na prévia): na Tract daria 152 sintéticas contra
      180, porque grupo sintético sem filho existe. Sem bloco, `CABECALHO_DIVERGENTE` com
      `details.recognizedRoles`/`missingRoles`/`ambiguousRoles` (papéis nossos). Só planilha:
-     o CSV segue só no modelo. **Arquivo de cliente novo vira
+     o CSV segue só no modelo. **Linha com problema não derruba mais o arquivo
+     inteiro** (86e3ydjze): a prévia a lista em `linhasComProblema` (só linha e motivo dos
+     vocabulários que já existiam) e a importação só grava SEM ela quando o campo
+     `linhasExcluidas` traz EXATAMENTE a lista que o servidor recalcula no mesmo arquivo
+     (`sheet.refuse_unconfirmed_lines`; sem o campo, ou diferente, é o 422 de sempre e nada
+     é gravado). Continuam recusando o arquivo inteiro: `codigo_repetido` (qual das duas
+     vale?) e mais de `MAX_PROBLEM_LINE_RATIO` (20%) das linhas. Cada importação que entra
+     grava `client_accounting_chart_imports` (migration `e3a1c7d5b9f2`, CHECK da contagem
+     igual ao tamanho do JSONB), a lista do plano devolve a última em `ultimaImportacao`, e
+     com linha de fora a tela mostra o selo vermelho "Plano não está 100%" (tooltip e
+     diálogo com as linhas), que some quando uma importação seguinte entra inteira. **Arquivo de cliente novo vira
      fixture anonimizada ANTES de regra mudar** (`tests/fixtures/accounting_chart_tract/`,
      `scripts/anonymize_tract_chart_sample.py`), e as duas fixtures do Domínio chegam ao
      MESMO plano pelo conteúdo, sem o cabeçalho (teste de generalidade).
@@ -996,7 +1006,9 @@ installment_number)`, `UNIQUE(client_id, payable_key)`, `UNIQUE(claimed_by_file_
       **associação da conta do banco** (`client_source_account_bindings`) e depois o
       **plano contábil do cliente** (`client_accounting_accounts`), nessa ordem
       (a associação aponta para o plano), depois das decisões do de-para e antes dos
-      usuários (autoria RESTRICT), no purge e na exclusão definitiva; o vínculo conta ↔
+      usuários (autoria RESTRICT), no purge e na exclusão definitiva, e o **registro das
+      importações do plano** (`client_accounting_chart_imports`, 86e3ydjze: só contagens e
+      `{linha, motivo}`) sai junto, antes dos usuários (`imported_by` RESTRICT); o vínculo conta ↔
       cliente/fornecedor (86e3qhhrn) mora nas colunas da própria conta e sai com ela, e a
       impressão digital da empresa dos relatórios (`party_reports_company_fingerprint`) é
       zerada no encerramento, em Core, junto com o nome. Nas

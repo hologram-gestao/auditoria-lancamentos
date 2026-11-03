@@ -44,6 +44,7 @@ from app.db.models import (
     AccountingFileGeneration,
     Client,
     ClientAccountingAccount,
+    ClientAccountingChartImport,
     ClientAssignment,
     ClientCategory,
     ClientChartOfAccount,
@@ -618,6 +619,13 @@ class ClientRepository:
         # S14 (BACK 14.3): o registro dos arquivos processados também tem `created_by`
         # RESTRICT (o operador do tenant envia o arquivo) — sai antes dos usuários.
         await s.execute(delete(ClientFileImport).where(ClientFileImport.client_id == client.id))
+        # 86e3ydjze: o registro das importações do plano contábil tem `imported_by`
+        # RESTRICT (quem importou pode ser usuário do tenant) — sai antes dos usuários.
+        await s.execute(
+            delete(ClientAccountingChartImport).where(
+                ClientAccountingChartImport.client_id == client.id
+            )
+        )
         # S16 (BACK 16.3): a conta do banco de cada conta de origem — aponta para o
         # plano (FK) e tem autoria RESTRICT: sai ANTES do plano e dos usuários.
         await s.execute(
@@ -738,6 +746,13 @@ class ClientRepository:
         await s.execute(
             delete(ClientSourceAccountBinding).where(
                 ClientSourceAccountBinding.client_id == client_id
+            )
+        )
+        # 86e3ydjze: o registro das importações do plano (o aviso "não está 100%") é
+        # configuração de um cliente que não lança mais; só números e motivos fechados.
+        await s.execute(
+            delete(ClientAccountingChartImport).where(
+                ClientAccountingChartImport.client_id == client_id
             )
         )
         await s.execute(

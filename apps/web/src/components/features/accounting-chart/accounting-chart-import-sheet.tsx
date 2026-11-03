@@ -99,6 +99,7 @@ interface AccountingChartImportSheetProps {
 
 export function importSuccessMessage(result: AccountingChartImportResult): string {
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const excluded = result.contasExcluidas ?? 0;
   return `Plano contábil importado: ${plural(result.contas, 'conta', 'contas')}, ${plural(
     result.contasNovas,
     'nova',
@@ -107,7 +108,23 @@ export function importSuccessMessage(result: AccountingChartImportResult): strin
     result.contasAusentes,
     'não veio',
     'não vieram',
-  )}.`;
+  )}${excluded > 0 ? `; ${plural(excluded, 'linha ficou', 'linhas ficaram')} de fora` : ''}.`;
+}
+
+/** O rótulo do "Confirmar": com linha de fora, diz quantas ficam de fora (86e3ydjze). */
+function confirmLabel(
+  preview: AccountingChartImportPreview,
+  hasPlan: boolean,
+  isPending: boolean,
+): string {
+  if (isPending) return 'Importando…';
+  const excluded = preview.linhasComProblema.length;
+  if (excluded > 0) {
+    return excluded === 1
+      ? 'Importar sem a linha com problema'
+      : `Importar sem as ${excluded} linhas`;
+  }
+  return hasPlan ? 'Confirmar reimportação' : 'Confirmar importação';
 }
 
 export function AccountingChartImportSheet({
@@ -200,7 +217,14 @@ export function AccountingChartImportSheet({
   async function send(file: File) {
     setRefusal(null);
     try {
-      const result = await importMutation.mutateAsync({ file, mapping });
+      // 86e3ydjze: as linhas com problema que a prévia mostrou e a pessoa confirmou deixar
+      // de fora; o servidor só grava se forem EXATAMENTE as que ele calcula agora.
+      const excluded = preview?.linhasComProblema.map((item) => item.linha) ?? [];
+      const result = await importMutation.mutateAsync({
+        file,
+        mapping,
+        excludedLines: excluded.length > 0 ? excluded : null,
+      });
       toast.success(importSuccessMessage(result));
       onImported(result);
       onOpenChange(false);
@@ -219,7 +243,8 @@ export function AccountingChartImportSheet({
           </SheetTitle>
           <SheetDescription>
             O plano do sistema contábil onde o escritório lança — é dele que o de-para escolhe a
-            conta de cada categoria. Ou a planilha entra inteira, ou nada entra.
+            conta de cada categoria. Linha com problema só fica de fora se você confirmar na
+            revisão.
           </SheetDescription>
         </SheetHeader>
 
@@ -304,11 +329,7 @@ export function AccountingChartImportSheet({
                   {preview.temMudancas ? (
                     <Button type="submit" disabled={isPending}>
                       {isPending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-                      {isPending
-                        ? 'Importando…'
-                        : hasPlan
-                          ? 'Confirmar reimportação'
-                          : 'Confirmar importação'}
+                      {confirmLabel(preview, hasPlan, isPending)}
                     </Button>
                   ) : (
                     <Button type="button" onClick={() => onOpenChange(false)} disabled={isPending}>
