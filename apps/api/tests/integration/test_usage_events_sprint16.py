@@ -132,6 +132,7 @@ class TestEventoDaImportacao:
             "contas_alteradas": 0,
             "contas_ausentes": 0,
             "layout": "modelo",
+            "contas_excluidas": 0,
         }
 
         again = await _import(

@@ -17,6 +17,8 @@ export const ACCOUNTING_PARTIES_REFUSAL_CODES = [
   'CABECALHO_DIVERGENTE',
   'LINHAS_INVALIDAS',
   'RELATORIO_DE_OUTRA_EMPRESA',
+  // 86e3ydjzy: o tipo escolhido contradiz o título do relatório (o título manda).
+  'TIPO_DE_VINCULO_DIVERGENTE',
 ] as const;
 
 export type AccountingPartiesRefusalCode = (typeof ACCOUNTING_PARTIES_REFUSAL_CODES)[number];
@@ -41,7 +43,18 @@ export const PARTY_LINE_REASON_LABELS: Record<string, string> = {
     'CNPJ ou CPF inválido no relatório (dígito verificador errado, ou zeros à esquerda perdidos numa célula numérica)',
   conta_compartilhada:
     'Conta compartilhada por mais de uma pessoa: o vínculo precisa ser um para um',
+  // Só no vínculo pela coluna de CNPJ/CPF do plano (86e3ydjzy).
+  documento_repetido:
+    'O mesmo CNPJ ou CPF em mais de uma conta: não dá para saber qual é a da pessoa',
 };
+
+/**
+ * O 422 `TIPO_DE_VINCULO_NECESSARIO` (86e3ydjzy): a relação não traz o título do Domínio,
+ * e a tela pergunta se é de clientes ou de fornecedores. Não é recusa.
+ */
+export function isPartyTypeRequired(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'TIPO_DE_VINCULO_NECESSARIO';
+}
 
 export function partyLineReasonLabel(reason: string): string {
   return PARTY_LINE_REASON_LABELS[reason] ?? reason;
@@ -56,6 +69,7 @@ export interface PartyInvalidLine {
 export type AccountingPartiesRefusal =
   | { code: 'FORMATO_NAO_SUPORTADO'; userMessage: string }
   | { code: 'RELATORIO_DE_OUTRA_EMPRESA'; userMessage: string }
+  | { code: 'TIPO_DE_VINCULO_DIVERGENTE'; userMessage: string }
   | { code: 'CABECALHO_DIVERGENTE'; userMessage: string }
   | {
       code: 'ARQUIVO_INVALIDO';
@@ -101,6 +115,7 @@ export function readAccountingPartiesRefusal(error: unknown): AccountingPartiesR
   switch (code) {
     case 'FORMATO_NAO_SUPORTADO':
     case 'RELATORIO_DE_OUTRA_EMPRESA':
+    case 'TIPO_DE_VINCULO_DIVERGENTE':
     case 'CABECALHO_DIVERGENTE':
       return { code, userMessage };
     case 'ARQUIVO_INVALIDO':

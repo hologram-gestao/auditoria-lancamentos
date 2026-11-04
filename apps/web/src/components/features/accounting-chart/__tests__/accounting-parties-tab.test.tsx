@@ -142,6 +142,7 @@ function importResult(
     ],
     naoVinculadasTotal: 5,
     listLimit: 50,
+    empresaConferida: true,
     ...overrides,
   };
 }
@@ -414,6 +415,57 @@ describe('remover vínculo (86e3tttaf)', () => {
   });
 });
 
+describe('relação sem o título do Domínio (86e3ydjzy)', () => {
+  it('pergunta o tipo, sem padrão, e reenvia o MESMO arquivo com a escolha', async () => {
+    importState.mutateAsync
+      .mockRejectedValueOnce(
+        new ApiError(422, {
+          code: 'TIPO_DE_VINCULO_NECESSARIO',
+          message: 'x',
+          userMessage: 'Escolha o tipo.',
+          details: {},
+        }),
+      )
+      .mockResolvedValueOnce(importResult({ empresaConferida: false }));
+    const { container } = render(<AccountingPartiesTab clientId="c1" isClosed={false} hasPlan />);
+    const file = await chooseFile();
+    await userEvent.click(screen.getByRole('button', { name: 'Importar relação' }));
+
+    const question = await screen.findByTestId('accounting-parties-type-question');
+    expect(question).toHaveTextContent('Esta relação é de clientes ou de fornecedores?');
+    // Nenhum dos dois vem marcado: são dois botões, a pessoa escolhe.
+    expect(within(question).getAllByRole('button')).toHaveLength(2);
+    expect(screen.queryByTestId('accounting-parties-refusal')).not.toBeInTheDocument();
+    await assertNoA11yViolations(container);
+
+    await userEvent.click(within(question).getByRole('button', { name: 'Fornecedores' }));
+    await waitFor(() =>
+      expect(importState.mutateAsync).toHaveBeenLastCalledWith({ file, partyType: 'fornecedor' }),
+    );
+    const panel = await screen.findByTestId('accounting-parties-import-success');
+    expect(within(panel).getByTestId('accounting-parties-company-unchecked')).toHaveTextContent(
+      'A empresa do relatório não foi conferida',
+    );
+    expect(screen.queryByTestId('accounting-parties-type-question')).not.toBeInTheDocument();
+  });
+
+  it('o tipo que contradiz o título é recusa, com o motivo', async () => {
+    importState.mutateAsync.mockRejectedValue(
+      new ApiError(422, {
+        code: 'TIPO_DE_VINCULO_DIVERGENTE',
+        message: 'x',
+        userMessage: 'O tipo escolhido não é o do relatório.',
+        details: {},
+      }),
+    );
+    render(<AccountingPartiesTab clientId="c1" isClosed={false} hasPlan />);
+    await chooseFile();
+    await userEvent.click(screen.getByRole('button', { name: 'Importar relação' }));
+    const notice = await screen.findByTestId('accounting-parties-refusal');
+    expect(notice).toHaveTextContent('O tipo escolhido não é o do relatório');
+  });
+});
+
 describe('importar a relação', () => {
   it('sucesso mostra as contagens DA RESPOSTA e as linhas sem vínculo com conta e motivo', async () => {
     importState.mutateAsync.mockResolvedValue(importResult());
@@ -421,7 +473,9 @@ describe('importar a relação', () => {
     const file = await chooseFile();
     await userEvent.click(screen.getByRole('button', { name: 'Importar relação' }));
 
-    await waitFor(() => expect(importState.mutateAsync).toHaveBeenCalledWith(file));
+    await waitFor(() =>
+      expect(importState.mutateAsync).toHaveBeenCalledWith({ file, partyType: null }),
+    );
     const panel = await screen.findByTestId('accounting-parties-import-success');
     expect(panel).toHaveTextContent(
       'Relação de fornecedores importada: 93 pessoas, 88 contas vinculadas (88 novas, 0 atualizadas, 0 sem mudança); 5 linhas ficaram sem vínculo.',

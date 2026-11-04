@@ -688,9 +688,12 @@ const FILE_REFUSALS: Record<'cabecalho' | 'linhas', Record<string, unknown>> = {
  * cenário "sem plano" e o desfecho da importação são trocados por teste.
  */
 let accountingChartEmpty = false;
-let accountingImportOutcome: 'sucesso' | 'linhas' | 'dominio' = 'sucesso';
+let accountingImportOutcome: 'sucesso' | 'linhas' | 'dominio' | 'mapeamento' | 'linhas-de-fora' =
+  'sucesso';
+/** 86e3ydjze — a última importação deixou linhas de fora (o selo "não está 100%"). */
+let accountingLastImportIncomplete = false;
 /** 86e3qhhrn — a importação da relação de clientes/fornecedores: sucesso ou recusa. */
-let partiesImportOutcome: 'sucesso' | 'linhas' = 'sucesso';
+let partiesImportOutcome: 'sucesso' | 'linhas' | 'sem-titulo' = 'sucesso';
 /** 86e3qhhrr — a prévia da planilha da Omie: pronta (com aviso de cadastro) ou com problemas. */
 let omieExportOutcome: 'pronta' | 'problemas' = 'pronta';
 
@@ -766,6 +769,10 @@ const ACCOUNTING_PREVIEW_FIRST = {
   alteradas: [],
   ausentes: [],
   listLimit: 200,
+  // Épico 86e3ydjy9: os campos que o servidor sempre devolve desde 03/11.
+  linhasComProblema: [] as Array<{ linha: number; motivo: string }>,
+  documentosEncontrados: null as number | null,
+  tipoDerivado: null as { sinteticas: number; analiticas: number } | null,
 };
 const ACCOUNTING_PREVIEW_REIMPORT = {
   layout: 'modelo',
@@ -794,6 +801,64 @@ const ACCOUNTING_PREVIEW_REIMPORT = {
     },
   ],
   listLimit: 200,
+  // Épico 86e3ydjy9: os campos que o servidor sempre devolve desde 03/11.
+  linhasComProblema: [] as Array<{ linha: number; motivo: string }>,
+  documentosEncontrados: null as number | null,
+  tipoDerivado: null as { sinteticas: number; analiticas: number } | null,
+};
+
+/**
+ * 86e3ydjz4 — a etapa de mapeamento: o 422 `MAPEAMENTO_NECESSARIO` com o perfil das
+ * colunas (o cabeçalho é a exceção declarada; nenhum valor de célula) e a prévia
+ * depois do mapeamento, com o tipo pela hierarquia.
+ */
+const ACCOUNTING_MAPPING_REQUIRED = {
+  code: 'MAPEAMENTO_NECESSARIO',
+  message: 'x',
+  userMessage:
+    'Reconhecemos as colunas de código e classificação; não encontramos a coluna de tipo (S ou A); há mais de uma coluna que pode ser nome. Diga o que é cada coluna para continuar.',
+  details: {
+    recognizedRoles: ['codigo', 'classificacao'],
+    missingRoles: ['tipo', 'nome'],
+    ambiguousRoles: ['nome'],
+    colunas: [
+      {
+        indice: 0,
+        cabecalho: 'Código',
+        formaDetectada: 'inteiro',
+        preenchimento: 100,
+        papelSugerido: 'codigo',
+      },
+      {
+        indice: 1,
+        cabecalho: 'Classificação',
+        formaDetectada: 'classificacao',
+        preenchimento: 100,
+        papelSugerido: 'classificacao',
+      },
+      {
+        indice: 2,
+        cabecalho: 'Nome',
+        formaDetectada: 'texto',
+        preenchimento: 100,
+        papelSugerido: null,
+      },
+      {
+        indice: 3,
+        cabecalho: 'Nome fantasia',
+        formaDetectada: 'texto',
+        preenchimento: 96,
+        papelSugerido: null,
+      },
+      {
+        indice: 4,
+        cabecalho: 'CNPJ',
+        formaDetectada: 'documento',
+        preenchimento: 14,
+        papelSugerido: 'documento',
+      },
+    ],
+  },
 };
 
 /** 86e3nb816 — as duas recusas da gaveta de conta manual, no formato do servidor. */
@@ -2635,6 +2700,25 @@ async function fulfillApi(route: Route): Promise<void> {
   // 86e3qhhrn — vínculo conta ↔ cliente/fornecedor. A lista é o trio REAL
   // `{ data, pagination, summary }` (`fulfill` cru); o filtro `type` recorta no mock.
   if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/parties/import`) {
+    // 86e3ydjzy: a relação sem o título do Domínio pede o tipo; com ele, entra sem
+    // conferir a empresa.
+    if (partiesImportOutcome === 'sem-titulo') {
+      if (!(route.request().postData() ?? '').includes('name="tipoVinculo"')) {
+        return route.fulfill({
+          status: 422,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: {
+              code: 'TIPO_DE_VINCULO_NECESSARIO',
+              message: 'x',
+              userMessage: 'Escolha o tipo e envie de novo.',
+              details: {},
+            },
+          }),
+        });
+      }
+      return json({ ...PARTIES_IMPORT_RESULT, empresaConferida: false });
+    }
     if (partiesImportOutcome === 'linhas') {
       return route.fulfill({
         status: 422,
@@ -2699,6 +2783,33 @@ async function fulfillApi(route: Route): Promise<void> {
   }
   if (path === `/api/v1/clients/${CLIENT_ID}/accounting-chart/import/preview`) {
     if (enviouXls(route)) return recusarXls(route);
+    if (accountingImportOutcome === 'linhas-de-fora') {
+      return json({
+        ...ACCOUNTING_PREVIEW_FIRST,
+        layout: 'reconhecido',
+        contas: 4,
+        contasNovas: 4,
+        linhasComProblema: [
+          { linha: 10, motivo: 'codigo_vazio' },
+          { linha: 12, motivo: 'tipo_invalido' },
+        ],
+        documentosEncontrados: 2,
+      });
+    }
+    if (accountingImportOutcome === 'mapeamento') {
+      if (!(route.request().postData() ?? '').includes('name="mapeamento"')) {
+        return route.fulfill({
+          status: 422,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: ACCOUNTING_MAPPING_REQUIRED }),
+        });
+      }
+      return json({
+        ...ACCOUNTING_PREVIEW_FIRST,
+        layout: 'mapeado',
+        tipoDerivado: { sinteticas: 2, analiticas: 3 },
+      });
+    }
     if (accountingImportOutcome === 'linhas' || accountingImportOutcome === 'dominio') {
       const error =
         accountingImportOutcome === 'dominio'
@@ -2824,6 +2935,17 @@ async function fulfillApi(route: Route): Promise<void> {
           total: contas.length,
           totalPages: contas.length === 0 ? 0 : Math.ceil(contas.length / pageSize),
         },
+        ultimaImportacao: accountingLastImportIncomplete
+          ? {
+              importadaEm: '2026-11-03T15:30:00Z',
+              layout: 'reconhecido',
+              contas: 4,
+              linhasExcluidas: [
+                { linha: 10, motivo: 'codigo_vazio' },
+                { linha: 12, motivo: 'tipo_invalido' },
+              ],
+            }
+          : null,
       }),
     });
   }
@@ -4085,6 +4207,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
   // S16: o cliente TEM plano contábil e a importação dá certo, por padrão.
   accountingChartEmpty = false;
   accountingImportOutcome = 'sucesso';
+  accountingLastImportIncomplete = false;
   partiesImportOutcome = 'sucesso';
   omieExportOutcome = 'pronta';
   mappingAccountingDestination = false;
@@ -12121,6 +12244,144 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByRole('button', { name: 'Nova conta' })).toHaveCount(0);
       await expect(page.getByRole('button', { name: /^Editar conta / })).toHaveCount(0);
       await analyze(page, `plano contábil — gerente do cliente sem conta manual (${vp.label})`);
+    });
+  });
+}
+
+/**
+ * Épico 86e3ydjy9 — importar o plano contábil de qualquer cliente sem conserto por
+ * cliente (Tract, 03/11/2026): a etapa de mapeamento (86e3ydjz4), a importação sem as
+ * linhas com problema e o selo "plano não está 100%" (86e3ydjze) e a relação de
+ * fornecedores sem título (86e3ydjzy), nos três temas e nos dois viewports.
+ *
+ * Bloco próprio no FIM do arquivo, pelo motivo do bloco 86e3f55bc.
+ */
+for (const vp of VIEWPORTS) {
+  const slugPC = vp.label.replace(/\s+/g, '-');
+  test.describe(`Plano contábil por conteúdo (86e3ydjy9) — ${vp.label}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('etapa "Diga o que é cada coluna": cabeçalho, forma, papel e a hierarquia (86e3ydjz4)', async ({
+      page,
+    }) => {
+      accountingChartEmpty = true;
+      accountingImportOutcome = 'mapeamento';
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+
+      await page.getByRole('button', { name: 'Importar planilha' }).click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      await gaveta.getByLabel('Planilha (.csv, .xlsx ou .xls)').setInputFiles(PLANILHA_PLANO);
+      await gaveta.getByRole('button', { name: 'Revisar mudanças', exact: true }).click();
+
+      const etapa = gaveta.getByTestId('accounting-chart-mapping-step');
+      await expect(etapa.getByRole('heading', { name: 'Diga o que é cada coluna' })).toBeVisible();
+      await expect(etapa.getByRole('listitem')).toHaveCount(5);
+      await expect(etapa.getByRole('listitem').nth(3)).toContainText('Coluna 4 · Nome fantasia');
+      await expect(etapa.getByRole('combobox', { name: 'Papel da coluna 3' })).toHaveText(
+        'Ignorar',
+      );
+      // Nenhuma recusa: é uma pergunta.
+      await expect(gaveta.locator('[data-refusal-code]')).toHaveCount(0);
+      const continuar = gaveta.getByRole('button', { name: 'Continuar', exact: true });
+      await exigirDentroDaViewport(page, continuar, `${vp.label}: "Continuar" da etapa`);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        `${vp.label}: sem rolagem horizontal`,
+      ).toBe(true);
+      await shot(page, `plano-contabil-mapeamento-${slugPC}`);
+      await analyze(page, `plano contábil — etapa de mapeamento (${vp.label})`);
+
+      await etapa.getByRole('combobox', { name: 'Papel da coluna 3' }).click();
+      await page.getByRole('option', { name: 'Nome' }).click();
+      await etapa.getByRole('switch').click();
+      await continuar.click();
+
+      const derivado = gaveta.getByTestId('accounting-chart-preview-derived-types');
+      await expect(derivado).toContainText('2 contas marcadas como sintéticas pela hierarquia');
+      await shot(page, `plano-contabil-mapeamento-previa-${slugPC}`);
+      await analyze(page, `plano contábil — prévia do mapeamento (${vp.label})`);
+    });
+
+    test('linhas com problema na prévia e o selo "Plano não está 100%" (86e3ydjze)', async ({
+      page,
+    }) => {
+      accountingChartEmpty = true;
+      accountingImportOutcome = 'linhas-de-fora';
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+
+      await page.getByRole('button', { name: 'Importar planilha' }).click();
+      const gaveta = page.getByRole('dialog');
+      await aguardarAnimacao(gaveta);
+      await gaveta.getByLabel('Planilha (.csv, .xlsx ou .xls)').setInputFiles(PLANILHA_PLANO);
+      await gaveta.getByRole('button', { name: 'Revisar mudanças', exact: true }).click();
+      const linhas = gaveta.getByTestId('accounting-chart-preview-problem-lines');
+      await expect(linhas).toContainText('2 linhas da planilha têm problema e ficam de fora');
+      await expect(linhas.getByRole('row')).toHaveCount(3);
+      // 86e3ydjzy: a planilha tem a coluna de CNPJ/CPF; o vínculo é escolha, desligado.
+      const vinculo = gaveta.getByTestId('accounting-chart-link-documents');
+      await expect(vinculo).toContainText('Vincular as 2 contas ao CNPJ/CPF');
+      await vinculo.getByRole('switch').click();
+      await expect(vinculo.getByRole('radio', { name: 'Fornecedores' })).toBeChecked();
+      const confirmar = gaveta.getByRole('button', { name: 'Importar sem as 2 linhas' });
+      await exigirDentroDaViewport(page, confirmar, `${vp.label}: "Importar sem as 2 linhas"`);
+      await shot(page, `plano-contabil-linhas-de-fora-${slugPC}`);
+      await analyze(page, `plano contábil — prévia com linhas de fora (${vp.label})`);
+      await gaveta.getByRole('button', { name: 'Voltar' }).click();
+      await gaveta.getByRole('button', { name: 'Cancelar' }).click();
+
+      // A tela com a última importação incompleta: o selo vermelho ao lado do título.
+      accountingChartEmpty = false;
+      accountingLastImportIncomplete = true;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil`);
+      const selo = page.getByTestId('accounting-chart-incomplete-badge');
+      await expect(selo).toHaveText('Plano não está 100%');
+      await exigirDentroDaViewport(page, selo, `${vp.label}: selo do plano incompleto`);
+      expect(
+        await measuredContrast(page, '[data-testid="accounting-chart-incomplete-badge"]'),
+      ).toBeGreaterThanOrEqual(4.5);
+      // Foco do teclado abre o tooltip (o mesmo do hover).
+      await selo.focus();
+      await expect(page.getByRole('tooltip')).toContainText(
+        'não está 100%: 2 linhas ficaram de fora',
+      );
+      await analyze(page, `plano contábil — selo com tooltip (${vp.label})`);
+      await selo.click();
+      const dialogo = page.getByRole('dialog', { name: 'O plano importado não está 100%' });
+      await aguardarAnimacao(dialogo);
+      await expect(dialogo.getByRole('row')).toHaveCount(3);
+      await exigirDentroDaViewport(
+        page,
+        dialogo.getByRole('button', { name: 'Fechar' }).last(),
+        `${vp.label}: "Fechar" do diálogo das linhas`,
+      );
+      await shot(page, `plano-contabil-selo-incompleto-${slugPC}`);
+      await analyze(page, `plano contábil — diálogo das linhas de fora (${vp.label})`);
+    });
+
+    test('relação sem o título do Domínio: o tipo é perguntado (86e3ydjzy)', async ({ page }) => {
+      partiesImportOutcome = 'sem-titulo';
+      sessionUser = SYSTEM_MANAGER_USER;
+      await page.goto(`/clientes/${CLIENT_ID}/plano-contabil?aba=clientes-fornecedores`);
+      await page.getByLabel('Relação exportada do Domínio (.xls ou .xlsx)').setInputFiles({
+        name: 'Fornecedores Ajustados.xlsx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        buffer: Buffer.from('xlsx de teste'),
+      });
+      await page.getByRole('button', { name: 'Importar relação' }).click();
+      const pergunta = page.getByTestId('accounting-parties-type-question');
+      await expect(pergunta).toContainText('Esta relação é de clientes ou de fornecedores?');
+      const fornecedores = pergunta.getByRole('button', { name: 'Fornecedores' });
+      await exigirDentroDaViewport(page, fornecedores, `${vp.label}: "Fornecedores"`);
+      await shot(page, `plano-contabil-relacao-tipo-${slugPC}`);
+      await analyze(page, `plano contábil — pergunta do tipo da relação (${vp.label})`);
+      await fornecedores.click();
+      const sucesso = page.getByTestId('accounting-parties-import-success');
+      await expect(sucesso.getByTestId('accounting-parties-company-unchecked')).toBeVisible();
+      await aguardarToastEstavel(page);
+      await analyze(page, `plano contábil — relação sem empresa conferida (${vp.label})`);
     });
   });
 }

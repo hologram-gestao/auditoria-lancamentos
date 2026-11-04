@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.db.models.client_accounting_account import (
     MAX_ACCOUNTING_ACCOUNT_CLASSIFICATION_CHARS,
@@ -22,15 +22,18 @@ from app.db.models.client_accounting_account import (
 )
 from app.modules.client_accounting_chart.omie_sheet import problems_details
 from app.modules.client_accounting_chart.parties import PartyLineProblem
+from app.modules.client_accounting_chart.recognizer import AccountRole, ColumnMapping
 from app.modules.client_accounting_chart.service import (
     ACCOUNTING_ACCOUNT_UNDECIPHERABLE,
     AccountPatch,
     not_postable_reason,
 )
+from app.modules.client_file_ingestion.reader import MAX_FILE_COLUMNS, MAX_FILE_ROWS
 from app.modules.users.schemas import PaginationMeta
 
 if TYPE_CHECKING:
     from app.db.models.client_accounting_account import ClientAccountingAccount
+    from app.db.models.client_accounting_chart_import import ClientAccountingChartImport
     from app.modules.client_accounting_chart.service import (
         ChartImportResult,
         ChartPreview,
@@ -132,11 +135,62 @@ class AccountingAccountResponse(BaseModel):
         )
 
 
+class ChartProblemLine(BaseModel):
+    """Uma linha da planilha que fica (ou ficou) DE FORA: só o número e o motivo fechado."""
+
+    linha: int = Field(ge=1, description="A linha física da planilha, como no Excel.")
+    motivo: str = Field(
+        description=(
+            "Motivo no vocabulário fechado da importação (`codigo_vazio`, `nome_vazio`, "
+            "`tipo_invalido`, `grau_divergente`, `conta_fora_do_bloco`…)."
+        )
+    )
+
+
+class ChartLastImport(BaseModel):
+    """A última importação do plano (86e3ydjze): o que a tela lê para o selo."""
+
+    importada_em: datetime = Field(alias="importadaEm")
+    layout: str
+    contas: int = Field(ge=0)
+    linhas_excluidas: list[ChartProblemLine] = Field(
+        alias="linhasExcluidas",
+        description=(
+            "As linhas que ficaram DE FORA por confirmação na prévia. Vazia = o plano "
+            'importado está inteiro; com itens, a tela mostra o selo "não está 100%".'
+        ),
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_row(cls, row: ClientAccountingChartImport) -> ChartLastImport:
+        return cls(
+            importada_em=row.imported_at,
+            layout=row.layout,
+            contas=row.accounts,
+            linhas_excluidas=[
+                ChartProblemLine(linha=int(item["linha"]), motivo=str(item["motivo"]))
+                for item in row.excluded_lines
+            ],
+        )
+
+
 class AccountingChartListResponse(BaseModel):
     """Body de `GET /clients/{client_id}/accounting-chart`."""
 
     data: list[AccountingAccountResponse]
     pagination: PaginationMeta
+    ultima_importacao: ChartLastImport | None = Field(
+        default=None,
+        alias="ultimaImportacao",
+        description=(
+            "A última importação registrada do plano (desde 03/11/2026), ou `null`. Só "
+            "contagens, linhas e motivos fechados: nenhum nome nem célula."
+        ),
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class ChartImportPayload(BaseModel):
@@ -160,6 +214,23 @@ class ChartImportPayload(BaseModel):
         ),
     )
 
+    contas_excluidas: int = Field(
+        default=0,
+        ge=0,
+        alias="contasExcluidas",
+        description=(
+            "Linhas da planilha que ficaram DE FORA por confirmação (`linhasExcluidas`); "
+            'com elas, a tela do plano mostra o selo "não está 100%".'
+        ),
+    )
+    vinculos: PartiesImportPayload | None = Field(
+        default=None,
+        description=(
+            "Só com `vincularDocumentos` (86e3ydjzy): o vínculo conta ↔ CNPJ/CPF pela coluna "
+            "de documento da própria planilha, no formato da importação da relação."
+        ),
+    )
+
     model_config = ConfigDict(populate_by_name=True)
 
     @classmethod
@@ -169,6 +240,10 @@ class ChartImportPayload(BaseModel):
             contas_novas=result.new,
             contas_alteradas=result.updated,
             contas_ausentes=result.absent,
+            contas_excluidas=result.excluded,
+            vinculos=(
+                PartiesImportPayload.from_result(result.links) if result.links is not None else None
+            ),
         )
 
 
@@ -228,11 +303,92 @@ class ChartPreviewAbsentAccount(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+#: De onde veio a planilha (espelho de `sheet.ChartLayout`; o teste compara os dois).
+ChartLayoutName = Literal["modelo", "dominio", "reconhecido", "mapeado"]
+
+#: Teto do campo `mapeamento` (JSON) no multipart: cinco papéis e um booleano cabem
+#: com folga; acima disso não é um mapeamento.
+MAX_CHART_MAPPING_CHARS = 1000
+#: Teto do campo `linhasExcluidas` (JSON, lista de linhas): o leitor aceita até 10.000
+#: linhas e a importação recusa acima de 20% com problema, então 2.000 números de até
+#: 5 dígitos e a vírgula cabem com folga.
+MAX_EXCLUDED_LINES_CHARS = 16_000
+
+
+class ChartLinkDocumentsRequest(BaseModel):
+    """O vínculo pela coluna de CNPJ/CPF do plano (campo `vincularDocumentos`, 86e3ydjzy)."""
+
+    tipo: AccountingPartyType
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChartExcludedLinesRequest(BaseModel):
+    """As linhas que a pessoa confirmou deixar de fora (campo `linhasExcluidas`)."""
+
+    linhas: list[int] = Field(max_length=MAX_FILE_ROWS * 2)
+
+    @model_validator(mode="after")
+    def _positive(self) -> ChartExcludedLinesRequest:
+        if any(line < 1 for line in self.linhas):
+            raise ValueError("linha fora da planilha")
+        return self
+
+
+class ChartColumnMappingRequest(BaseModel):
+    """O mapeamento das colunas que a pessoa escolheu na tela (campo `mapeamento`).
+
+    Uma coluna por papel e um papel por coluna; `codigo` e `nome` obrigatórios; `tipo`
+    obrigatório salvo com `tipoPelaHierarquia`, que exige a `classificacao` (a conta que
+    tem outra abaixo é sintética) e não convive com uma coluna de tipo. Forma inválida é
+    o 400 genérico.
+    """
+
+    colunas: dict[AccountRole, int] = Field(
+        description="Papel → índice da coluna (0 = primeira coluna da planilha)."
+    )
+    tipo_pela_hierarquia: bool = Field(default=False, alias="tipoPelaHierarquia")
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    @model_validator(mode="after")
+    def _coherent(self) -> ChartColumnMappingRequest:
+        columns = self.colunas
+        if any(not 0 <= col < MAX_FILE_COLUMNS for col in columns.values()):
+            raise ValueError("índice de coluna fora do limite")
+        if len(set(columns.values())) != len(columns):
+            raise ValueError("a mesma coluna em dois papéis")
+        if "codigo" not in columns or "nome" not in columns:
+            raise ValueError("código e nome são obrigatórios")
+        if self.tipo_pela_hierarquia:
+            if "classificacao" not in columns or "tipo" in columns:
+                raise ValueError(
+                    "tipo pela hierarquia exige classificação e nenhuma coluna de tipo"
+                )
+        elif "tipo" not in columns:
+            raise ValueError("tipo obrigatório")
+        return self
+
+    def to_mapping(self) -> ColumnMapping:
+        return ColumnMapping(roles=self.colunas, type_by_hierarchy=self.tipo_pela_hierarquia)
+
+
+class ChartDerivedTypes(BaseModel):
+    """Quantas contas o tipo pela hierarquia marcou como sintéticas e como analíticas."""
+
+    sinteticas: int = Field(ge=0)
+    analiticas: int = Field(ge=0)
+
+
 class ChartImportPreviewPayload(BaseModel):
     """O que a importação desta planilha faria — nada é gravado."""
 
-    layout: Literal["modelo", "dominio"] = Field(
-        description="`modelo` da plataforma ou o plano exportado do `dominio`."
+    layout: ChartLayoutName = Field(
+        description=(
+            "`modelo` da plataforma, o plano exportado do `dominio`, `reconhecido` (a "
+            "planilha lida pelo CONTEÚDO das colunas, com as que a plataforma não usa "
+            "ignoradas) ou `mapeado` (lida pelo mapeamento escolhido na tela)."
+        )
     )
     contas: int = Field(ge=0, description="Contas na planilha.")
     contas_novas: int = Field(ge=0, alias="contasNovas")
@@ -275,6 +431,30 @@ class ChartImportPreviewPayload(BaseModel):
     list_limit: int = Field(
         alias="listLimit", description="O teto de cada lista; as contagens são as reais."
     )
+    linhas_com_problema: list[ChartProblemLine] = Field(
+        alias="linhasComProblema",
+        description=(
+            "As linhas da planilha que NÃO entram (86e3ydjze), em ordem de linha, com o "
+            "motivo fechado. Vazia = a planilha entra inteira. Para importar sem elas, a "
+            "importação manda a MESMA lista em `linhasExcluidas`."
+        ),
+    )
+    documentos_encontrados: int | None = Field(
+        alias="documentosEncontrados",
+        description=(
+            "Quantas contas trazem CNPJ/CPF na coluna de documento da planilha (86e3ydjzy), "
+            "fora o `0`; `null` quando a planilha não tem essa coluna. A importação com "
+            "`vincularDocumentos` vincula cada uma (as inválidas ficam sem vínculo)."
+        ),
+    )
+    tipo_derivado: ChartDerivedTypes | None = Field(
+        alias="tipoDerivado",
+        description=(
+            "Só quando o mapeamento pediu o tipo pela hierarquia (`tipoPelaHierarquia`): "
+            "quantas contas ficaram sintéticas (têm conta abaixo) e quantas analíticas. "
+            "`null` nos outros casos."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -284,8 +464,18 @@ class ChartImportPreviewPayload(BaseModel):
         names = preview.names
         limit = CHART_PREVIEW_LIST_LIMIT
         absent = sorted(diff.absent, key=lambda a: a.id not in preview.absent_in_use)
+        derived = preview.derived_types
         return cls(
             layout=preview.layout,
+            tipo_derivado=(
+                ChartDerivedTypes(sinteticas=derived[0], analiticas=derived[1])
+                if derived is not None
+                else None
+            ),
+            linhas_com_problema=[
+                ChartProblemLine(linha=line, motivo=reason) for line, reason in preview.problems
+            ],
+            documentos_encontrados=preview.documents_found,
             contas=preview.accounts,
             contas_novas=len(diff.new_rows),
             contas_alteradas=len(diff.changed),
@@ -447,7 +637,9 @@ class PartySkippedLine(BaseModel):
         description=(
             "`sem_conta` (conta 0 no Domínio), `documento_ausente`, `documento_invalido` "
             "(dígito verificador errado no Domínio) ou `conta_compartilhada` (a mesma conta "
-            "em mais de uma pessoa: vínculo um-para-um impossível)."
+            "em mais de uma pessoa: vínculo um-para-um impossível); no vínculo pela coluna "
+            "do plano, também `documento_repetido` (o mesmo documento em duas contas) e "
+            "`conta_sintetica`."
         )
     )
     account_code: str | None = Field(default=None, alias="accountCode")
@@ -484,12 +676,21 @@ class PartiesImportPayload(BaseModel):
     )
     nao_vinculadas_total: int = Field(ge=0, alias="naoVinculadasTotal")
     list_limit: int = Field(alias="listLimit")
+    empresa_conferida: bool = Field(
+        default=True,
+        alias="empresaConferida",
+        description=(
+            "`false` quando o relatório não traz o CNPJ da empresa (86e3ydjzy): a relação "
+            "entrou SEM conferir que é da empresa deste cliente."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
     @classmethod
     def from_result(cls, result: PartyImportResult) -> PartiesImportPayload:
         return cls(
+            empresa_conferida=result.company_checked,
             relatorio=result.party_type,
             linhas=result.lines,
             contas_vinculadas=result.linked,
@@ -715,3 +916,7 @@ class OmieExportPreviewEnvelope(BaseModel):
     """Body de `GET /clients/{client_id}/accounting-chart/omie-export/preview`."""
 
     data: OmieExportPreviewPayload
+
+
+# `ChartImportPayload.vinculos` aponta para um modelo declarado depois dele.
+ChartImportPayload.model_rebuild()

@@ -38,6 +38,7 @@ const TITLES: Record<AccountingPartiesRefusal['code'], string> = {
   CABECALHO_DIVERGENTE: 'O arquivo não é a relação de clientes nem a de fornecedores',
   LINHAS_INVALIDAS: 'O relatório tem linhas que impedem a importação — nenhum vínculo foi gravado',
   RELATORIO_DE_OUTRA_EMPRESA: 'Este relatório é de outra empresa',
+  TIPO_DE_VINCULO_DIVERGENTE: 'O tipo escolhido não é o do relatório',
 };
 
 export function AccountingPartiesRefusalNotice({

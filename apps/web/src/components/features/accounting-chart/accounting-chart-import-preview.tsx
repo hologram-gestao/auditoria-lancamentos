@@ -17,6 +17,16 @@
 import { AlertTriangle, Info } from 'lucide-react';
 
 import { ScrollRegion } from '@/components/ui/scroll-region';
+import {
+  Table,
+  TableBody,
+  TableCard,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { accountingLineReasonLabel } from '@/lib/accounting-chart-errors';
 import type {
   AccountingChartImportPreview,
   AccountingChartPreviewChangedAccount,
@@ -65,6 +75,68 @@ export function AccountingChartImportPreviewPanel({
         <PreviewStat label="Sem mudança" value={preview.contasSemMudanca} />
         <PreviewStat label="Não vieram" value={preview.contasAusentes} />
       </dl>
+
+      {preview.linhasComProblema.length > 0 && (
+        <div
+          data-testid="accounting-chart-preview-problem-lines"
+          className="bg-destructive-muted text-destructive ring-destructive/30 space-y-3 rounded-lg p-3 text-sm ring-1 ring-inset"
+        >
+          <p className="flex items-start gap-2 font-medium">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>
+              {plural(
+                preview.linhasComProblema.length,
+                'linha da planilha tem problema e fica de fora',
+                'linhas da planilha têm problema e ficam de fora',
+              )}
+            </span>
+          </p>
+          <TableCard className="bg-background text-foreground max-h-60">
+            <Table fill scrollRegionLabel="Linhas com problema (rolável)">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-20 whitespace-nowrap">Linha</TableHead>
+                  <TableHead>Motivo</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {preview.linhasComProblema.map((item) => (
+                  <TableRow key={item.linha}>
+                    <TableCell className="tabular-nums">{item.linha}</TableCell>
+                    <TableCell className="whitespace-normal">
+                      {accountingLineReasonLabel(item.motivo)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableCard>
+          <p>
+            Ao confirmar, a planilha entra SEM estas linhas, e o plano fica com o aviso &quot;Plano
+            não está 100%&quot; até você importar o arquivo corrigido. Os números são os das linhas
+            da planilha, como aparecem no Excel.
+          </p>
+        </div>
+      )}
+
+      {preview.tipoDerivado && (
+        <p
+          data-testid="accounting-chart-preview-derived-types"
+          className="bg-info-muted text-info ring-info/30 flex items-start gap-2 rounded-lg p-3 text-sm ring-1 ring-inset"
+        >
+          <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>
+            {plural(
+              preview.tipoDerivado.sinteticas,
+              'conta marcada como sintética',
+              'contas marcadas como sintéticas',
+            )}{' '}
+            pela hierarquia (têm contas abaixo); as outras{' '}
+            {plural(preview.tipoDerivado.analiticas, 'é analítica', 'são analíticas')}. Confira
+            antes de confirmar: um grupo sem conta abaixo fica analítico.
+          </span>
+        </p>
+      )}
 
       {!preview.temMudancas && (
         <p role="status" className="bg-muted text-foreground rounded-lg p-3 text-sm">

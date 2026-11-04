@@ -69,6 +69,8 @@ const listState: ListState = {
 let planTotal = 0;
 /** A sonda ainda não respondeu (a lista pode ter chegado antes). */
 let probeLoading = false;
+/** 86e3ydjze: a última importação que a sonda devolve (o selo "não está 100%"). */
+let lastImportState: AccountingChartLastImport | null = null;
 const importState = { mutateAsync: vi.fn(), isPending: false };
 const partiesListState = {
   data: {
@@ -104,6 +106,7 @@ vi.mock('@/hooks/use-client-accounting-chart', () => ({
         data: {
           data: [],
           pagination: { page: 1, pageSize: 1, total: planTotal, totalPages: planTotal },
+          ultimaImportacao: lastImportState,
         },
         isLoading: false,
       };
@@ -153,6 +156,7 @@ import type {
   AccountingChartListResponse,
   AuthenticatedUser,
   SourceAccountEntry,
+  AccountingChartLastImport,
 } from '@/lib/contracts';
 import { assertNoA11yViolations } from '@/test/a11y';
 
@@ -227,6 +231,9 @@ function preview(
     alteradas: [{ accountId: 'acc-10', code: '10', name: 'Ativo circulante', changes: ['nome'] }],
     ausentes: [],
     listLimit: 200,
+    tipoDerivado: null,
+    linhasComProblema: [],
+    documentosEncontrados: null,
     ...overrides,
   };
 }
@@ -269,6 +276,7 @@ beforeAll(() => {
 beforeEach(() => {
   currentSearch = '';
   probeLoading = false;
+  lastImportState = null;
   authState.user = manager;
   clientDetailState.data = {
     closed_at: null,
@@ -866,6 +874,219 @@ describe('importação', () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
+  it('CABECALHO_DIVERGENTE com papéis reconhecidos diz o que achou e o que falta (86e3ydjyq)', async () => {
+    withoutPlan();
+    previewState.mutateAsync = vi.fn().mockRejectedValue(
+      refusal('CABECALHO_DIVERGENTE', {
+        missingColumns: ['codigo_reduzido', 'tipo'],
+        repeatedColumns: [],
+        unexpectedColumnCount: 1,
+        foundColumnCount: 2,
+        recognizedRoles: ['codigo', 'nome'],
+        missingRoles: ['tipo'],
+        ambiguousRoles: [],
+      }),
+    );
+    render(<AccountingChartScreen clientId="c1" />);
+    const { user, dialog } = await openAndPick(/Importar planilha/);
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+
+    const notice = await within(dialog).findByRole('alert');
+    expect(within(notice).getByRole('list', { name: 'Reconhecemos' })).toHaveTextContent(
+      'CódigoNome',
+    );
+    expect(within(notice).getByRole('list', { name: 'Não encontramos' })).toHaveTextContent(
+      'Tipo (S ou A)',
+    );
+    // Com o reconhecimento, a lista de colunas do MODELO sai: ela mandaria a pessoa
+    // renomear colunas que a plataforma já entendeu.
+    expect(
+      within(notice).queryByRole('list', { name: 'Colunas obrigatórias que faltam' }),
+    ).not.toBeInTheDocument();
+    expect(within(notice).queryByTestId('accounting-header-counts')).not.toBeInTheDocument();
+  });
+
+  describe('etapa de mapeamento (86e3ydjz4)', () => {
+    const columns = [
+      {
+        indice: 0,
+        cabecalho: 'Código',
+        formaDetectada: 'inteiro',
+        preenchimento: 100,
+        papelSugerido: 'codigo',
+      },
+      {
+        indice: 1,
+        cabecalho: 'Classificação',
+        formaDetectada: 'classificacao',
+        preenchimento: 100,
+        papelSugerido: 'classificacao',
+      },
+      {
+        indice: 2,
+        cabecalho: null,
+        formaDetectada: 'texto',
+        preenchimento: 100,
+        papelSugerido: null,
+      },
+      {
+        indice: 3,
+        cabecalho: null,
+        formaDetectada: 'texto',
+        preenchimento: 100,
+        papelSugerido: null,
+      },
+    ];
+
+    function mappingRequired() {
+      return refusal('MAPEAMENTO_NECESSARIO', {
+        colunas: columns,
+        recognizedRoles: ['codigo', 'classificacao'],
+        missingRoles: ['tipo', 'nome'],
+        ambiguousRoles: ['nome'],
+      });
+    }
+
+    async function chooseRole(
+      user: ReturnType<typeof userEvent.setup>,
+      dialog: HTMLElement,
+      column: number,
+      role: string,
+    ) {
+      await user.click(within(dialog).getByRole('combobox', { name: `Papel da coluna ${column}` }));
+      await user.click(await screen.findByRole('option', { name: role }));
+    }
+
+    it('abre a etapa com o cabeçalho, a forma e o papel sugerido, sem valor de célula', async () => {
+      withoutPlan();
+      previewState.mutateAsync = vi.fn().mockRejectedValue(mappingRequired());
+      render(<AccountingChartScreen clientId="c1" />);
+      const { user, dialog } = await openAndPick(/Importar planilha/);
+      await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+
+      const step = await within(dialog).findByTestId('accounting-chart-mapping-step');
+      expect(within(step).getByText('Diga o que é cada coluna')).toBeInTheDocument();
+      expect(
+        within(step).getByText('Mensagem tipada de MAPEAMENTO_NECESSARIO.'),
+      ).toBeInTheDocument();
+      // O cabeçalho da coluna (a exceção declarada) aparece ao lado do número dela.
+      const items = within(
+        within(step).getByRole('list', { name: 'Colunas da planilha' }),
+      ).getAllByRole('listitem');
+      expect(items[0]).toHaveTextContent('Coluna 1 · Código');
+      expect(items[2]).toHaveTextContent(/^Coluna 3texto/);
+      expect(within(step).getAllByText('texto · 100% preenchida')).toHaveLength(2);
+      expect(within(step).getByRole('combobox', { name: 'Papel da coluna 1' })).toHaveTextContent(
+        'Código',
+      );
+      // As duas colunas de texto chegam sem papel: ignorar até a pessoa escolher.
+      expect(within(step).getByRole('combobox', { name: 'Papel da coluna 3' })).toHaveTextContent(
+        'Ignorar',
+      );
+      expect(within(dialog).getByRole('button', { name: 'Continuar' })).toBeInTheDocument();
+      // A recusa não aparece: é uma pergunta, não um erro.
+      expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('a regra do servidor: sem tipo e sem a hierarquia, não continua', async () => {
+      withoutPlan();
+      previewState.mutateAsync = vi.fn().mockRejectedValueOnce(mappingRequired());
+      render(<AccountingChartScreen clientId="c1" />);
+      const { user, dialog } = await openAndPick(/Importar planilha/);
+      await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+      await within(dialog).findByTestId('accounting-chart-mapping-step');
+      await chooseRole(user, dialog, 3, 'Nome');
+      await user.click(within(dialog).getByRole('button', { name: 'Continuar' }));
+
+      expect(
+        await within(dialog).findByText(
+          'Escolha a coluna de tipo (S ou A), ou marque que o arquivo não tem coluna de tipo.',
+        ),
+      ).toBeInTheDocument();
+      expect(previewState.mutateAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it('a mesma coluna em dois papéis é recusada antes de enviar', async () => {
+      withoutPlan();
+      previewState.mutateAsync = vi.fn().mockRejectedValueOnce(mappingRequired());
+      render(<AccountingChartScreen clientId="c1" />);
+      const { user, dialog } = await openAndPick(/Importar planilha/);
+      await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+      await within(dialog).findByTestId('accounting-chart-mapping-step');
+      await chooseRole(user, dialog, 3, 'Nome');
+      await chooseRole(user, dialog, 4, 'Nome');
+      await user.click(within(dialog).getByRole('button', { name: 'Continuar' }));
+
+      expect(await within(dialog).findByText('Só uma coluna pode ser nome.')).toBeInTheDocument();
+      expect(previewState.mutateAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it('com a hierarquia, a prévia diz quantas ficaram sintéticas e a importação leva o mesmo mapeamento', async () => {
+      withoutPlan();
+      previewState.mutateAsync = vi
+        .fn()
+        .mockRejectedValueOnce(mappingRequired())
+        .mockResolvedValueOnce(
+          preview({
+            layout: 'mapeado',
+            contas: 7,
+            contasNovas: 7,
+            contasAlteradas: 0,
+            contasSemMudanca: 0,
+            tipoDerivado: { sinteticas: 3, analiticas: 4 },
+          }),
+        );
+      importState.mutateAsync = vi.fn().mockResolvedValue({
+        contas: 7,
+        contasNovas: 7,
+        contasAlteradas: 0,
+        contasAusentes: 0,
+      });
+      render(<AccountingChartScreen clientId="c1" />);
+      const { user, dialog } = await openAndPick(/Importar planilha/);
+      await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+      await within(dialog).findByTestId('accounting-chart-mapping-step');
+
+      const hierarchy = within(dialog).getByRole('switch');
+      // Sem nome escolhido ainda a hierarquia já pode: classificação marcada, sem tipo.
+      expect(hierarchy).toBeEnabled();
+      await chooseRole(user, dialog, 3, 'Nome');
+      await user.click(hierarchy);
+      await user.click(within(dialog).getByRole('button', { name: 'Continuar' }));
+
+      const expected = {
+        colunas: { codigo: 0, classificacao: 1, nome: 2 },
+        tipoPelaHierarquia: true,
+      };
+      await waitFor(() =>
+        expect(previewState.mutateAsync).toHaveBeenLastCalledWith(
+          expect.objectContaining({ mapping: expected }),
+        ),
+      );
+      expect(
+        await within(dialog).findByTestId('accounting-chart-preview-derived-types'),
+      ).toHaveTextContent('3 contas marcadas como sintéticas pela hierarquia');
+
+      await user.click(within(dialog).getByRole('button', { name: 'Confirmar importação' }));
+      await waitFor(() =>
+        expect(importState.mutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({ mapping: expected }),
+        ),
+      );
+    });
+
+    it('com uma coluna de tipo escolhida, o interruptor da hierarquia fica desabilitado', async () => {
+      withoutPlan();
+      previewState.mutateAsync = vi.fn().mockRejectedValueOnce(mappingRequired());
+      render(<AccountingChartScreen clientId="c1" />);
+      const { user, dialog } = await openAndPick(/Importar planilha/);
+      await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+      await within(dialog).findByTestId('accounting-chart-mapping-step');
+      await chooseRole(user, dialog, 4, 'Tipo (S ou A)');
+      expect(within(dialog).getByRole('switch')).toBeDisabled();
+    });
+  });
+
   it('CABECALHO_DIVERGENTE por coluna REPETIDA nomeia a repetida (é do modelo)', async () => {
     withoutPlan();
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -919,6 +1140,208 @@ describe('importação', () => {
 
     await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith('Erro inesperado.'));
+  });
+});
+
+describe('linhas de fora e o selo "não está 100%" (86e3ydjze)', () => {
+  const problemPreview = () =>
+    preview({
+      layout: 'reconhecido',
+      contas: 1848,
+      contasNovas: 1848,
+      contasAlteradas: 0,
+      contasSemMudanca: 0,
+      linhasComProblema: [
+        { linha: 10, motivo: 'codigo_vazio' },
+        { linha: 12, motivo: 'tipo_invalido' },
+      ],
+    });
+
+  async function reviewWithProblems() {
+    withoutPlan();
+    previewState.mutateAsync = vi.fn().mockResolvedValue(problemPreview());
+    importState.mutateAsync = vi.fn().mockResolvedValue({
+      contas: 1848,
+      contasNovas: 1848,
+      contasAlteradas: 0,
+      contasAusentes: 0,
+      contasExcluidas: 2,
+    });
+    render(<AccountingChartScreen clientId="c1" />);
+    const user = userEvent.setup({ applyAccept: false });
+    await user.click(screen.getByRole('button', { name: /Importar planilha/ }));
+    const dialog = await screen.findByRole('dialog');
+    await user.upload(within(dialog).getByLabelText('Planilha (.csv, .xlsx ou .xls)'), csvFile());
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+    return { user, dialog };
+  }
+
+  it('a prévia lista linha × motivo e o confirmar diz quantas ficam de fora', async () => {
+    const { dialog } = await reviewWithProblems();
+    const box = await within(dialog).findByTestId('accounting-chart-preview-problem-lines');
+    expect(box).toHaveTextContent('2 linhas da planilha têm problema e ficam de fora');
+    const rows = within(box).getAllByRole('row');
+    expect(rows[1]).toHaveTextContent('10Código reduzido vazio');
+    expect(rows[2]).toHaveTextContent(/12Tipo diferente/);
+    expect(within(dialog).getByRole('button', { name: 'Importar sem as 2 linhas' })).toBeEnabled();
+  });
+
+  it('confirmar manda EXATAMENTE as linhas da prévia e o resultado diz quantas ficaram de fora', async () => {
+    const { user, dialog } = await reviewWithProblems();
+    await user.click(
+      await within(dialog).findByRole('button', { name: 'Importar sem as 2 linhas' }),
+    );
+    await waitFor(() =>
+      expect(importState.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ excludedLines: [10, 12] }),
+      ),
+    );
+    expect(await screen.findByTestId('accounting-chart-import-excluded')).toHaveTextContent(
+      '2 linhas da planilha ficaram de fora.',
+    );
+  });
+
+  it('sem linha com problema, o pedido não leva a lista', async () => {
+    withoutPlan();
+    importState.mutateAsync = vi.fn().mockResolvedValue({
+      contas: 3,
+      contasNovas: 1,
+      contasAlteradas: 1,
+      contasAusentes: 0,
+      contasExcluidas: 0,
+    });
+    render(<AccountingChartScreen clientId="c1" />);
+    const user = userEvent.setup({ applyAccept: false });
+    await user.click(screen.getByRole('button', { name: /Importar planilha/ }));
+    const dialog = await screen.findByRole('dialog');
+    await user.upload(within(dialog).getByLabelText('Planilha (.csv, .xlsx ou .xls)'), csvFile());
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+    await user.click(await within(dialog).findByRole('button', { name: 'Confirmar importação' }));
+    await waitFor(() =>
+      expect(importState.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ excludedLines: null }),
+      ),
+    );
+  });
+
+  it('com linha de fora na última importação, o selo aparece; o tooltip e o diálogo dizem quais', async () => {
+    lastImportState = {
+      importadaEm: '2026-11-03T15:30:00Z',
+      layout: 'reconhecido',
+      contas: 1848,
+      linhasExcluidas: [
+        { linha: 10, motivo: 'codigo_vazio' },
+        { linha: 12, motivo: 'tipo_invalido' },
+      ],
+    };
+    render(<AccountingChartScreen clientId="c1" />);
+    const badge = screen.getByTestId('accounting-chart-incomplete-badge');
+    expect(badge).toHaveTextContent('Plano não está 100%');
+    expect(badge).toHaveAccessibleName(
+      /^Plano não está 100%: O plano importado em 03\/11\/2026 às \d{2}h30 não está 100%: 2 linhas ficaram de fora\. Ver as linhas\.$/,
+    );
+    expect(badge).not.toHaveAttribute('title');
+
+    const user = userEvent.setup();
+    await user.hover(badge);
+    expect((await screen.findAllByText(/Clique para ver quais\./)).length).toBeGreaterThan(0);
+
+    await user.click(badge);
+    const dialog = await screen.findByRole('dialog', { name: 'O plano importado não está 100%' });
+    expect(within(dialog).getAllByRole('row')).toHaveLength(3);
+    expect(dialog).toHaveTextContent('Corrija o arquivo e importe de novo para tirar este aviso.');
+  });
+
+  it('última importação inteira (ou nenhuma registrada): sem selo', () => {
+    lastImportState = {
+      importadaEm: '2026-11-03T15:30:00Z',
+      layout: 'modelo',
+      contas: 3,
+      linhasExcluidas: [],
+    };
+    const { unmount } = render(<AccountingChartScreen clientId="c1" />);
+    expect(screen.queryByTestId('accounting-chart-incomplete-badge')).not.toBeInTheDocument();
+    unmount();
+    lastImportState = null;
+    render(<AccountingChartScreen clientId="c1" />);
+    expect(screen.queryByTestId('accounting-chart-incomplete-badge')).not.toBeInTheDocument();
+  });
+});
+
+describe('vínculo pela coluna de CNPJ/CPF do plano (86e3ydjzy)', () => {
+  async function reviewWithDocuments() {
+    withoutPlan();
+    previewState.mutateAsync = vi
+      .fn()
+      .mockResolvedValue(preview({ layout: 'reconhecido', documentosEncontrados: 252 }));
+    importState.mutateAsync = vi.fn().mockResolvedValue({
+      contas: 1850,
+      contasNovas: 1850,
+      contasAlteradas: 0,
+      contasAusentes: 0,
+      contasExcluidas: 0,
+      vinculos: {
+        relatorio: 'cliente',
+        linhas: 263,
+        contasVinculadas: 240,
+        vinculosNovos: 240,
+        vinculosAtualizados: 0,
+        vinculosSemMudanca: 0,
+        naoVinculadas: [],
+        naoVinculadasTotal: 23,
+        listLimit: 50,
+        empresaConferida: false,
+      },
+    });
+    render(<AccountingChartScreen clientId="c1" />);
+    const user = userEvent.setup({ applyAccept: false });
+    await user.click(screen.getByRole('button', { name: /Importar planilha/ }));
+    const dialog = await screen.findByRole('dialog');
+    await user.upload(within(dialog).getByLabelText('Planilha (.csv, .xlsx ou .xls)'), csvFile());
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+    return { user, dialog };
+  }
+
+  it('desligado por padrão: a importação não leva o vínculo', async () => {
+    const { user, dialog } = await reviewWithDocuments();
+    const choice = await within(dialog).findByTestId('accounting-chart-link-documents');
+    expect(choice).toHaveTextContent('Vincular as 252 contas ao CNPJ/CPF que vieram no arquivo');
+    expect(within(choice).getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+    await user.click(within(dialog).getByRole('button', { name: 'Confirmar importação' }));
+    await waitFor(() =>
+      expect(importState.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ linkDocumentsAs: null }),
+      ),
+    );
+  });
+
+  it('ligado, com o tipo do lote escolhido (pré-marcado fornecedor), e o resultado aparece', async () => {
+    const { user, dialog } = await reviewWithDocuments();
+    const choice = await within(dialog).findByTestId('accounting-chart-link-documents');
+    await user.click(within(choice).getByRole('switch'));
+    expect(within(choice).getByRole('radio', { name: 'Fornecedores' })).toBeChecked();
+    await user.click(within(choice).getByRole('radio', { name: 'Clientes' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Confirmar importação' }));
+    await waitFor(() =>
+      expect(importState.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ linkDocumentsAs: 'cliente' }),
+      ),
+    );
+    expect(await screen.findByTestId('accounting-chart-import-links')).toHaveTextContent(
+      'Vínculo pelos documentos da planilha: 263 pessoas, 240 contas vinculadas',
+    );
+  });
+
+  it('sem coluna de documento, nada é oferecido', async () => {
+    withoutPlan();
+    render(<AccountingChartScreen clientId="c1" />);
+    const user = userEvent.setup({ applyAccept: false });
+    await user.click(screen.getByRole('button', { name: /Importar planilha/ }));
+    const dialog = await screen.findByRole('dialog');
+    await user.upload(within(dialog).getByLabelText('Planilha (.csv, .xlsx ou .xls)'), csvFile());
+    await user.click(within(dialog).getByRole('button', { name: 'Revisar mudanças' }));
+    await within(dialog).findByTestId('accounting-chart-import-preview');
+    expect(within(dialog).queryByTestId('accounting-chart-link-documents')).not.toBeInTheDocument();
   });
 });
 

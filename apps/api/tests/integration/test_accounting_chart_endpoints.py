@@ -215,7 +215,14 @@ class TestImportacaoDaAmostra:
         resp = await _import(client_with_db, world.client, _SAMPLE.read_bytes())
         assert resp.status_code == 200, resp.text
         assert resp.json() == {
-            "data": {"contas": 20, "contasNovas": 20, "contasAlteradas": 0, "contasAusentes": 0}
+            "data": {
+                "contas": 20,
+                "contasNovas": 20,
+                "contasAlteradas": 0,
+                "contasAusentes": 0,
+                "contasExcluidas": 0,
+                "vinculos": None,
+            }
         }
         assert await _count(db_session, world.client.id) == 20
 
@@ -347,6 +354,9 @@ class TestReimportacao:
             "contasNovas": 1,
             "contasAlteradas": 2,
             "contasAusentes": 1,
+            # Épico 86e3ydjy9: as linhas de fora e o vínculo pelo plano.
+            "contasExcluidas": 0,
+            "vinculos": None,
         }
 
         contas = await _accounts(db_session, world.client.id)
@@ -385,6 +395,9 @@ class TestReimportacao:
             "contasNovas": 0,
             "contasAlteradas": 0,
             "contasAusentes": 0,
+            # Épico 86e3ydjy9: as linhas de fora e o vínculo pelo plano.
+            "contasExcluidas": 0,
+            "vinculos": None,
         }
         contas = await _accounts(db_session, world.client.id)
         assert contas["692"].absent_since is None, "a conta que volta perde o selo"
@@ -726,7 +739,14 @@ class TestPlanoExportadoDoDominio:
             )
         assert resp.status_code == 200, resp.text
         assert resp.json() == {
-            "data": {"contas": 563, "contasNovas": 563, "contasAlteradas": 0, "contasAusentes": 0}
+            "data": {
+                "contas": 563,
+                "contasNovas": 563,
+                "contasAlteradas": 0,
+                "contasAusentes": 0,
+                "contasExcluidas": 0,
+                "vinculos": None,
+            }
         }
         assert await _count(db_session, world.client.id) == 563
         assert "exemplo" not in repr(logs)
@@ -754,6 +774,7 @@ class TestPlanoExportadoDoDominio:
             "contas_alteradas": 0,
             "contas_ausentes": 0,
             "layout": "dominio",
+            "contas_excluidas": 0,
         }
 
     async def test_conta_depois_do_rodape_recusa_inteiro_sem_gravar(
@@ -884,7 +905,14 @@ class TestPlanoDoDominioEmXls:
             )
         assert resp.status_code == 200, resp.text
         assert resp.json() == {
-            "data": {"contas": 370, "contasNovas": 370, "contasAlteradas": 0, "contasAusentes": 0}
+            "data": {
+                "contas": 370,
+                "contasNovas": 370,
+                "contasAlteradas": 0,
+                "contasAusentes": 0,
+                "contasExcluidas": 0,
+                "vinculos": None,
+            }
         }
         assert "exemplo" not in repr(logs)
 

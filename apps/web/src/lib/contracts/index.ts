@@ -594,6 +594,9 @@ export type AccountingAccount = Schemas['AccountingAccountResponse'];
 export type AccountingAccountType = Schemas['AccountingAccountType'];
 /** `{ data, pagination }` — DUAS chaves: o `apiGet` entrega o par inteiro. */
 export type AccountingChartListResponse = Schemas['AccountingChartListResponse'];
+/** A última importação do plano (86e3ydjze): a fonte do selo "não está 100%". */
+export type AccountingChartLastImport = Schemas['ChartLastImport'];
+export type AccountingChartProblemLine = Schemas['ChartProblemLine'];
 /** Query real de `GET …/accounting-chart` (`page`, `pageSize`, `code`, `type`, `status`). */
 export type ListAccountingChartQuery = NonNullable<
   paths['/api/v1/clients/{client_id}/accounting-chart']['get']['parameters']['query']

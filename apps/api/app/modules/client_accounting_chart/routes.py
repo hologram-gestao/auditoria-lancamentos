@@ -44,10 +44,12 @@ linha `export` na trilha; o conteúdo não persiste.
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
+from pydantic import ValidationError
 
 from app.core.audit import AccessAction, record_access
 from app.core.dependencies import (
@@ -59,6 +61,7 @@ from app.core.dependencies import (
     OpenClientDep,
     SettingsDep,
 )
+from app.core.exceptions import ValidationAppError
 from app.db.models.client_accounting_account import (
     MAX_ACCOUNTING_ACCOUNT_CODE_CHARS,
     AccountingAccountType,
@@ -73,18 +76,25 @@ from app.modules.client_accounting_chart.omie_sheet import (
     OMIE_EXPORT_MEDIA_TYPE,
     omie_export_filename,
 )
+from app.modules.client_accounting_chart.recognizer import ColumnMapping
 from app.modules.client_accounting_chart.repository import AccountingChartFilters
 from app.modules.client_accounting_chart.schemas import (
+    MAX_CHART_MAPPING_CHARS,
+    MAX_EXCLUDED_LINES_CHARS,
     AccountingAccountCreateRequest,
     AccountingAccountEnvelope,
     AccountingAccountResponse,
     AccountingAccountStatusFilter,
     AccountingAccountUpdateRequest,
     AccountingChartListResponse,
+    ChartColumnMappingRequest,
+    ChartExcludedLinesRequest,
     ChartImportEnvelope,
     ChartImportPayload,
     ChartImportPreviewEnvelope,
     ChartImportPreviewPayload,
+    ChartLastImport,
+    ChartLinkDocumentsRequest,
     OmieExportPreviewEnvelope,
     OmieExportPreviewPayload,
     PartiesImportEnvelope,
@@ -163,6 +173,7 @@ async def list_accounting_chart(
     rows, total, names = await service.list_page(
         client, filters=filters, limit=page_size, offset=(page - 1) * page_size
     )
+    last_import = await service.latest_import(client)
     return AccountingChartListResponse(
         data=[AccountingAccountResponse.from_row(row, names=names) for row in rows],
         pagination=PaginationMeta(
@@ -171,7 +182,94 @@ async def list_accounting_chart(
             total=total,
             total_pages=(total + page_size - 1) // page_size,
         ),
+        ultima_importacao=ChartLastImport.from_row(last_import) if last_import else None,
     )
+
+
+#: O campo `mapeamento` das duas rotas (86e3ydjz4): o JSON do mapeamento das colunas.
+_MAPPING_FORM_DESCRIPTION = (
+    "Opcional. O que é cada coluna, quando a planilha pediu (`MAPEAMENTO_NECESSARIO`): JSON "
+    '`{"colunas": {"codigo": 0, "classificacao": 1, "tipo": 2, "grau": 3, "nome": 5}, '
+    '"tipoPelaHierarquia": false}` (índice 0 = primeira coluna). `codigo` e `nome` são '
+    "obrigatórios; `tipo` também, salvo com `tipoPelaHierarquia: true`, que exige a "
+    "`classificacao` e marca como sintética a conta que tem outra abaixo. Com ele, a "
+    "planilha é lida pelos papéis escolhidos (layout `mapeado`). Forma inválida: 400."
+)
+MappingForm = Annotated[
+    str | None,
+    Form(max_length=MAX_CHART_MAPPING_CHARS, description=_MAPPING_FORM_DESCRIPTION),
+]
+
+
+_EXCLUDED_FORM_DESCRIPTION = (
+    "Opcional, só na importação. As linhas que a pessoa confirmou deixar DE FORA, como a "
+    "prévia as devolveu em `linhasComProblema`: JSON `[12, 40]`. O servidor recalcula as "
+    "linhas com problema do MESMO arquivo e só grava se o conjunto for IGUAL; diferença é "
+    "422 `LINHAS_INVALIDAS` e nada é gravado. Forma inválida: 400."
+)
+ExcludedLinesForm = Annotated[
+    str | None,
+    Form(
+        alias="linhasExcluidas",
+        max_length=MAX_EXCLUDED_LINES_CHARS,
+        description=_EXCLUDED_FORM_DESCRIPTION,
+    ),
+]
+
+
+_LINK_FORM_DESCRIPTION = (
+    "Opcional, só na importação (86e3ydjzy). Quando a prévia devolveu "
+    "`documentosEncontrados`, vincula cada conta ao CNPJ/CPF da coluna de documento da "
+    'própria planilha, com o tipo escolhido para o lote: JSON `{"tipo": "fornecedor"}` ou '
+    '`{"tipo": "cliente"}` (o tipo nunca é inferido da posição da conta). Mesma política '
+    "da relação: inválido, `0`, conta sintética e documento repetido em duas contas ficam "
+    "sem vínculo e voltam em `vinculos.naoVinculadas`. Forma inválida: 400."
+)
+LinkDocumentsForm = Annotated[
+    str | None,
+    Form(alias="vincularDocumentos", max_length=100, description=_LINK_FORM_DESCRIPTION),
+]
+PartyTypeForm = Annotated[
+    AccountingPartyType | None,
+    Form(
+        alias="tipoVinculo",
+        description=(
+            "Opcional (86e3ydjzy): `cliente` ou `fornecedor`, para a relação que NÃO traz o "
+            "título do Domínio (sem ele, a resposta é 422 `TIPO_DE_VINCULO_NECESSARIO`). Com "
+            "título, o título manda e um tipo diferente é 422 `TIPO_DE_VINCULO_DIVERGENTE`."
+        ),
+    ),
+]
+
+
+def _link_from_form(raw: str | None) -> AccountingPartyType | None:
+    """O tipo do vínculo pela coluna do plano; forma inválida é o 400 genérico."""
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return ChartLinkDocumentsRequest.model_validate_json(raw).tipo
+    except ValidationError:
+        raise ValidationAppError("vínculo dos documentos do plano inválido") from None
+
+
+def _excluded_from_form(raw: str | None) -> list[int] | None:
+    """As linhas confirmadas do multipart; forma inválida é o 400 genérico."""
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return ChartExcludedLinesRequest.model_validate({"linhas": json.loads(raw)}).linhas
+    except (ValueError, ValidationError):
+        raise ValidationAppError("linhas excluídas do plano contábil inválidas") from None
+
+
+def _mapping_from_form(raw: str | None) -> ColumnMapping | None:
+    """O mapeamento do multipart, validado; forma inválida é o 400 genérico."""
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return ChartColumnMappingRequest.model_validate_json(raw).to_mapping()
+    except ValidationError:
+        raise ValidationAppError("mapeamento do plano contábil inválido") from None
 
 
 @router.post(
@@ -189,6 +287,21 @@ async def list_accounting_chart(
         "`Nome`/`Grau` nas 10 primeiras linhas e convertido para o modelo (código, `S` = "
         "sintética e vazio = analítica, classificação, nome e grau, que tem de ser a "
         "profundidade da classificação); o CSV nativo do Domínio não é aceito. "
+        "Planilha (XLSX ou XLS) que não é nenhum dos dois é lida pelo CONTEÚDO das colunas "
+        "(layout `reconhecido`): inteiro sem repetição é o código, `1.1.2` a classificação, "
+        "`S`/`A` o tipo, inteiro igual à profundidade da classificação o grau e texto o nome; "
+        "natureza, CNPJ e qualquer outra coluna são ignorados, e o nome da coluna só "
+        "desempata. Quando o conteúdo não decide código, nome ou tipo, a resposta é 422 "
+        "`MAPEAMENTO_NECESSARIO` com `details.colunas` (`indice`, `cabecalho`, "
+        "`formaDetectada`, `preenchimento`, `papelSugerido`: o cabeçalho é o único texto do "
+        "arquivo que sai, nunca um valor de célula) e o pedido seguinte manda o campo "
+        "`mapeamento`. "
+        "Linha com problema não recusa mais o arquivo inteiro: a prévia a lista em "
+        "`linhasComProblema` e a importação só grava SEM ela quando o campo "
+        "`linhasExcluidas` traz exatamente a mesma lista (sem o campo, ou diferente, é o 422 "
+        "`LINHAS_INVALIDAS`); o arquivo inteiro continua recusado com código repetido ou com "
+        "mais de 20% das linhas com problema. A importação fica registrada, e a lista do "
+        "plano devolve a última em `ultimaImportacao`. "
         "A reimportação casa por código e só adiciona e atualiza: conta "
         "nova entra ativa, conta existente atualiza nome, tipo e classificação, e a "
         "conta que não veio na planilha continua como estava (nunca é inativada nem "
@@ -202,7 +315,9 @@ async def list_accounting_chart(
         "`FORMATO_NAO_SUPORTADO` (não é CSV nem XLSX pelo CONTEÚDO), `ARQUIVO_INVALIDO` "
         "(não abre, ou planilha sem nenhuma conta com `details.reason=sem_contas`), "
         "`CABECALHO_DIVERGENTE` (`details.missingColumns`/`repeatedColumns` — só colunas do "
-        "MODELO — mais `details.unexpectedColumnCount`/`foundColumnCount`) e `LINHAS_INVALIDAS` (`details.lines=[{line, "
+        "MODELO — mais `details.unexpectedColumnCount`/`foundColumnCount` e, do "
+        "reconhecimento por conteúdo, `recognizedRoles`/`missingRoles`/`ambiguousRoles` em "
+        "papéis `codigo`, `classificacao`, `tipo`, `grau` e `nome`) e `LINHAS_INVALIDAS` (`details.lines=[{line, "
         "reason}]` com `reason` ∈ `codigo_vazio`, `codigo_longo`, `codigo_invalido`, "
         "`codigo_repetido`, `nome_vazio`, `nome_longo`, `tipo_invalido`, "
         "`classificacao_longa` e, no export do Domínio, também `codigo_ausente`, "
@@ -224,13 +339,26 @@ async def import_accounting_chart(
             description="CSV (`;`, UTF-8), XLSX ou XLS no modelo, ou o plano exportado do Domínio."
         ),
     ],
+    mapeamento: MappingForm = None,
+    linhas_excluidas: ExcludedLinesForm = None,
+    vincular_documentos: LinkDocumentsForm = None,
 ) -> ChartImportEnvelope:
+    mapping = _mapping_from_form(mapeamento)
+    excluded = _excluded_from_form(linhas_excluidas)
+    link_documents = _link_from_form(vincular_documentos)
     content = await read_upload_within_limit(
         file,
         declared_content_length=parse_content_length(request.headers.get("content-length")),
         max_bytes=settings.max_upload_bytes,
     )
-    result = await service.import_sheet(client, actor=actor, content=content)
+    result = await service.import_sheet(
+        client,
+        actor=actor,
+        content=content,
+        mapping=mapping,
+        excluded_lines=excluded,
+        link_documents=link_documents,
+    )
     return ChartImportEnvelope(data=ChartImportPayload.from_result(result))
 
 
@@ -238,8 +366,10 @@ async def import_accounting_chart(
     "/import/preview",
     summary=(
         "Mostra o que a importação desta planilha faria, SEM GRAVAR nada: o mesmo leitor "
-        "e as mesmas recusas 422 de `POST …/import` (modelo da plataforma e plano "
-        "exportado do Domínio). Devolve as contagens (`contasNovas`, `contasAlteradas`, "
+        "e as mesmas recusas 422 de `POST …/import` (modelo da plataforma, plano "
+        "exportado do Domínio, planilha lida pelo conteúdo das colunas e o 422 "
+        "`MAPEAMENTO_NECESSARIO`), e o mesmo campo `mapeamento`; com o tipo pela "
+        "hierarquia, `tipoDerivado` diz quantas ficaram sintéticas. Devolve as contagens (`contasNovas`, `contasAlteradas`, "
         "`contasSemMudanca`, `contasAusentes`, `contasAusentesEmUso` — as ausentes que "
         "decisões do de-para, de qualquer vigência, ou a conta do banco usam —, "
         "`contasQueVoltaram` e `contasInativasNaPlanilha`), `temMudancas` e as listas "
@@ -262,13 +392,15 @@ async def preview_accounting_chart_import(
             description="CSV (`;`, UTF-8), XLSX ou XLS no modelo, ou o plano exportado do Domínio."
         ),
     ],
+    mapeamento: MappingForm = None,
 ) -> ChartImportPreviewEnvelope:
+    mapping = _mapping_from_form(mapeamento)
     content = await read_upload_within_limit(
         file,
         declared_content_length=parse_content_length(request.headers.get("content-length")),
         max_bytes=settings.max_upload_bytes,
     )
-    preview = await service.preview_sheet(client, content=content)
+    preview = await service.preview_sheet(client, content=content, mapping=mapping)
     return ChartImportPreviewEnvelope(data=ChartImportPreviewPayload.from_preview(preview))
 
 
@@ -395,10 +527,15 @@ async def update_accounting_account(
         "Reimportar é idempotente; a conta vinculada que não vem no relatório fica como "
         "está. O CNPJ da empresa no cabeçalho do relatório é comparado (por impressão "
         "digital, nunca em claro) com o dos relatórios já importados: outra empresa é 422 "
-        "`RELATORIO_DE_OUTRA_EMPRESA`. Arquivo que não é a relação: 422 "
-        "`CABECALHO_DIVERGENTE`; sem título ou sem o CNPJ da empresa: 422 `ARQUIVO_INVALIDO` "
-        "com `details.reason` (`relatorio_nao_reconhecido`, `empresa_nao_identificada`, "
-        "`sem_pessoas`); CSV ou PDF: 422 `FORMATO_NAO_SUPORTADO`. Requer "
+        "`RELATORIO_DE_OUTRA_EMPRESA`; sem o CNPJ da empresa, a relação entra SEM conferir "
+        "e a resposta diz `empresaConferida: false` (86e3ydjzy). O cabeçalho por nome só "
+        "exige `Conta` e a coluna do documento (outras colunas não recusam); sem ele, o "
+        "conteúdo decide (documento com cara de CNPJ/CPF, conta de inteiros que existem no "
+        "plano). Arquivo que não é a relação: 422 `CABECALHO_DIVERGENTE`; sem o título do "
+        "Domínio: 422 `TIPO_DE_VINCULO_NECESSARIO` (reenviar com `tipoVinculo`), e o "
+        "`tipoVinculo` que contradiz o título é 422 `TIPO_DE_VINCULO_DIVERGENTE`; sem "
+        "pessoas: 422 `ARQUIVO_INVALIDO` com `details.reason=sem_pessoas`; CSV ou PDF: 422 "
+        "`FORMATO_NAO_SUPORTADO`. Requer "
         "`manage_client_accounting_chart`; cliente encerrado 409. Nenhum documento, nome "
         "ou razão social sai na resposta nem vai para o log."
     ),
@@ -415,13 +552,16 @@ async def import_accounting_parties(
             description="A RELAÇÃO DE CLIENTES ou a RELAÇÃO DE FORNECEDORES do Domínio (XLS/XLSX)."
         ),
     ],
+    tipo_vinculo: PartyTypeForm = None,
 ) -> PartiesImportEnvelope:
     content = await read_upload_within_limit(
         file,
         declared_content_length=parse_content_length(request.headers.get("content-length")),
         max_bytes=settings.max_upload_bytes,
     )
-    result = await service.import_parties(client, actor=actor, content=content)
+    result = await service.import_parties(
+        client, actor=actor, content=content, party_type=tipo_vinculo
+    )
     return PartiesImportEnvelope(data=PartiesImportPayload.from_result(result))
 
 

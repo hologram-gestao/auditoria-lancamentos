@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -61,6 +61,7 @@ from app.db.models.client_accounting_account import (
     AccountingPartyType,
     ClientAccountingAccount,
 )
+from app.db.models.client_accounting_chart_import import ClientAccountingChartImport
 from app.modules.client_accounting_chart.diff import ChartDiff, diff_chart
 from app.modules.client_accounting_chart.export import build_chart_csv
 from app.modules.client_accounting_chart.nature import derive_nature, resolve_nature
@@ -72,11 +73,14 @@ from app.modules.client_accounting_chart.omie_sheet import (
     problems_details,
 )
 from app.modules.client_accounting_chart.parties import (
+    PartyLine,
     PartyLineProblem,
+    normalize_document,
     parse_parties_report,
     parse_typed_document,
     raise_party_lines,
 )
+from app.modules.client_accounting_chart.recognizer import ColumnMapping, as_integer
 from app.modules.client_accounting_chart.repository import (
     AccountingChartFilters,
     AccountingChartRepository,
@@ -85,7 +89,9 @@ from app.modules.client_accounting_chart.sheet import (
     REASON_FIELD,
     ChartLayout,
     ChartSheetRow,
+    ParsedChartSheet,
     parse_chart_sheet,
+    refuse_unconfirmed_lines,
     validate_account,
 )
 from app.modules.client_accounting_chart.sort_key import chart_sort_key
@@ -93,7 +99,7 @@ from app.modules.usage_events.repository import UsageEventRepository
 from app.modules.usage_events.service import UsageEventService
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterable, Sequence
+    from collections.abc import Awaitable, Callable, Collection, Iterable, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -139,6 +145,10 @@ class ChartImportResult:
     #: De onde veio a planilha (`modelo` ou o export nativo do `dominio`). Vai só
     #: para a métrica, não para a resposta.
     layout: ChartLayout = "modelo"
+    #: Linhas da planilha que ficaram DE FORA por confirmação (86e3ydjze).
+    excluded: int = 0
+    #: O vínculo pela coluna de CNPJ/CPF do plano, quando pedido (86e3ydjzy).
+    links: PartyImportResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +165,12 @@ class ChartPreview:
     diff: ChartDiff
     names: DecryptedNames
     absent_in_use: frozenset[UUID]
+    #: Só com o tipo pela hierarquia (mapeamento, 86e3ydjz4): (sintéticas, analíticas).
+    derived_types: tuple[int, int] | None = None
+    #: As linhas com problema que ficariam de fora (86e3ydjze), `(linha, motivo)`.
+    problems: tuple[tuple[int, str], ...] = ()
+    #: Contas que trazem CNPJ/CPF na coluna do plano (86e3ydjzy), ou `None` sem a coluna.
+    documents_found: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +235,9 @@ class PartyImportResult:
     updated: int
     unchanged: int
     skipped: list[PartyLineProblem]
+    #: A empresa do relatório foi conferida pela impressão digital? `False` quando o
+    #: arquivo não traz o CNPJ da empresa (86e3ydjzy): entra sem conferir.
+    company_checked: bool = True
 
     @property
     def linked(self) -> int:
@@ -309,6 +328,10 @@ class AccountingChartService:
         self._usage_events = usage_events or UsageEventService(UsageEventRepository(db))
 
     # ------------------------------------------------------------------ leitura
+
+    async def latest_import(self, client: Client) -> ClientAccountingChartImport | None:
+        """A última importação registrada do plano (86e3ydjze): a fonte do selo da tela."""
+        return await self._repo.latest_import(client.id)
 
     async def list_page(
         self,
@@ -421,7 +444,14 @@ class AccountingChartService:
     # ------------------------------------------------------------------ escrita
 
     async def import_sheet(
-        self, client: Client, *, actor: CurrentUser, content: bytes
+        self,
+        client: Client,
+        *,
+        actor: CurrentUser,
+        content: bytes,
+        mapping: ColumnMapping | None = None,
+        excluded_lines: Collection[int] | None = None,
+        link_documents: AccountingPartyType | None = None,
     ) -> ChartImportResult:
         """Importa (ou reimporta) o plano do cliente — tudo ou nada.
 
@@ -436,7 +466,12 @@ class AccountingChartService:
         """
         _require_open(client)
         # CPU síncrona fora do event loop (limites do leitor checados antes de iterar).
-        parsed = await run_in_threadpool(parse_chart_sheet, content)
+        parsed = await run_in_threadpool(
+            parse_chart_sheet, content, mapping=mapping, allow_problems=True
+        )
+        # Linha com problema só fica de fora com a lista CONFIRMADA igual (86e3ydjze),
+        # antes de qualquer escrita: diferença é 422 e nada é gravado.
+        refuse_unconfirmed_lines(parsed.problems, confirmed=excluded_lines, layout=parsed.layout)
         rows = parsed.rows
 
         await self._repo.lock_client_chart(client.id)
@@ -464,30 +499,56 @@ class AccountingChartService:
         newly_absent = await self._repo.mark_absent(
             client.id, account_ids=[account.id for account in diff.absent], author_id=author_id
         )
-        await self._db.commit()
-
+        links: PartyImportResult | None = None
+        if link_documents is not None:
+            links = await self._link_chart_documents(
+                client, parsed, party_type=link_documents, author_id=author_id
+            )
         result = ChartImportResult(
             accounts=len(rows),
             new=len(inserts),
             updated=len(diff.changed),
             absent=len(diff.absent),
             layout=parsed.layout,
+            excluded=len(parsed.problems),
+            links=links,
         )
+        await self._repo.record_import(
+            ClientAccountingChartImport(
+                client_id=client.id,
+                imported_by=author_id,
+                layout=result.layout,
+                accounts=result.accounts,
+                new_accounts=result.new,
+                updated_accounts=result.updated,
+                absent_accounts=result.absent,
+                excluded_count=result.excluded,
+                excluded_lines=[
+                    {"linha": line, "motivo": reason} for line, reason in parsed.problems
+                ],
+            )
+        )
+        await self._db.commit()
+
         log.info(
             "accounting_chart_imported",
             client_id=str(client.id),
             layout=result.layout,
+            **_recognition_log(parsed),
             accounts=result.accounts,
             new=result.new,
             updated=result.updated,
             absent=result.absent,
+            excluded=result.excluded,
             newly_absent=newly_absent,
             returned=len(diff.returned),
         )
         await self._emit_imported(client, result)
         return result
 
-    async def preview_sheet(self, client: Client, *, content: bytes) -> ChartPreview:
+    async def preview_sheet(
+        self, client: Client, *, content: bytes, mapping: ColumnMapping | None = None
+    ) -> ChartPreview:
         """O que `import_sheet` faria com esta planilha — SEM GRAVAR (86e3qhhrm).
 
         O MESMO leitor (os dois layouts e as mesmas recusas 422) e a MESMA diferença
@@ -496,7 +557,9 @@ class AccountingChartService:
         (navegação no próprio tenant, §4.7).
         """
         _require_open(client)
-        parsed = await run_in_threadpool(parse_chart_sheet, content)
+        parsed = await run_in_threadpool(
+            parse_chart_sheet, content, mapping=mapping, allow_problems=True
+        )
         existing = await self._repo.list_all(client.id)
         current = await self.decrypt_names(client, existing)
         diff = diff_chart(parsed.rows, existing, names=current.names, failed=current.failed)
@@ -507,12 +570,14 @@ class AccountingChartService:
             "accounting_chart_import_previewed",
             client_id=str(client.id),
             layout=parsed.layout,
+            **_recognition_log(parsed),
             accounts=len(parsed.rows),
             new=len(diff.new_rows),
             updated=len(diff.changed),
             absent=len(diff.absent),
             absent_in_use=len(in_use),
             returned=len(diff.returned),
+            problem_lines=len(parsed.problems),
         )
         return ChartPreview(
             accounts=len(parsed.rows),
@@ -520,6 +585,9 @@ class AccountingChartService:
             diff=diff,
             names=current,
             absent_in_use=frozenset(in_use),
+            derived_types=parsed.derived_types,
+            problems=parsed.problems,
+            documents_found=parsed.documents_found,
         )
 
     async def export_csv(self, client: Client) -> tuple[bytes, int]:
@@ -826,39 +894,53 @@ class AccountingChartService:
     # ------------------------------------------- vínculo conta ↔ pessoa (86e3qhhrn)
 
     async def import_parties(
-        self, client: Client, *, actor: CurrentUser, content: bytes
+        self,
+        client: Client,
+        *,
+        actor: CurrentUser,
+        content: bytes,
+        party_type: AccountingPartyType | None = None,
     ) -> PartyImportResult:
-        """Importa a RELAÇÃO DE CLIENTES ou a DE FORNECEDORES do Domínio — por arquivo,
-        tudo ou nada.
+        """Importa a RELAÇÃO DE CLIENTES ou a DE FORNECEDORES — por arquivo, tudo ou nada.
 
         Ordem: cliente encerrado (409) → relatório inteiro lido em memória (422 tipado,
-        nada gravado) → trava por cliente → EMPRESA do relatório contra a impressão
-        digital dos relatórios anteriores (422 `RELATORIO_DE_OUTRA_EMPRESA`) → cada conta
-        contra o plano do cliente (inexistente ou sintética recusa o arquivo inteiro,
-        `LINHAS_INVALIDAS`) → DEK → documento cifrado por conta, numa transação →
-        commit → métrica.
+        nada gravado; sem título, o tipo vem de `party_type` ou é 422
+        `TIPO_DE_VINCULO_NECESSARIO`) → trava por cliente → EMPRESA do relatório contra a
+        impressão digital dos relatórios anteriores (422 `RELATORIO_DE_OUTRA_EMPRESA`;
+        relatório sem o CNPJ da empresa entra SEM conferir e sem tocar a impressão,
+        86e3ydjzy) → cada conta contra o plano do cliente (inexistente ou sintética
+        recusa o arquivo inteiro, `LINHAS_INVALIDAS`) → DEK → documento cifrado por conta,
+        numa transação → commit → métrica.
 
         Reimportar é idempotente: a conta cujo documento e tipo não mudaram não é
         regravada. A conta vinculada que não vem no relatório FICA como está (como a
         reimportação do plano nunca inativa). O documento nunca entra em log.
         """
         _require_open(client)
-        report = await run_in_threadpool(parse_parties_report, content)
+        # Os códigos do plano: o reconhecimento da coluna da conta pelo CONTEÚDO, quando
+        # a relação não tem cabeçalho por nome, confere que eles existem.
+        known_codes = frozenset(await self._repo.list_codes(client.id))
+        report = await run_in_threadpool(
+            parse_parties_report, content, party_type=party_type, known_codes=known_codes
+        )
 
         await self._repo.lock_client_chart(client.id)
-        fingerprint = compute_fingerprint(
-            report.company_document, self._settings.SEARCH_BLIND_INDEX_KEY.get_secret_value()
-        )
-        current_fingerprint = await self._repo.company_fingerprint_for_update(client.id)
-        if current_fingerprint is not None and current_fingerprint != fingerprint:
-            # A empresa só muda enquanto NENHUMA conta tem vínculo: é a saída para o
-            # relatório da empresa errada importado por engano antes de qualquer
-            # vínculo; com vínculo gravado, a troca seria misturar duas empresas.
-            if sum((await self._repo.count_links_by_type(client.id)).values()) > 0:
-                raise PartiesReportCompanyMismatchError(
-                    f"relatório de terceiros de outra empresa para o cliente {client.id}"
-                )
-            current_fingerprint = None
+        fingerprint: str | None = None
+        current_fingerprint: str | None = None
+        if report.company_document is not None:
+            fingerprint = compute_fingerprint(
+                report.company_document, self._settings.SEARCH_BLIND_INDEX_KEY.get_secret_value()
+            )
+            current_fingerprint = await self._repo.company_fingerprint_for_update(client.id)
+            if current_fingerprint is not None and current_fingerprint != fingerprint:
+                # A empresa só muda enquanto NENHUMA conta tem vínculo: é a saída para o
+                # relatório da empresa errada importado por engano antes de qualquer
+                # vínculo; com vínculo gravado, a troca seria misturar duas empresas.
+                if sum((await self._repo.count_links_by_type(client.id)).values()) > 0:
+                    raise PartiesReportCompanyMismatchError(
+                        f"relatório de terceiros de outra empresa para o cliente {client.id}"
+                    )
+                current_fingerprint = None
 
         codes = {line.account_code for line in report.lines}
         accounts = {a.code: a for a in await self._repo.get_by_codes(client.id, codes)}
@@ -874,43 +956,145 @@ class AccountingChartService:
         if problems:
             raise_party_lines(problems)
 
-        if not report.lines:
-            # Nada a vincular (só pulos): não provisiona DEK nem grava a empresa.
-            result = PartyImportResult(
+        new = updated = unchanged = 0
+        if report.lines:
+            new, updated, unchanged = await self._write_party_links(
+                client,
+                lines=report.lines,
+                accounts=accounts,
                 party_type=report.party_type,
-                lines=report.persons,
-                new=0,
-                updated=0,
-                unchanged=0,
-                skipped=report.skipped,
+                author_id=UUID(actor.id),
             )
-            log.info(
-                "accounting_parties_imported",
-                client_id=str(client.id),
-                relatorio=result.party_type.value,
-                lines=result.lines,
-                new=0,
-                updated=0,
-                unchanged=0,
-                skipped=len(result.skipped),
-            )
-            await self._emit_parties_imported(client, result)
-            return result
+            if fingerprint is not None and current_fingerprint is None:
+                await self._repo.set_company_fingerprint(client.id, fingerprint)
+            await self._db.commit()
+        # Sem linha a vincular (só pulos): não provisiona DEK nem grava a empresa.
 
+        result = PartyImportResult(
+            party_type=report.party_type,
+            lines=report.persons,
+            new=new,
+            updated=updated,
+            unchanged=unchanged,
+            skipped=report.skipped,
+            company_checked=report.company_document is not None,
+        )
+        log.info(
+            "accounting_parties_imported",
+            client_id=str(client.id),
+            relatorio=result.party_type.value,
+            lines=result.lines,
+            new=result.new,
+            updated=result.updated,
+            unchanged=result.unchanged,
+            skipped=len(result.skipped),
+            company_checked=result.company_checked,
+        )
+        await self._emit_parties_imported(client, result)
+        return result
+
+    async def _link_chart_documents(
+        self,
+        client: Client,
+        parsed: ParsedChartSheet,
+        *,
+        party_type: AccountingPartyType,
+        author_id: UUID,
+    ) -> PartyImportResult:
+        """Vincula cada conta ao CNPJ/CPF que veio na coluna do próprio plano (86e3ydjzy).
+
+        Só por ESCOLHA (o campo `vincularDocumentos`, com o tipo do lote: nada inferido da
+        posição da conta no plano), na MESMA transação da importação e pelo MESMO
+        `_write_party_links` da relação do Domínio. A mesma política de "não vincula, mas
+        não recusa": `0` ou vazio (`documento_ausente`), verificador errado
+        (`documento_invalido`), conta sintética (`conta_sintetica`) e o MESMO documento em
+        mais de uma conta (`documento_repetido`: qual delas é a da pessoa?) ficam sem
+        vínculo e voltam na resposta, com a linha e o código da conta.
+        """
+        skipped: list[PartyLineProblem] = []
+        candidates: list[PartyLine] = []
+        codes = {code for _, code, _ in parsed.documents}
+        accounts = {a.code: a for a in await self._repo.get_by_codes(client.id, codes)}
+        # O tipo vem da PLANILHA que acabou de ser gravada: o objeto da sessão pode ser o
+        # de antes do UPDATE em Core desta mesma importação (conta que virou sintética).
+        types = {row.code: row.account_type for row in parsed.rows}
+        for line, code, raw in parsed.documents:
+            if as_integer(raw) == 0:
+                skipped.append(PartyLineProblem(line, "documento_ausente", code))
+                continue
+            normalized = normalize_document(raw)
+            if normalized is None:
+                skipped.append(PartyLineProblem(line, "documento_invalido", code))
+                continue
+            if code not in accounts or types.get(code) is not AccountingAccountType.ANALITICA:
+                skipped.append(PartyLineProblem(line, "conta_sintetica", code))
+                continue
+            document, kind = normalized
+            candidates.append(PartyLine(line=line, account_code=code, document=document, kind=kind))
+        by_document: dict[str, int] = {}
+        for candidate in candidates:
+            by_document[candidate.document] = by_document.get(candidate.document, 0) + 1
+        lines: list[PartyLine] = []
+        for candidate in candidates:
+            if by_document[candidate.document] > 1:
+                skipped.append(
+                    PartyLineProblem(candidate.line, "documento_repetido", candidate.account_code)
+                )
+            else:
+                lines.append(candidate)
+        new = updated = unchanged = 0
+        if lines:
+            new, updated, unchanged = await self._write_party_links(
+                client, lines=lines, accounts=accounts, party_type=party_type, author_id=author_id
+            )
+        skipped.sort(key=lambda p: p.line)
+        log.info(
+            "accounting_chart_documents_linked",
+            client_id=str(client.id),
+            relatorio=party_type.value,
+            new=new,
+            updated=updated,
+            unchanged=unchanged,
+            skipped=len(skipped),
+        )
+        return PartyImportResult(
+            party_type=party_type,
+            lines=len(parsed.documents),
+            new=new,
+            updated=updated,
+            unchanged=unchanged,
+            skipped=skipped,
+            company_checked=False,
+        )
+
+    async def _write_party_links(
+        self,
+        client: Client,
+        *,
+        lines: Sequence[PartyLine],
+        accounts: dict[str, ClientAccountingAccount],
+        party_type: AccountingPartyType,
+        author_id: UUID,
+    ) -> tuple[int, int, int]:
+        """Grava o documento cifrado de cada linha na conta dela — novos, alterados, iguais.
+
+        O MESMO caminho da relação do Domínio e da coluna de documento do plano
+        (86e3ydjzy): a conta cujo documento e tipo não mudaram não é regravada. Sem
+        commit: quem chama decide a transação. O documento nunca entra em log.
+        """
         cipher = await self._write_cipher(client)
-        linked_accounts = [accounts[line.account_code] for line in report.lines]
+        linked_accounts = [accounts[line.account_code] for line in lines]
         current = _decrypt_party_documents(client.id, cipher, linked_accounts)
-        author_id = UUID(actor.id)
         updates: list[dict[str, object]] = []
         new = updated = unchanged = 0
-        for line in report.lines:
+        for line in lines:
             account = accounts[line.account_code]
             if account.party_document_encrypted is None:
                 new += 1
             elif (
                 account.id not in current.failed
                 and current.plain.get(account.id) == line.document
-                and account.party_type == report.party_type.value
+                and account.party_type == party_type.value
             ):
                 unchanged += 1
                 continue
@@ -925,35 +1109,12 @@ class AccountingChartService:
                     "b_id": account.id,
                     "b_ct": envelope,
                     "b_iv": iv,
-                    "b_type": report.party_type.value,
+                    "b_type": party_type.value,
                     "b_author": author_id,
                 }
             )
         await self._repo.update_party_links(updates)
-        if current_fingerprint is None:
-            await self._repo.set_company_fingerprint(client.id, fingerprint)
-        await self._db.commit()
-
-        result = PartyImportResult(
-            party_type=report.party_type,
-            lines=report.persons,
-            new=new,
-            updated=updated,
-            unchanged=unchanged,
-            skipped=report.skipped,
-        )
-        log.info(
-            "accounting_parties_imported",
-            client_id=str(client.id),
-            relatorio=result.party_type.value,
-            lines=result.lines,
-            new=result.new,
-            updated=result.updated,
-            unchanged=result.unchanged,
-            skipped=len(result.skipped),
-        )
-        await self._emit_parties_imported(client, result)
-        return result
+        return new, updated, unchanged
 
     async def list_parties(
         self, client: Client, *, party_type: AccountingPartyType | None, limit: int, offset: int
@@ -1249,6 +1410,7 @@ class AccountingChartService:
                 contas_alteradas=result.updated,
                 contas_ausentes=result.absent,
                 layout=result.layout,
+                contas_excluidas=result.excluded,
             )
         except Exception:
             log.warning("plano_contabil_importado_emit_failed", client_id=str(client.id))
@@ -1324,6 +1486,17 @@ def _effective_nature(account: ClientAccountingAccount) -> AccountingAccountNatu
 
 def _digits(value: str) -> str:
     return "".join(ch for ch in value if ch.isdigit())
+
+
+def _recognition_log(parsed: ParsedChartSheet) -> dict[str, Any]:
+    """Só CONTAGENS do reconhecimento por conteúdo (86e3ydjyq): os papéis reconhecidos e
+    quantas colunas foram ignoradas. Nenhum texto do arquivo (§4.5)."""
+    if parsed.recognition is None:
+        return {}
+    return {
+        "recognized_roles": parsed.recognition.recognized_roles,
+        "ignored_columns": parsed.recognition.ignored_columns,
+    }
 
 
 def _require_open(client: Client) -> None:
