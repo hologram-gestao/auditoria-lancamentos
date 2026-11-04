@@ -237,45 +237,82 @@ class TestTractPeloConteudo:
         _no_account_name(logs)
 
 
+async def _all_codes(http: AsyncClient, client: Client) -> list[str]:
+    codes: list[str] = []
+    page = 1
+    while True:
+        listing = await http.get(_url(client), params={"pageSize": 100, "page": page})
+        assert listing.status_code == 200, listing.text
+        body = listing.json()
+        codes += [row["code"] for row in body["data"]]
+        if page >= body["pagination"]["totalPages"]:
+            return codes
+        page += 1
+
+
 class TestExportCruDaTract:
     async def test_previa_e_importacao_entram_inteiras_pelo_dominio(
         self, client_with_db: AsyncClient, world: World
     ) -> None:
         await _login(client_with_db, world.admin)
         content = _TRACT_DOMINIO.read_bytes()
-        preview = await _post_xls(client_with_db, f"{_url(world.client)}/import/preview", content)
+        with capture_logs() as logs:
+            preview = await _post_xls(
+                client_with_db, f"{_url(world.client)}/import/preview", content
+            )
+            resp = await _post_xls(client_with_db, f"{_url(world.client)}/import", content)
         assert preview.status_code == 200, preview.text
         data = preview.json()["data"]
         assert (data["layout"], data["contas"], data["contasNovas"]) == ("dominio", 150, 150)
         assert data["linhasComProblema"] == []
-
-        resp = await _post_xls(client_with_db, f"{_url(world.client)}/import", content)
         assert resp.status_code == 200, resp.text
         assert resp.json()["data"]["contasNovas"] == 150
+        _no_account_name(logs)
 
-        listing = await client_with_db.get(_url(world.client), params={"pageSize": 100, "page": 1})
-        second = await client_with_db.get(_url(world.client), params={"pageSize": 100, "page": 2})
-        codes = [r["code"] for r in listing.json()["data"] + second.json()["data"]]
         with _TRACT_DOMINIO_EXPECTED.open(encoding="utf-8", newline="") as fh:
             expected = [r["codigo_reduzido"] for r in csv.DictReader(fh, delimiter=";")]
-        assert codes == expected
+        assert await _all_codes(client_with_db, world.client) == expected
 
-    async def test_depois_do_ajustado_nada_e_novo_e_o_resto_fica_ausente(
-        self, client_with_db: AsyncClient, world: World
+    async def test_depois_do_ajustado_nada_e_novo_e_o_resto_fica_ausente_sem_inativar(
+        self, client_with_db: AsyncClient, db_session: AsyncSession, world: World
     ) -> None:
         await _login(client_with_db, world.admin)
         adjusted = await _post_xlsx(
             client_with_db, f"{_url(world.client)}/import", _TRACT.read_bytes()
         )
         assert adjusted.status_code == 200, adjusted.text
-        preview = await _post_xls(
-            client_with_db,
-            f"{_url(world.client)}/import/preview",
-            _TRACT_DOMINIO.read_bytes(),
+        inactive_before = await _inactive_count(db_session, world.client.id)
+
+        resp = await _post_xls(
+            client_with_db, f"{_url(world.client)}/import", _TRACT_DOMINIO.read_bytes()
         )
-        assert preview.status_code == 200, preview.text
-        data = preview.json()["data"]
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
         assert (data["contasNovas"], data["contasAusentes"]) == (0, 1700)
+
+        stored = (
+            await db_session.execute(
+                select(ClientAccountingAccount)
+                .where(ClientAccountingAccount.client_id == world.client.id)
+                .execution_options(populate_existing=True)
+            )
+        ).scalars()
+        accounts = list(stored)
+        assert len(accounts) == 1850
+        assert sum(1 for a in accounts if a.absent_since is not None) == 1700
+        assert await _inactive_count(db_session, world.client.id) == inactive_before
+
+
+async def _inactive_count(db: AsyncSession, client_id: Any) -> int:
+    rows = await db.execute(
+        select(ClientAccountingAccount)
+        .where(
+            ClientAccountingAccount.client_id == client_id,
+            ClientAccountingAccount.active.is_(False),
+        )
+        .execution_options(populate_existing=True)
+    )
+    return len(list(rows.scalars()))
 
 
 def _tract_without_type() -> bytes:

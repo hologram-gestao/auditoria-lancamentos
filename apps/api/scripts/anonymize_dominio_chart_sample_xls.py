@@ -68,15 +68,23 @@ _WRITEACCESS = 0x005C
 _PROPERTY_STREAMS = ("\x05SummaryInformation", "\x05DocumentSummaryInformation")
 #: Abaixo deste tamanho o stream mora no mini-stream, que o script não sabe escrever.
 _MIN_STANDARD_STREAM = 4096
-#: Tipos de valor de texto do MS-OLEPS: `VT_LPSTR` (página de código) e `VT_LPWSTR`, sozinhos
-#: ou em vetor (`VT_VECTOR`), e o vetor de `VT_VARIANT` (títulos e nomes das abas).
-_VT_I4 = 0x0003
+#: Tipos de valor de texto do MS-OLEPS: `VT_LPSTR` (na página de código do conjunto) e
+#: `VT_LPWSTR`, sozinhos ou em vetor (`VT_VECTOR`), e o vetor de `VT_VARIANT` (títulos e
+#: nomes das abas).
 _VT_LPSTR = 0x001E
 _VT_LPWSTR = 0x001F
 _VT_VECTOR = 0x1000
 _VT_VARIANT = 0x000C
-#: Propriedades 0 (dicionário) e 1 (página de código) não são valor de usuário.
-_RESERVED_PIDS = frozenset({0, 1})
+#: Tamanho dos tipos de tamanho fixo (I2, I4, R4, R8, CY, DATE, BOOL, I1, UI1, UI2, UI4,
+#: I8, UI8, INT, UINT, FILETIME): o percurso de um vetor precisa pular cada um certo.
+_VT_FIXED_SIZES = {
+    0x02: 2, 0x03: 4, 0x04: 4, 0x05: 8, 0x06: 8, 0x07: 8, 0x0B: 2, 0x10: 1, 0x11: 1,
+    0x12: 2, 0x13: 4, 0x14: 8, 0x15: 8, 0x16: 4, 0x17: 4, 0x40: 8,
+}  # fmt: skip
+#: Propriedade 0 é o dicionário; a 1 é a página de código (lida, não é valor de usuário).
+_PID_DICTIONARY = 0
+_PID_CODEPAGE = 1
+_CODEPAGE_CODECS = {1200: "utf-16-le", 65001: "utf-8"}
 _HEADER_TEXTS = frozenset({"Código", "T", "Classificação", "Nome", "Grau"})
 SHEET_TITLE = "Contas"
 
@@ -102,7 +110,10 @@ def _stream_sectors(content: bytes, name: str) -> tuple[list[int], int, int] | N
     if node is None:
         return None
     if node.tot_size < _MIN_STANDARD_STREAM:
-        sys.exit("stream pequeno (mini-stream): fora do que este script sabe escrever")
+        sys.exit(
+            f"o stream {name.strip()!r} mora no mini-stream (arquivo salvo por outro "
+            "programa?): este script não sabe escrever nele, e nada foi gerado"
+        )
     sectors: list[int] = []
     sid = node.first_SID
     while sid >= 0:
@@ -139,50 +150,90 @@ def _empty_property_set(original: bytes) -> bytes:
     conjunto só, com o FMTID do primeiro do original, e a seção dele (tamanho 8, zero
     propriedades) logo em seguida. O resto do stream vira zero.
     """
+    if len(original) < 56 or struct.unpack_from("<I", original, 24)[0] < 1:
+        sys.exit("stream de propriedades sem conjunto: fora do que este script conhece")
     fmtid = original[28:44]
     body = original[:24] + struct.pack("<I", 1) + fmtid + struct.pack("<III", 48, 8, 0)
     return body + b"\x00" * (len(original) - len(body))
 
 
-def _ole_value(stream: bytes, pos: int, vt: int, out: set[str]) -> int:
-    """Lê um valor do tipo `vt` em `pos`, guarda o texto em `out`; devolve o fim dele."""
+def _pad4(size: int) -> int:
+    return (size + 3) // 4 * 4
+
+
+def _codec(codepage: int) -> str:
+    codec = _CODEPAGE_CODECS.get(codepage, f"cp{codepage}")
+    try:
+        "".encode(codec)
+    except LookupError:
+        return "latin-1"
+    return codec
+
+
+def _ole_value(
+    stream: bytes, pos: int, vt: int, out: set[str], *, codec: str, in_vector: bool = False
+) -> int:
+    """Lê um valor do tipo `vt` em `pos`, guarda o texto em `out`; devolve o fim dele.
+
+    Dentro de um vetor, o tipo desconhecido para o script: o próximo elemento sairia do
+    lugar errado, e a conferência leria lixo (ou deixaria de ler um texto de verdade).
+    """
     if vt == _VT_LPSTR:
         size: int = struct.unpack_from("<I", stream, pos)[0]
-        out.add(stream[pos + 4 : pos + 4 + size].split(b"\x00", 1)[0].decode("latin-1"))
-        return pos + 4 + (size + 3) // 4 * 4
+        raw = stream[pos + 4 : pos + 4 + size]
+        text = raw.decode(codec, errors="replace")
+        out.add(text.split("\x00", 1)[0])
+        # SEM alinhamento: o Excel grava o próximo elemento do vetor colado no fim da
+        # string (medido na amostra da Tract, 04/11/2026). Quem alinhar com zeros cai
+        # no tipo desconhecido abaixo e o script para, em vez de ler fora do lugar.
+        return pos + 4 + size
     if vt == _VT_LPWSTR:
         chars: int = struct.unpack_from("<I", stream, pos)[0]
         raw = stream[pos + 4 : pos + 4 + 2 * chars]
         out.add(raw.decode("utf-16-le", errors="replace").split("\x00", 1)[0])
-        return pos + 4 + (2 * chars + 3) // 4 * 4
-    if vt == _VT_I4:
-        return pos + 4
+        return pos + 4 + _pad4(2 * chars)
+    if vt in _VT_FIXED_SIZES:
+        return pos + _pad4(_VT_FIXED_SIZES[vt])
     if vt == _VT_VARIANT:
-        inner = struct.unpack_from("<H", stream, pos)[0]
-        return _ole_value(stream, pos + 4, inner, out)
+        inner: int = struct.unpack_from("<H", stream, pos)[0]
+        return _ole_value(stream, pos + 4, inner, out, codec=codec, in_vector=True)
     if vt & _VT_VECTOR:
-        count = struct.unpack_from("<I", stream, pos)[0]
+        count: int = struct.unpack_from("<I", stream, pos)[0]
         pos += 4
+        element = vt & ~_VT_VECTOR
+        if element in _VT_FIXED_SIZES:
+            return pos + _pad4(count * _VT_FIXED_SIZES[element])
         for _ in range(count):
-            pos = _ole_value(stream, pos, vt & ~_VT_VECTOR, out)
+            pos = _ole_value(stream, pos, element, out, codec=codec, in_vector=True)
         return pos
-    # Data, booleano, miniatura: não é texto, e a conferência não precisa do fim.
+    if in_vector:
+        sys.exit(f"propriedade de tipo {vt:#06x} num vetor: fora do que este script conhece")
+    # Fora de vetor (miniatura, blob): não é texto, e o fim dele não é usado.
     return pos
 
 
 def _property_texts(stream: bytes) -> set[str]:
     """Os valores de texto de um stream de propriedades (MS-OLEPS), para a conferência."""
     out: set[str] = set()
-    sets = struct.unpack_from("<I", stream, 24)[0]
+    sets: int = struct.unpack_from("<I", stream, 24)[0]
     for i in range(sets):
-        section = struct.unpack_from("<I", stream, 28 + 20 * i + 16)[0]
-        count = struct.unpack_from("<I", stream, section + 4)[0]
-        for k in range(count):
-            pid, offset = struct.unpack_from("<II", stream, section + 8 + 8 * k)
-            if pid in _RESERVED_PIDS:
+        section: int = struct.unpack_from("<I", stream, 28 + 20 * i + 16)[0]
+        count: int = struct.unpack_from("<I", stream, section + 4)[0]
+        entries = [struct.unpack_from("<II", stream, section + 8 + 8 * k) for k in range(count)]
+        codepage = next(
+            (
+                struct.unpack_from("<H", stream, section + offset + 4)[0]
+                for pid, offset in entries
+                if pid == _PID_CODEPAGE
+            ),
+            1252,
+        )
+        codec = _codec(codepage)
+        for pid, offset in entries:
+            if pid in (_PID_DICTIONARY, _PID_CODEPAGE):
                 continue
             vt = struct.unpack_from("<H", stream, section + offset)[0]
-            _ole_value(stream, section + offset + 4, vt, out)
+            _ole_value(stream, section + offset + 4, vt, out, codec=codec)
     return {text.strip() for text in out if text.strip()}
 
 
@@ -437,7 +488,13 @@ def anonymize(source: Path, out_dir: Path) -> None:
 
 
 def _check_no_leak(originals: set[str], target: Path) -> None:
-    """Nenhum texto trocado sobrou: nem no SST relido, nem em byte nenhum do arquivo."""
+    """Nenhum texto trocado sobrou: nem no SST relido, nem em byte nenhum do arquivo.
+
+    Os caracteres das strings do SST saem da busca nos bytes porque cada uma é, por
+    construção do `_decide`, ou estrutura mantida inteira ou texto fictício montado só
+    com vocabulário fixo e classificação. Uma mudança no `_decide` que aproveite texto do
+    original dentro de uma string NOVA quebra essa premissa e precisa de outra conferência.
+    """
     content = target.read_bytes()
     sectors, sec_size, size = _workbook_sectors(content)
     stream = _read_stream(content, sectors, sec_size, size)

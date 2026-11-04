@@ -25,6 +25,7 @@ import struct
 from pathlib import Path
 
 import xlrd
+from scripts.anonymize_dominio_chart_sample import FILE_AUTHOR
 from xlrd import compdoc
 
 from app.db.models.client_accounting_account import AccountingAccountType
@@ -125,15 +126,19 @@ class TestRegravadoPeloExcel:
         stream = _doc().get_named_stream("Workbook")
         assert stream is not None
         pos = 0
-        while True:
+        found = None
+        while pos + 4 <= len(stream):
             code, length = struct.unpack_from("<HH", stream, pos)
             if code == _WRITEACCESS:
+                found = pos
                 break
             pos += 4 + length
-        nchars, options = struct.unpack_from("<HB", stream, pos + 4)
+        assert found is not None, "o Excel grava WRITEACCESS e a fixture o mantém"
+        nchars, options = struct.unpack_from("<HB", stream, found + 4)
+        assert nchars > 0
         assert not options & 0x01
-        user = stream[pos + 7 : pos + 7 + nchars].decode("latin-1")
-        assert "Hologram OS (fixture anonimizada)".startswith(user)
+        user = stream[found + 7 : found + 7 + nchars].decode("latin-1")
+        assert FILE_AUTHOR.startswith(user)
 
 
 class TestRecorteDoPlanoAjustado:
