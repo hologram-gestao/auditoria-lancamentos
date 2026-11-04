@@ -14,9 +14,18 @@ codificação daquele pedaço (a string pode ser partida entre registros CONTINU
 de 8 para 16 bits no meio). Nenhum byte muda de posição: contêiner OLE2, registros,
 deslocamentos e o defeito do Domínio ficam idênticos ao original.
 
-A conferência final relê o SST da fixture e procura cada texto trocado nos bytes do
-arquivo inteiro, em latin-1 e em UTF-16; imprime só contagens. O script não imprime
-célula nenhuma.
+O export do Domínio REGRAVADO pelo Excel (a amostra da Tract, 04/11/2026) traz mais
+dois lugares com texto fora do SST, e os dois saem: o nome do usuário no registro
+WRITEACCESS (trocado no lugar, mesmo comprimento) e os streams de propriedades do Office
+(`SummaryInformation` e `DocumentSummaryInformation`: autor, "último a salvar", empresa),
+regravados como um conjunto de propriedades VAZIO do mesmo tamanho. O export original do
+Domínio não tem nenhum dos dois, e nele o script faz o mesmo que sempre fez.
+
+A conferência final relê o SST da fixture (nenhuma string pode ser IGUAL a um texto
+trocado) e procura cada texto trocado nos bytes do arquivo inteiro, em latin-1 e em
+UTF-16, com os caracteres das strings do SST mascarados: elas são estrutura mantida ou
+texto fictício, e uma sigla do original (`CPF`, `CRC`) dentro do rodapé fictício não é
+sobra. Imprime só contagens. O script não imprime célula nenhuma.
 
 Uso (de `apps/api/`; o caminho da amostra é argumento, nunca escrito aqui):
 
@@ -44,6 +53,7 @@ from scripts.anonymize_dominio_chart_sample import (
     _FILLER,
     BANNER_LABELS,
     BANNER_VALUES,
+    FILE_AUTHOR,
     FOOTER_TEXT,
 )
 
@@ -53,6 +63,20 @@ _BOUNDSHEET = 0x0085
 _LABELSST = 0x00FD
 _EOF = 0x000A
 _BOF = 0x0809
+_WRITEACCESS = 0x005C
+#: Streams de propriedades do Office (MS-OLEPS) que o Excel grava ao salvar.
+_PROPERTY_STREAMS = ("\x05SummaryInformation", "\x05DocumentSummaryInformation")
+#: Abaixo deste tamanho o stream mora no mini-stream, que o script não sabe escrever.
+_MIN_STANDARD_STREAM = 4096
+#: Tipos de valor de texto do MS-OLEPS: `VT_LPSTR` (página de código) e `VT_LPWSTR`, sozinhos
+#: ou em vetor (`VT_VECTOR`), e o vetor de `VT_VARIANT` (títulos e nomes das abas).
+_VT_I4 = 0x0003
+_VT_LPSTR = 0x001E
+_VT_LPWSTR = 0x001F
+_VT_VECTOR = 0x1000
+_VT_VARIANT = 0x000C
+#: Propriedades 0 (dicionário) e 1 (página de código) não são valor de usuário.
+_RESERVED_PIDS = frozenset({0, 1})
 _HEADER_TEXTS = frozenset({"Código", "T", "Classificação", "Nome", "Grau"})
 SHEET_TITLE = "Contas"
 
@@ -71,11 +95,13 @@ def _fit(text: str, length: int) -> str:
     return (text + _FILLER * (1 + length // len(_FILLER)))[:length]
 
 
-def _workbook_sectors(content: bytes) -> tuple[list[int], int, int]:
-    """Setores do stream `Workbook`, tamanho do setor e tamanho do stream."""
+def _stream_sectors(content: bytes, name: str) -> tuple[list[int], int, int] | None:
+    """Setores do stream `name`, tamanho do setor e tamanho do stream (None sem ele)."""
     doc = compdoc.CompDoc(content, logfile=io.StringIO())
-    node = next(d for d in doc.dirlist if d.name == "Workbook")
-    if node.tot_size < 4096:
+    node = next((d for d in doc.dirlist if d.name == name), None)
+    if node is None:
+        return None
+    if node.tot_size < _MIN_STANDARD_STREAM:
         sys.exit("stream pequeno (mini-stream): fora do que este script sabe escrever")
     sectors: list[int] = []
     sid = node.first_SID
@@ -83,6 +109,81 @@ def _workbook_sectors(content: bytes) -> tuple[list[int], int, int]:
         sectors.append(sid)
         sid = doc.SAT[sid]
     return sectors, doc.sec_size, node.tot_size
+
+
+def _workbook_sectors(content: bytes) -> tuple[list[int], int, int]:
+    """Setores do stream `Workbook`, tamanho do setor e tamanho do stream."""
+    found = _stream_sectors(content, "Workbook")
+    if found is None:
+        sys.exit("arquivo sem o stream Workbook: nada foi gerado")
+    return found
+
+
+def _read_stream(content: bytes, sectors: list[int], sec_size: int, size: int) -> bytes:
+    return b"".join(content[512 + s * sec_size : 512 + (s + 1) * sec_size] for s in sectors)[:size]
+
+
+def _put_stream(out: bytearray, sectors: list[int], sec_size: int, stream: bytes) -> None:
+    for i, s in enumerate(sectors):
+        chunk = stream[i * sec_size : (i + 1) * sec_size]
+        start = 512 + s * sec_size
+        if start + len(chunk) > len(out):
+            sys.exit("setor fora do arquivo: nada foi gerado")
+        out[start : start + len(chunk)] = chunk
+
+
+def _empty_property_set(original: bytes) -> bytes:
+    """O stream de propriedades com UM conjunto e nenhuma propriedade, do mesmo tamanho.
+
+    MS-OLEPS: ordem de bytes, versão, sistema e CLSID (24 bytes) ficam; depois, um
+    conjunto só, com o FMTID do primeiro do original, e a seção dele (tamanho 8, zero
+    propriedades) logo em seguida. O resto do stream vira zero.
+    """
+    fmtid = original[28:44]
+    body = original[:24] + struct.pack("<I", 1) + fmtid + struct.pack("<III", 48, 8, 0)
+    return body + b"\x00" * (len(original) - len(body))
+
+
+def _ole_value(stream: bytes, pos: int, vt: int, out: set[str]) -> int:
+    """Lê um valor do tipo `vt` em `pos`, guarda o texto em `out`; devolve o fim dele."""
+    if vt == _VT_LPSTR:
+        size: int = struct.unpack_from("<I", stream, pos)[0]
+        out.add(stream[pos + 4 : pos + 4 + size].split(b"\x00", 1)[0].decode("latin-1"))
+        return pos + 4 + (size + 3) // 4 * 4
+    if vt == _VT_LPWSTR:
+        chars: int = struct.unpack_from("<I", stream, pos)[0]
+        raw = stream[pos + 4 : pos + 4 + 2 * chars]
+        out.add(raw.decode("utf-16-le", errors="replace").split("\x00", 1)[0])
+        return pos + 4 + (2 * chars + 3) // 4 * 4
+    if vt == _VT_I4:
+        return pos + 4
+    if vt == _VT_VARIANT:
+        inner = struct.unpack_from("<H", stream, pos)[0]
+        return _ole_value(stream, pos + 4, inner, out)
+    if vt & _VT_VECTOR:
+        count = struct.unpack_from("<I", stream, pos)[0]
+        pos += 4
+        for _ in range(count):
+            pos = _ole_value(stream, pos, vt & ~_VT_VECTOR, out)
+        return pos
+    # Data, booleano, miniatura: não é texto, e a conferência não precisa do fim.
+    return pos
+
+
+def _property_texts(stream: bytes) -> set[str]:
+    """Os valores de texto de um stream de propriedades (MS-OLEPS), para a conferência."""
+    out: set[str] = set()
+    sets = struct.unpack_from("<I", stream, 24)[0]
+    for i in range(sets):
+        section = struct.unpack_from("<I", stream, 28 + 20 * i + 16)[0]
+        count = struct.unpack_from("<I", stream, section + 4)[0]
+        for k in range(count):
+            pid, offset = struct.unpack_from("<II", stream, section + 8 + 8 * k)
+            if pid in _RESERVED_PIDS:
+                continue
+            vt = struct.unpack_from("<H", stream, section + offset)[0]
+            _ole_value(stream, section + offset + 4, vt, out)
+    return {text.strip() for text in out if text.strip()}
 
 
 def _records(stream: bytes, start: int, end: int) -> list[tuple[int, int, int]]:
@@ -156,6 +257,18 @@ def _sheet_name(stream: bytes, records: list[tuple[int, int, int]]) -> _Text:
     nchars, options = struct.unpack_from("<BB", stream, pos + 6)
     wide = bool(options & 0x01)
     start = pos + 8
+    raw = stream[start : start + nchars * (2 if wide else 1)]
+    return _Text(raw.decode("utf-16-le" if wide else "latin-1"), [(start, nchars, wide)])
+
+
+def _write_access(stream: bytes, records: list[tuple[int, int, int]]) -> _Text | None:
+    """O nome do usuário no WRITEACCESS (o Excel grava; o export do Domínio, não)."""
+    pos = next((p for code, p, _ in records if code == _WRITEACCESS), None)
+    if pos is None:
+        return None
+    nchars, options = struct.unpack_from("<HB", stream, pos)
+    wide = bool(options & 0x01)
+    start = pos + 3
     raw = stream[start : start + nchars * (2 if wide else 1)]
     return _Text(raw.decode("utf-16-le" if wide else "latin-1"), [(start, nchars, wide)])
 
@@ -267,9 +380,7 @@ def _write(stream: bytearray, text: _Text, new: str) -> None:
 def anonymize(source: Path, out_dir: Path) -> None:
     content = source.read_bytes()
     sectors, sec_size, size = _workbook_sectors(content)
-    stream = bytearray(
-        b"".join(content[512 + s * sec_size : 512 + (s + 1) * sec_size] for s in sectors)[:size]
-    )
+    stream = bytearray(_read_stream(content, sectors, sec_size, size))
     globals_end = next(
         p + n for code, p, n in _records(bytes(stream), 0, len(stream)) if code == _EOF
     )
@@ -281,17 +392,27 @@ def anonymize(source: Path, out_dir: Path) -> None:
     replaced = {t.value.strip() for t, new in zip(texts, final, strict=True) if new != t.value}
     for text, new in zip(texts, final, strict=True):
         _write(stream, text, new)
-    _write(stream, sheet, _fit(SHEET_TITLE, len(sheet.value)))
-    if sheet.value != _fit(SHEET_TITLE, len(sheet.value)):
+    sheet_title = _fit(SHEET_TITLE, len(sheet.value))
+    _write(stream, sheet, sheet_title)
+    if sheet.value != sheet_title:
         replaced.add(sheet.value.strip())
+    access = _write_access(bytes(stream), records)
+    if access is not None and access.value.strip():
+        _write(stream, access, _fit(FILE_AUTHOR, len(access.value)))
+        replaced.add(access.value.strip())
 
     out = bytearray(content)
-    for i, s in enumerate(sectors):
-        chunk = stream[i * sec_size : (i + 1) * sec_size]
-        start = 512 + s * sec_size
-        if start + len(chunk) > len(out):
-            sys.exit("setor fora do arquivo: nada foi gerado")
-        out[start : start + len(chunk)] = chunk
+    _put_stream(out, sectors, sec_size, bytes(stream))
+    for name in _PROPERTY_STREAMS:
+        found = _stream_sectors(content, name)
+        if found is None:
+            continue
+        prop_sectors, prop_sec_size, prop_size = found
+        original_props = _read_stream(content, prop_sectors, prop_sec_size, prop_size)
+        # O nome da aba também está nas propriedades (`TitlesOfParts`): o que ficou nela é
+        # o título fictício, e a conferência procura o resto.
+        replaced |= _property_texts(original_props) - {sheet_title.strip()}
+        _put_stream(out, prop_sectors, prop_sec_size, _empty_property_set(original_props))
 
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / "plano_dominio.xls"
@@ -319,18 +440,29 @@ def _check_no_leak(originals: set[str], target: Path) -> None:
     """Nenhum texto trocado sobrou: nem no SST relido, nem em byte nenhum do arquivo."""
     content = target.read_bytes()
     sectors, sec_size, size = _workbook_sectors(content)
-    stream = b"".join(content[512 + s * sec_size : 512 + (s + 1) * sec_size] for s in sectors)[
-        :size
-    ]
+    stream = _read_stream(content, sectors, sec_size, size)
     globals_end = next(p + n for code, p, n in _records(stream, 0, len(stream)) if code == _EOF)
-    sst = {t.value.strip() for t in _sst_texts(stream, _records(stream, 0, globals_end))}
+    texts = _sst_texts(stream, _records(stream, 0, globals_end))
+    sst = {t.value.strip() for t in texts}
+    # As strings do SST já foram conferidas por igualdade acima; nos bytes, os caracteres
+    # delas saem da busca (estrutura mantida ou texto fictício), e o resto do arquivo
+    # (os outros registros e os outros streams) é procurado inteiro.
+    masked = bytearray(stream)
+    for text in texts:
+        for pos, nchars, wide in text.segments:
+            masked[pos : pos + nchars * (2 if wide else 1)] = bytes(nchars * (2 if wide else 1))
+    rest = bytearray(content)
+    _put_stream(rest, sectors, sec_size, bytes(size))
+    haystacks = (bytes(masked), bytes(rest))
     originals = {text for text in originals if text}
     leaked = sum(
         1
         for text in originals
         if text in sst
-        or text.encode("latin-1", errors="ignore") in content
-        or text.encode("utf-16-le") in content
+        or any(
+            text.encode("latin-1", errors="ignore") in hay or text.encode("utf-16-le") in hay
+            for hay in haystacks
+        )
     )
     print(f"textos_originais={len(originals)} encontrados_na_fixture={leaked}")
     if leaked:

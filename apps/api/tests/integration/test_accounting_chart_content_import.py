@@ -3,6 +3,11 @@
     POST /api/v1/clients/{client_id}/accounting-chart/import/preview
     POST /api/v1/clients/{client_id}/accounting-chart/import
 
+Sub 5 (86e3ydk0c): o plano da Tract exportado do Domínio em `.xls` (regravado pelo Excel)
+entra inteiro pelo caminho do Domínio, 150 contas, sem linha com problema; importado DEPOIS
+do plano ajustado, não cria conta nova e marca as 1700 que o recorte não traz como ausentes
+(sem inativar nada, a regra da reimportação).
+
 Sub 4 (86e3ydjzy): a aba "Fornecedores Ajustados" da Tract (sem título do Domínio) pede
 o tipo, entra com `tipoVinculo` sem conferir a empresa, recusa nomeando a conta que não
 está no plano; e o plano importado com `vincularDocumentos` vincula as contas pela coluna
@@ -62,6 +67,9 @@ PLAIN_PASSWORD = "Senh@PlanoConteudo#1"
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 _TRACT = _FIXTURES / "accounting_chart_tract" / "plano.xlsx"
 _TRACT_EXPECTED = _FIXTURES / "accounting_chart_tract" / "plano_esperado.csv"
+_TRACT_DOMINIO = _FIXTURES / "accounting_chart_dominio_tract" / "plano_dominio.xls"
+_TRACT_DOMINIO_EXPECTED = _FIXTURES / "accounting_chart_dominio_tract" / "plano_esperado.csv"
+_XLS_TYPE = "application/vnd.ms-excel"
 _XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
@@ -124,6 +132,10 @@ async def _post_xlsx(
     return await http.post(
         url, files={"file": ("plano.xlsx", content, _XLSX_TYPE)}, data=data or {}
     )
+
+
+async def _post_xls(http: AsyncClient, url: str, content: bytes) -> Response:
+    return await http.post(url, files={"file": ("plano.xls", content, _XLS_TYPE)})
 
 
 def _xlsx(rows: list[list[Any]]) -> bytes:
@@ -223,6 +235,47 @@ class TestTractPeloConteudo:
         assert "ATIVO" not in resp.text
         assert "CAIXA" not in resp.text
         _no_account_name(logs)
+
+
+class TestExportCruDaTract:
+    async def test_previa_e_importacao_entram_inteiras_pelo_dominio(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        content = _TRACT_DOMINIO.read_bytes()
+        preview = await _post_xls(client_with_db, f"{_url(world.client)}/import/preview", content)
+        assert preview.status_code == 200, preview.text
+        data = preview.json()["data"]
+        assert (data["layout"], data["contas"], data["contasNovas"]) == ("dominio", 150, 150)
+        assert data["linhasComProblema"] == []
+
+        resp = await _post_xls(client_with_db, f"{_url(world.client)}/import", content)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["contasNovas"] == 150
+
+        listing = await client_with_db.get(_url(world.client), params={"pageSize": 100, "page": 1})
+        second = await client_with_db.get(_url(world.client), params={"pageSize": 100, "page": 2})
+        codes = [r["code"] for r in listing.json()["data"] + second.json()["data"]]
+        with _TRACT_DOMINIO_EXPECTED.open(encoding="utf-8", newline="") as fh:
+            expected = [r["codigo_reduzido"] for r in csv.DictReader(fh, delimiter=";")]
+        assert codes == expected
+
+    async def test_depois_do_ajustado_nada_e_novo_e_o_resto_fica_ausente(
+        self, client_with_db: AsyncClient, world: World
+    ) -> None:
+        await _login(client_with_db, world.admin)
+        adjusted = await _post_xlsx(
+            client_with_db, f"{_url(world.client)}/import", _TRACT.read_bytes()
+        )
+        assert adjusted.status_code == 200, adjusted.text
+        preview = await _post_xls(
+            client_with_db,
+            f"{_url(world.client)}/import/preview",
+            _TRACT_DOMINIO.read_bytes(),
+        )
+        assert preview.status_code == 200, preview.text
+        data = preview.json()["data"]
+        assert (data["contasNovas"], data["contasAusentes"]) == (0, 1700)
 
 
 def _tract_without_type() -> bytes:
