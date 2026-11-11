@@ -50,6 +50,7 @@ from app.core.logging import get_logger
 from app.db.models import (
     CardPostingDateMode,
     FileEntrySituation,
+    ProcessingStage,
     ReconciliationOmieEntry,
     ReconciliationSession,
     ReconciliationStatus,
@@ -283,13 +284,43 @@ async def _mark_origin_connection_error(
         log.warning("origin_connection_error_mark_failed", connection_id=str(connection_id))
 
 
+async def _mark_processing_stage(
+    session_id: UUID,
+    stage: ProcessingStage,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Grava a etapa numa transação CURTA e própria, na FRONTEIRA de um passo (86e3mpmcw).
+
+    Nunca é chamada com a transação do passo 4 aberta: lá a qualificação e os
+    contadores escrevem na linha da sessão, e este UPDATE, por outra conexão,
+    esperaria o lock até o commit. Antes de cada passo começar não há transação
+    do job aberta sobre a linha.
+
+    Best-effort: a etapa é diagnóstico para o watchdog. Falhar em gravá-la só
+    loga; o passo seguinte, se o banco estiver mesmo fora, falha por conta própria
+    e cai no tratamento de erro de sempre.
+    """
+    try:
+        async with session_factory() as db, db.begin():
+            await ReconciliationRepository(db).mark_processing_stage(session_id, stage)
+    except Exception:
+        log.warning(
+            "reconciliation_stage_mark_failed", session_id=str(session_id), stage=stage.value
+        )
+
+
 async def _execute_processing(
     session_id: UUID,
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """Caminho feliz — exceções sobem para o `run_reconciliation_processing`."""
+    """Caminho feliz — exceções sobem para o `run_reconciliation_processing`.
+
+    Antes de cada passo, `_mark_processing_stage` grava a etapa (86e3mpmcw): é o
+    que o alerta do watchdog mostra quando a sessão para de dar sinal.
+    """
     # 1. Load session + client + entries
+    await _mark_processing_stage(session_id, ProcessingStage.CARREGANDO, session_factory)
     async with session_factory() as db:
         repo = ReconciliationRepository(db)
         session_obj = await repo.get_session_with_client(session_id)
@@ -381,6 +412,7 @@ async def _execute_processing(
 
     # 2. Fetch Omie data — toda a interação com credencial em claro
     #    acontece dentro do `async with` do OmieClient.
+    await _mark_processing_stage(session_id, ProcessingStage.OMIE, session_factory)
     omie_client = client_from_credentials(
         origin_provider_type, origin_credentials, settings=settings
     )
@@ -446,6 +478,7 @@ async def _execute_processing(
     #    DATE_DIVERGENCE_RANGE (default do matcher, FASE 1). Modo "vencimento da
     #    fatura" do cartão (86e3n70p0): `omie_movements` já é o LOTE da fatura, a
     #    data da compra não decide, e o par é por valor dentro dele.
+    await _mark_processing_stage(session_id, ProcessingStage.CRUZAMENTO, session_factory)
     match_mode = (
         CardPostingDateMode.INVOICE_DUE_DATE.value
         if lot_date is not None
@@ -528,6 +561,9 @@ async def _execute_processing(
     )
 
     # 4. Apply tudo em uma única transação: matches + omie_entries + anomalies + counters.
+    #    A etapa é gravada ANTES de a transação abrir, nunca dentro dela (a
+    #    qualificação, parte desta etapa, escreve na linha da sessão).
+    await _mark_processing_stage(session_id, ProcessingStage.GRAVACAO, session_factory)
     async with session_factory() as db, db.begin():
         repo = ReconciliationRepository(db)
 

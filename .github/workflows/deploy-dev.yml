@@ -63,6 +63,11 @@ env:
   WEB_SERVICE: auditoria-web-dev
   MIGRATE_JOB: auditoria-api-migrate-dev
   CLEANUP_JOB: auditoria-api-cleanup-stuck-dev
+  # URL pública do web em dev (86e3mpmcw): vai como FRONTEND_URL para o job do
+  # watchdog, que monta o link da conciliação travada no alerta de plantão. É o
+  # mesmo valor que o serviço da API já tem (vindo do replay do manifesto, não deste
+  # workflow). Não é segredo. Mudou o host do web, muda aqui.
+  WEB_PUBLIC_URL: https://auditoria-web-dev-114342061812.southamerica-east1.run.app
   # Sincronização diária da CARTEIRA DE TÍTULOS (Sprint 11, R5). Não há scheduler
   # dentro da aplicação (a FASE 0 removeu Redis/ARQ), então o molde é o cleanup:
   # Cloud Run Job + Cloud Scheduler, provisionados 1× por ambiente em
@@ -192,11 +197,12 @@ jobs:
       - name: Re-resolve :dev digest in cleanup Job
         # Mesmo problema do migrate Job: o cleanup roda via Cloud Scheduler
         # de hora em hora e guarda o digest no manifest. Sem update, o cron
-        # roda imagem velha pra sempre depois que :dev avança.
+        # roda imagem velha pra sempre depois que :dev avança. FRONTEND_URL é o
+        # link da conciliação no alerta do watchdog (86e3mpmcw).
         run: |
           gcloud run jobs update ${{ env.CLEANUP_JOB }} \
             --image=${{ env.AR_HOST }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/auditoria-api:dev \
-            --update-env-vars=KEK_KMS_KEY_NAME=${{ env.KEK_KMS_KEY_NAME }} \
+            --update-env-vars=KEK_KMS_KEY_NAME=${{ env.KEK_KMS_KEY_NAME }},FRONTEND_URL=${{ env.WEB_PUBLIC_URL }} \
             --update-secrets=ALERT_WEBHOOK_URL=${{ env.ALERT_WEBHOOK_SECRET }}:latest,ALERT_EMAIL_TO=${{ env.ALERT_EMAIL_SECRET }}:latest,ALERT_WEBHOOK_URL_SYNTHETIC=${{ env.ALERT_WEBHOOK_SYNTHETIC_SECRET }}:latest,LEADS_SLACK_WEBHOOK_URL=${{ env.LEADS_SLACK_SECRET }}:latest \
             --region=${{ env.REGION }} \
             --project=${{ env.PROJECT_ID }}

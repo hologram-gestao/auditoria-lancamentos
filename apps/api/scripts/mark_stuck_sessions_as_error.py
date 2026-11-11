@@ -16,6 +16,9 @@ Este script entra como rede de segurança: rodado por Cloud Scheduler
 de ``STUCK_THRESHOLD_MINUTES`` e marca como ``error``. Threshold maior
 que o timeout do processamento pra não colidir com jobs lentos legítimos.
 
+A regra e o alerta moram em ``app/modules/reconciliations/stuck_sessions.py``
+(86e3mpmcw): o script só abre a transação, loga e dispara o alerta.
+
 Uso:
     cd apps/api
     uv run python -m scripts.mark_stuck_sessions_as_error
@@ -35,22 +38,14 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from sqlalchemy import text  # noqa: E402
-
-from app.core.alerting import Alert, AlertCode, send_alert  # noqa: E402
+from app.core.alerting import send_alert  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
-from app.core.exceptions import ErrorCode  # noqa: E402
 from app.core.logging import get_logger, setup_logging  # noqa: E402
 from app.db.session import close_db, get_session_factory, init_db  # noqa: E402
-
-# Margem confortável acima do timeout do processamento (RECONCILIATION_TIMEOUT_SECONDS
-# = 900s = 15min). 25min evita marcar como stuck um job que está só processando
-# lentamente.
-STUCK_THRESHOLD_MINUTES = 25
-
-_ERROR_MSG = (
-    "Processamento cancelado: sessao em 'processing' por mais de "
-    f"{STUCK_THRESHOLD_MINUTES} minutos sem conclusao (cleanup automatico)."
+from app.modules.reconciliations.stuck_sessions import (  # noqa: E402
+    STUCK_THRESHOLD_MINUTES,
+    build_heartbeat_missing_alert,
+    mark_stuck_sessions_as_error,
 )
 
 
@@ -62,51 +57,21 @@ async def main() -> None:
     init_db(settings)
     try:
         sf = get_session_factory()
+        # ``updated_at`` é mais conservador que ``created_at``: se o job progrediu
+        # (gravou uma etapa, 86e3mpmcw) há pouco, não derruba.
         async with sf() as db, db.begin():
-            # ``updated_at`` é mais conservador que ``created_at``: se o job
-            # progrediu (mudou updated_at) há pouco, não derruba.
-            result = await db.execute(
-                text(
-                    """
-                    UPDATE reconciliation_sessions
-                    SET status = 'error',
-                        error_message = :msg,
-                        -- Sprint 4: o código acompanha a mensagem em TODO
-                        -- caminho que marca erro. Sem ele aqui, a sessão que o
-                        -- watchdog derruba seria a única sem "cód. X" na tela.
-                        error_code = :code,
-                        updated_at = NOW()
-                    WHERE status = 'processing'
-                      AND updated_at < NOW() - (:minutes || ' minutes')::interval
-                    """
-                ),
-                {
-                    "msg": _ERROR_MSG,
-                    "code": ErrorCode.RECONCILIATION_TIMEOUT.value,
-                    "minutes": STUCK_THRESHOLD_MINUTES,
-                },
-            )
-        # ``Result.rowcount`` existe em runtime mas o stub do SQLAlchemy 2.x
-        # marca como ``-1`` pra Core async — pegamos via ``getattr`` pra
-        # satisfazer o mypy strict.
-        count = getattr(result, "rowcount", -1)
+            stuck = await mark_stuck_sessions_as_error(db)
         log.info(
             "stuck_sessions_marked_as_error",
-            count=count,
+            count=len(stuck),
             threshold_minutes=STUCK_THRESHOLD_MINUTES,
+            session_ids=[str(s.session_id) for s in stuck],
         )
-        # BACK 03.6 — ausência de heartbeat: se o watchdog encontrou sessões
-        # travadas, o processamento assíncrono não deu sinal de vida. Alerta o
-        # plantão (sem PII — só a contagem). count<=0 = tudo bem, não alerta.
-        if isinstance(count, int) and count > 0:
+        # BACK 03.6 — ausência de heartbeat: alerta o plantão com o contexto de cada
+        # sessão (só IDs, competência, etapa, minutos e link). Nada marcado = tudo bem.
+        if stuck:
             await send_alert(
-                Alert(
-                    code=AlertCode.HEARTBEAT_MISSING,
-                    message=(
-                        f"{count} sessao(oes) travada(s) em 'processing' marcada(s) como "
-                        "error pelo watchdog (ausencia de heartbeat)."
-                    ),
-                ),
+                build_heartbeat_missing_alert(stuck, frontend_url=str(settings.FRONTEND_URL)),
                 settings,
             )
     finally:

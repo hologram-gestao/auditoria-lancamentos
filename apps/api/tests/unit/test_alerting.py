@@ -18,13 +18,16 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 import respx
+from structlog.testing import capture_logs
 
 from app.core.alerting import (
+    ALERT_ACTIONS,
     ALERT_PREFIX,
     Alert,
     AlertCode,
     AlertConfigError,
     dispatch_alert_nowait,
+    render_alert,
     send_alert,
     verify_alert_config,
 )
@@ -89,7 +92,10 @@ class TestAlertPayload:
         assert payload["service"] == "adl"
         assert payload["session_id"] == "sess-1"
         assert payload["client_id"] == "cli-1"
-        assert payload["text"].startswith(f"{ALERT_PREFIX} session_error:")
+        # 86e3mpmcw: o título é a primeira linha; a mensagem vem logo abaixo.
+        assert payload["text"].startswith(
+            f"{ALERT_PREFIX} session_error\nErro generico ao processar"
+        )
         # Só as chaves esperadas — nenhum campo extra (defesa contra PII).
         assert set(payload) == {"text", "service", "code", "session_id", "client_id"}
 
@@ -170,6 +176,11 @@ class _FakeSMTP:
 
     def send_message(self, msg: EmailMessage) -> None:
         self._sent.append(str(msg["To"]))
+        _FakeSMTP.bodies.append(msg.get_content())
+        _FakeSMTP.subjects.append(str(msg["Subject"]))
+
+    bodies: list[str] = []  # noqa: RUF012 - captura de teste
+    subjects: list[str] = []  # noqa: RUF012 - captura de teste
 
 
 class TestSyntheticChannelRouting:
@@ -274,3 +285,103 @@ class TestSyntheticChannelRouting:
 def test_dispatch_alert_nowait_without_loop_does_not_raise() -> None:
     # Contexto síncrono sem event loop → degrada para log, nunca levanta.
     dispatch_alert_nowait(Alert(code=AlertCode.SYNTHETIC, message="x"), _settings())
+
+
+class TestAlertActionsAndRendering:
+    """86e3mpmcw — todo alerta diz o que fazer, e o texto tem UMA montagem."""
+
+    def test_toda_alert_code_tem_acao(self) -> None:
+        assert set(ALERT_ACTIONS) == set(AlertCode)
+        for code, action in ALERT_ACTIONS.items():
+            assert action.strip(), code
+            assert action.endswith("."), code
+
+    def test_acoes_pedidas_na_task(self) -> None:
+        assert ALERT_ACTIONS[AlertCode.HEARTBEAT_MISSING] == (
+            "Abra a conciliação e use Tentar novamente; se repetir, confira a origem do "
+            "cliente e o crédito da IA."
+        )
+        assert ALERT_ACTIONS[AlertCode.ANTHROPIC_CREDIT] == (
+            "Recarregue o crédito no console da Anthropic (Billing). Não é preciso "
+            "reiniciar nada: a próxima chamada volta a funcionar."
+        )
+
+    def test_render_tem_titulo_mensagem_contexto_e_acao(self) -> None:
+        alert = Alert(
+            code=AlertCode.SESSION_ERROR,
+            message="Falha ao processar",
+            session_id="sess-1",
+            client_id="cli-1",
+            context=((("etapa", "omie"), ("conta Omie", "42")),),
+            context_omitted=3,
+        )
+        assert render_alert(alert).split("\n") == [
+            f"{ALERT_PREFIX} session_error",
+            "Falha ao processar",
+            "",
+            "sessão: sess-1",
+            "cliente: cli-1",
+            "",
+            "etapa: omie",
+            "conta Omie: 42",
+            "",
+            "e mais 3",
+            "",
+            f"Ação sugerida: {ALERT_ACTIONS[AlertCode.SESSION_ERROR]}",
+        ]
+
+    def test_render_sem_contexto_vai_direto_para_a_acao(self) -> None:
+        text_ = render_alert(Alert(code=AlertCode.SYNTHETIC, message="ping"))
+        assert text_.split("\n") == [
+            f"{ALERT_PREFIX} synthetic",
+            "ping",
+            "",
+            f"Ação sugerida: {ALERT_ACTIONS[AlertCode.SYNTHETIC]}",
+        ]
+
+    def test_webhook_escapa_mrkdwn_e_o_email_nao(self) -> None:
+        alert = Alert(
+            code=AlertCode.HEARTBEAT_MISSING,
+            message="a & b <!channel>",
+            context=((("link", "https://x/<y>"),),),
+        )
+        webhook = alert.to_webhook_payload()["text"]
+        assert "<!channel>" not in webhook
+        assert "a &amp; b &lt;!channel&gt;" in webhook
+        assert "link: https://x/&lt;y&gt;" in webhook
+        assert "a & b <!channel>" in render_alert(alert)
+
+    async def test_email_usa_a_mesma_montagem(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        sent: list[str] = []
+        _FakeSMTP.bodies.clear()
+        _FakeSMTP.subjects.clear()
+        monkeypatch.setattr("app.core.alerting.smtplib.SMTP", _FakeSMTP.factory(sent))
+        s = _settings(
+            ALERT_WEBHOOK_URL=None,
+            ALERT_WEBHOOK_URL_SYNTHETIC=None,
+            ALERT_EMAIL_TO="plantao@h.com",
+            ALERT_SMTP_HOST="smtp.h.com",
+        )
+        alert = Alert(
+            code=AlertCode.HEARTBEAT_MISSING,
+            message="1 parada",
+            context=((("etapa", "gravacao"),),),
+        )
+        res = await send_alert(alert, s)
+        assert res.email is True
+        assert _FakeSMTP.subjects == [f"{ALERT_PREFIX} heartbeat_missing"]
+        assert _FakeSMTP.bodies[0].rstrip("\n") == render_alert(alert)
+
+    async def test_falha_do_webhook_loga_so_o_codigo(self) -> None:
+        s = _settings(ALERT_WEBHOOK_URL=_WEBHOOK)
+        with respx.mock, capture_logs() as logs:
+            respx.post(_WEBHOOK).mock(return_value=httpx.Response(500))
+            await send_alert(
+                Alert(code=AlertCode.HEARTBEAT_MISSING, message="x", context=((("k", "v"),),)),
+                s,
+            )
+        failed = [e for e in logs if e["event"] == "alert_webhook_failed"]
+        assert failed == [
+            {"event": "alert_webhook_failed", "code": "heartbeat_missing", "log_level": "warning"}
+        ]
+        assert _WEBHOOK not in repr(logs)
