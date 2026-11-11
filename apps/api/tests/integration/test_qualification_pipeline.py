@@ -143,13 +143,14 @@ async def _seed_session(
     created_by: UUID,
     transactions: list[tuple[date, str, Decimal]],
     file_hash: str,
+    omie_conta_id: int = 42,
 ) -> UUID:
     hex_key = get_settings().OMIE_ENCRYPTION_KEY.get_secret_value()
     async with factory() as s, s.begin():
         sess = ReconciliationSession(
             client_id=client_id,
             created_by=created_by,
-            omie_conta_id=42,
+            omie_conta_id=omie_conta_id,
             reference_month=date(2026, 4, 1),
             date_tolerance_days=3,
             file_hash=file_hash,
@@ -517,6 +518,101 @@ async def test_pipeline_survives_anthropic_failure(
         # Matching foi bem-sucedido apesar da falha do Anthropic.
         assert sess.status == "reviewing", sess.error_message
         assert sess.conciliated_count == 1
+
+
+@pytest.mark.integration
+@respx.mock
+async def test_pipeline_sem_credito_segue_para_revisao_e_alerta_uma_vez(
+    factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """86e3mpmcx — sem crédito na qualificação, a sessão vai para revisão e o plantão sabe.
+
+    Em 07/10/2026 a conta ficou sem crédito e o alerta nunca saiu: o job criava o
+    `AnthropicClient` sem `alert_settings` e a qualificação chamava o SDK direto.
+    Duas sessões seguidas sem crédito: as duas terminam em `reviewing`, sem
+    anomalia de qualificação, e o alerta sai UMA vez (dedup por processo).
+    """
+    from anthropic import APIStatusError
+
+    import app.integrations.anthropic.client as client_module
+    from app.core.alerting import AlertCode
+
+    monkeypatch.setenv("QUALIFICATION_ENABLED", "true")
+    get_settings.cache_clear()
+    monkeypatch.setattr(client_module, "_credit_alert_last_at", None)
+    sent: list[Any] = []
+
+    async def _capture_alert(alert: Any, settings: Any) -> None:
+        sent.append(alert)
+
+    monkeypatch.setattr(client_module, "send_alert", _capture_alert)
+
+    await _seed_all_anomaly_types(factory)
+    admin = await _seed_admin(factory, "pipeline-q-credit@hologram.com.br")
+    cliente = await _seed_client(factory, admin.id, "Cli Pipeline Q Credito")
+    session_ids = [
+        await _seed_session(
+            factory,
+            client_id=cliente.id,
+            created_by=admin.id,
+            transactions=[(date(2026, 4, 5), "PAGAMENTO TARIFA", Decimal("-100.00"))],
+            file_hash=_hex64(f"pipeline-q-credit-{n}"),
+            omie_conta_id=900 + n,
+        )
+        for n in range(2)
+    ]
+    _setup_omie_mocks_for_one_match()
+
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+    class _NoCreditAnthropic:
+        class messages:  # noqa: N801  — mimic SDK API
+            @staticmethod
+            async def create(**_: Any) -> Any:
+                raise APIStatusError(
+                    message="Your credit balance is too low to access the Anthropic API.",
+                    response=httpx.Response(400, request=request),
+                    body={"error": {"type": "invalid_request_error"}},
+                )
+
+    from app.integrations.anthropic.client import AnthropicClient
+
+    monkeypatch.setattr(AnthropicClient, "_get_client", lambda self: _NoCreditAnthropic())
+
+    for session_id in session_ids:
+        await run_reconciliation_processing(
+            str(session_id), settings=get_settings(), session_factory=factory
+        )
+
+    async with factory() as s:
+        for session_id in session_ids:
+            sess = (
+                await s.execute(
+                    select(ReconciliationSession).where(ReconciliationSession.id == session_id)
+                )
+            ).scalar_one()
+            assert sess.status == "reviewing", sess.error_message
+            assert sess.error_code is None
+            assert sess.conciliated_count == 1
+            codes = (
+                (
+                    await s.execute(
+                        select(AnomalyType.code)
+                        .join(
+                            ReconciliationAnomaly,
+                            ReconciliationAnomaly.anomaly_type_id == AnomalyType.id,
+                        )
+                        .where(ReconciliationAnomaly.session_id == session_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert ANOMALY_CODE_QUALIF_SUSPEITA not in codes
+            assert ANOMALY_CODE_QUALIF_INCOERENTE not in codes
+
+    assert [a.code for a in sent] == [AlertCode.ANTHROPIC_CREDIT]
 
 
 @pytest.mark.integration

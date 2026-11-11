@@ -896,6 +896,9 @@ async def _run_qualification_safely(
         model=settings.ANTHROPIC_MODEL_DEFAULT,
         timeout=settings.ANTHROPIC_TIMEOUT_SECONDS,
         max_output_tokens=settings.ADL_PARSE_MAX_OUTPUT_TOKENS,
+        # Sem isto o crédito esgotado na qualificação não alertava ninguém
+        # (07/10/2026, 86e3mpmcx): o `AnthropicClient` só alerta com settings.
+        alert_settings=settings,
     )
     # SAVEPOINT (nested transaction): se o `qualify_session` falhar — seja
     # numa query, num flush quebrado, ou na chamada Anthropic — dá rollback

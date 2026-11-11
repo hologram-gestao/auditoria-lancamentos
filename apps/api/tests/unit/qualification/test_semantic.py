@@ -10,15 +10,21 @@ Mocka a Anthropic via injeção do `AnthropicClient` para validar:
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
+import httpx
 import pytest
+import respx
+from anthropic import APIStatusError
 from pydantic import SecretStr
 from structlog.testing import capture_logs
 
-from app.core.exceptions import AnthropicParseError, AnthropicRefusalError
+from app.core.alerting import ALERT_ACTIONS, AlertCode
+from app.core.config import Settings
+from app.core.exceptions import AnthropicCreditError, AnthropicParseError, AnthropicRefusalError
 from app.integrations.anthropic.client import AnthropicClient
 from app.modules.reconciliations.qualification.schemas import QualificationPair
 from app.modules.reconciliations.qualification.semantic import (
@@ -27,6 +33,7 @@ from app.modules.reconciliations.qualification.semantic import (
     SEMANTIC_BATCH_SIZE,
     analyze_pairs,
 )
+from app.modules.reconciliations.qualification.service import _run_semantic
 
 # ----------------------------------------------------------------------
 # Fakes (espelham anthropic.types sem importar o SDK real)
@@ -411,3 +418,137 @@ async def test_checking_account_does_not_inject_aplicacao_rule() -> None:
 
     system_blocks = fake.messages.calls[0]["system"]
     assert len(system_blocks) == 1
+
+
+# ----------------------------------------------------------------------
+# 86e3mpmcx — a qualificação passa pelo caminho do `AnthropicClient`
+# (`call_tool`): crédito esgotado vira `AnthropicCreditError` com o alerta de
+# plantão, 5xx tem a nova tentativa, e o log não leva o texto da Anthropic.
+# ----------------------------------------------------------------------
+
+_ALERT_WEBHOOK = "https://hooks.test/plantao-credito"
+_PROVIDER_TEXT = "Your credit balance is too low to access the Anthropic API."
+_FAKE_REQUEST = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+
+def _credit_error() -> APIStatusError:
+    return APIStatusError(
+        message=_PROVIDER_TEXT,
+        response=httpx.Response(400, request=_FAKE_REQUEST),
+        body={"error": {"type": "invalid_request_error", "message": _PROVIDER_TEXT}},
+    )
+
+
+def _server_error() -> APIStatusError:
+    return APIStatusError(
+        message="Internal server error",
+        response=httpx.Response(500, request=_FAKE_REQUEST),
+        body={"error": {"type": "api_error"}},
+    )
+
+
+def _alerting_client(fake: _FakeAnthropic) -> AnthropicClient:
+    settings = Settings(ALERT_WEBHOOK_URL=_ALERT_WEBHOOK, ALERT_EMAIL_TO=None, ALERT_SMTP_HOST=None)
+    return AnthropicClient(
+        api_key=SecretStr("fake"),
+        model="claude-sonnet-5-5",
+        timeout=10.0,
+        anthropic_client=fake,
+        alert_settings=settings,
+    )
+
+
+@pytest.fixture
+def _fresh_credit_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A dedup do alerta é por processo: cada teste começa com a janela vazia."""
+    import app.integrations.anthropic.client as client_module
+
+    monkeypatch.setattr(client_module, "_credit_alert_last_at", None)
+
+
+@pytest.mark.usefixtures("_fresh_credit_window")
+async def test_sem_credito_na_qualificacao_levanta_erro_proprio_e_alerta() -> None:
+    fake = _FakeAnthropic(side_effect=[_credit_error()])
+    client = _alerting_client(fake)
+
+    with respx.mock:
+        route = respx.post(_ALERT_WEBHOOK).mock(return_value=httpx.Response(200))
+        with pytest.raises(AnthropicCreditError):
+            await analyze_pairs([_pair()], anthropic_client=client)
+
+    # Crédito não é transitório: uma chamada só, sem retry nem nova tentativa.
+    assert len(fake.messages.calls) == 1
+    assert route.call_count == 1
+    text = json.loads(route.calls[0].request.content)["text"]
+    assert "[Hologram OS] anthropic_credit" in text
+    assert f"Ação sugerida: {ALERT_ACTIONS[AlertCode.ANTHROPIC_CREDIT]}" in text
+    assert "reprocessar refaz a análise" in text
+    assert _PROVIDER_TEXT not in text
+
+
+@pytest.mark.usefixtures("_fresh_credit_window")
+async def test_sem_credito_o_semantic_devolve_vazio_e_loga_so_o_codigo() -> None:
+    fake = _FakeAnthropic(side_effect=[_credit_error()])
+    client = _alerting_client(fake)
+
+    with respx.mock, capture_logs() as logs:
+        respx.post(_ALERT_WEBHOOK).mock(return_value=httpx.Response(200))
+        results, tokens, calls = await _run_semantic(
+            [_pair()],
+            anthropic_client=client,
+            account_type="checking",
+            client_id=uuid4(),
+            glossary_block=None,
+        )
+
+    assert (results, calls) == ([], 0)
+    assert tokens.input_tokens == 0
+    failed = [e for e in logs if e["event"] == "qualification_semantic_failed"]
+    assert len(failed) == 1
+    assert failed[0]["error_code"] == "ANTHROPIC_CREDIT_EXHAUSTED"
+    assert "exc_info" not in failed[0]
+    # Nenhum texto do provedor em nenhuma linha de log (§3.3, §4.5).
+    assert "credit balance" not in repr(logs).lower()
+
+
+@pytest.mark.usefixtures("_fresh_credit_window")
+async def test_dois_lotes_seguidos_sem_credito_geram_um_alerta() -> None:
+    fake = _FakeAnthropic(side_effect=[_credit_error(), _credit_error()])
+    client = _alerting_client(fake)
+
+    with respx.mock:
+        route = respx.post(_ALERT_WEBHOOK).mock(return_value=httpx.Response(200))
+        for _ in range(2):
+            results, _tokens, _calls = await _run_semantic(
+                [_pair()],
+                anthropic_client=client,
+                account_type="checking",
+                client_id=uuid4(),
+                glossary_block=None,
+            )
+            assert results == []
+
+    assert len(fake.messages.calls) == 2
+    assert route.call_count == 1
+
+
+async def test_qualificacao_tenta_de_novo_um_5xx() -> None:
+    p1 = _pair()
+    ok = _tool_response(
+        [{"pair_id": p1.pair_id, "status": "ok", "motivo": "coerente"}],
+        usage=_Usage(input_tokens=10, output_tokens=2),
+    )
+    fake = _FakeAnthropic(side_effect=[_server_error(), ok])
+    client = AnthropicClient(
+        api_key=SecretStr("fake"),
+        model="claude-sonnet-5-5",
+        timeout=10.0,
+        anthropic_client=fake,
+    )
+
+    results, tokens, calls = await analyze_pairs([p1], anthropic_client=client)
+
+    assert len(fake.messages.calls) == 2
+    assert fake.messages.calls[0] == fake.messages.calls[1]
+    assert [r.status for r in results] == ["ok"]
+    assert (tokens.input_tokens, calls) == (10, 1)
