@@ -517,3 +517,164 @@ async def test_pipeline_survives_anthropic_failure(
         # Matching foi bem-sucedido apesar da falha do Anthropic.
         assert sess.status == "reviewing", sess.error_message
         assert sess.conciliated_count == 1
+
+
+@pytest.mark.integration
+@respx.mock
+async def test_stage_is_written_at_each_boundary_and_never_blocks_the_write_step(
+    factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """86e3mpmcw — a etapa é gravada ANTES de cada passo e nunca trava o passo 4.
+
+    Dentro do passo 4 a qualificação escreve na linha da sessão
+    (`qualification_used_glossary`) e o fim do passo grava os contadores. Uma
+    gravação de etapa por OUTRA conexão nesse trecho esperaria o lock da linha
+    até o commit da própria transação do job: o processamento nunca terminaria. O
+    `asyncio.timeout` transforma esse travamento em falha do teste, e a ordem
+    dos eventos prova que cada etapa foi gravada na fronteira do passo.
+    """
+    import asyncio
+
+    from app.modules.reconciliations import repository as repo_module
+    from app.modules.reconciliations.processing import job as job_module
+
+    monkeypatch.setenv("QUALIFICATION_ENABLED", "true")
+    get_settings.cache_clear()
+
+    await _seed_all_anomaly_types(factory)
+    admin = await _seed_admin(factory, "pipeline-stage@hologram.com.br")
+    cliente = await _seed_client(factory, admin.id, "Cli Pipeline Etapa")
+    session_id = await _seed_session(
+        factory,
+        client_id=cliente.id,
+        created_by=admin.id,
+        transactions=[(date(2026, 4, 5), "PAGAMENTO TARIFA", Decimal("-100.00"))],
+        file_hash=_hex64("pipeline-stage"),
+    )
+    _setup_omie_mocks_for_one_match()
+
+    # A IA responde e a qualificação roda de verdade (escreve na linha da sessão).
+    async with factory() as s:
+        entry_id = (
+            await s.execute(
+                select(ReconciliationFileEntry.id).where(
+                    ReconciliationFileEntry.session_id == session_id
+                )
+            )
+        ).scalar_one()
+    fake = _FakeAnthropic(side_effect=_semantic_response_incoerente(str(entry_id)))
+    from app.integrations.anthropic.client import AnthropicClient
+
+    monkeypatch.setattr(AnthropicClient, "_get_client", lambda self: fake)
+
+    events: list[str] = []
+    real_mark = job_module._mark_processing_stage
+    real_fetch = job_module.fetch_realized
+    real_match = job_module.match
+    real_apply = repo_module.ReconciliationRepository.apply_matches
+    real_counters = repo_module.ReconciliationRepository.update_session_after_matching
+
+    async def mark(sid: UUID, stage: Any, sf: Any) -> None:
+        events.append(f"etapa:{stage.value}")
+        await real_mark(sid, stage, sf)
+
+    async def fetch(*args: Any, **kwargs: Any) -> Any:
+        events.append("passo:omie")
+        return await real_fetch(*args, **kwargs)
+
+    def do_match(*args: Any, **kwargs: Any) -> Any:
+        events.append("passo:cruzamento")
+        return real_match(*args, **kwargs)
+
+    async def apply(self: Any, *args: Any, **kwargs: Any) -> Any:
+        events.append("passo:gravacao")
+        return await real_apply(self, *args, **kwargs)
+
+    async def counters(self: Any, *args: Any, **kwargs: Any) -> Any:
+        events.append("passo:contadores")
+        return await real_counters(self, *args, **kwargs)
+
+    monkeypatch.setattr(job_module, "_mark_processing_stage", mark)
+    monkeypatch.setattr(job_module, "fetch_realized", fetch)
+    monkeypatch.setattr(job_module, "match", do_match)
+    monkeypatch.setattr(repo_module.ReconciliationRepository, "apply_matches", apply)
+    monkeypatch.setattr(
+        repo_module.ReconciliationRepository, "update_session_after_matching", counters
+    )
+
+    async with asyncio.timeout(60):
+        await run_reconciliation_processing(
+            str(session_id), settings=get_settings(), session_factory=factory
+        )
+
+    assert events == [
+        "etapa:carregando",
+        "etapa:omie",
+        "passo:omie",
+        "etapa:cruzamento",
+        "passo:cruzamento",
+        "etapa:gravacao",
+        "passo:gravacao",
+        "passo:contadores",
+    ]
+    async with factory() as s:
+        sess = (
+            await s.execute(
+                select(ReconciliationSession).where(ReconciliationSession.id == session_id)
+            )
+        ).scalar_one()
+        assert sess.status == "reviewing", sess.error_message
+        # Sessão concluída guarda a última etapa (diagnóstico).
+        assert sess.processing_stage == "gravacao"
+        # A qualificação rodou dentro do passo 4 (é ela que trava a linha).
+        anomalies = (
+            (
+                await s.execute(
+                    select(AnomalyType.code)
+                    .join(
+                        ReconciliationAnomaly,
+                        ReconciliationAnomaly.anomaly_type_id == AnomalyType.id,
+                    )
+                    .where(ReconciliationAnomaly.session_id == session_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert ANOMALY_CODE_QUALIF_INCOERENTE in anomalies
+
+
+@pytest.mark.integration
+async def test_stage_is_not_written_on_a_session_that_left_processing(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A etapa só casa sessão em `processing`: a cancelada não volta a parecer viva."""
+    from app.db.models import ProcessingStage
+    from app.modules.reconciliations.repository import ReconciliationRepository
+
+    admin = await _seed_admin(factory, "pipeline-stage-guard@hologram.com.br")
+    cliente = await _seed_client(factory, admin.id, "Cli Etapa Guarda")
+    session_id = await _seed_session(
+        factory,
+        client_id=cliente.id,
+        created_by=admin.id,
+        transactions=[(date(2026, 4, 5), "X", Decimal("-1.00"))],
+        file_hash=_hex64("pipeline-stage-guard"),
+    )
+    async with factory() as s, s.begin():
+        repo = ReconciliationRepository(s)
+        assert await repo.mark_processing_stage(session_id, ProcessingStage.OMIE) is True
+        await s.execute(
+            ReconciliationSession.__table__.update()
+            .where(ReconciliationSession.id == session_id)
+            .values(status="error")
+        )
+        assert await repo.mark_processing_stage(session_id, ProcessingStage.GRAVACAO) is False
+    async with factory() as s:
+        stage = await s.scalar(
+            select(ReconciliationSession.processing_stage).where(
+                ReconciliationSession.id == session_id
+            )
+        )
+    assert stage == "omie"

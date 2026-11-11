@@ -28,6 +28,7 @@ from pydantic import SecretStr, ValidationError
 from structlog.testing import capture_logs
 
 from app.core.config import Settings
+from app.core.mrkdwn import escape_mrkdwn
 from app.db.models import Lead
 from app.db.models import lead as lead_model
 from app.db.models.usage_event import DEDUPED_EVENT_NAMES
@@ -36,7 +37,6 @@ from app.modules.leads.notifier import (
     LeadNotice,
     SlackLeadNotifier,
     build_slack_payload,
-    escape_mrkdwn,
 )
 from app.modules.leads.schemas import CONSENT_TEXT_VERSION, LeadCreate
 from app.modules.leads.service import EMAIL_THROTTLE_MAX, EMAIL_THROTTLE_WINDOW, LeadService

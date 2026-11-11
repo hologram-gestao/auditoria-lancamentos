@@ -9,9 +9,13 @@ Princípios (CONTEXT.md Req. 4):
       dev degrada com warning (não trava o `pnpm dev`).
     - **Async real**: webhook via httpx async; e-mail via smtplib em threadpool
       (`asyncio.to_thread`) — nunca bloqueia o event loop.
-    - **SEM PII**: o texto do alerta carrega só `code`, `session_id`, `client_id`
-      e uma mensagem-template fixa. Nunca descrição de lançamento nem dado do
-      arquivo.
+    - **SEM PII**: o texto do alerta carrega só `code`, `session_id`, `client_id`,
+      uma mensagem-template fixa e linhas de CONTEXTO com IDs, códigos, datas e
+      números. Nunca nome de cliente ou de conta, descrição de lançamento nem dado
+      do arquivo: o canal é um webhook de terceiro.
+    - **Acionável** (86e3mpmcw): todo alerta termina com a AÇÃO SUGERIDA do código
+      (`ALERT_ACTIONS`, uma frase por `AlertCode`), e o texto é montado num lugar
+      só (`render_alert`), o MESMO para o webhook e para o e-mail.
     - **Segredo fora de log**: a URL do webhook e a senha SMTP NUNCA são logadas.
     - Falha ao entregar o alerta NUNCA derruba a operação que o disparou (cada
       canal é try/except; o dispatch fire-and-forget é blindado).
@@ -35,15 +39,18 @@ from __future__ import annotations
 
 import asyncio
 import smtplib
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from email.message import EmailMessage
 from enum import StrEnum
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from app.core.branding import PRODUCT_NAME
 from app.core.logging import get_logger
+from app.core.mrkdwn import escape_mrkdwn
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -90,14 +97,66 @@ class AlertCode(StrEnum):
     SYNTHETIC = "synthetic"
 
 
+#: O que fazer, numa frase, para cada `AlertCode` (86e3mpmcw). É o fim de todo
+#: alerta: quem está de plantão lê o problema e a primeira ação no mesmo lugar.
+#: Código novo sem ação reprova `test_toda_alert_code_tem_acao`.
+ALERT_ACTIONS: Mapping[AlertCode, str] = MappingProxyType(
+    {
+        AlertCode.SESSION_ERROR: (
+            "Abra a conciliação, leia o código do erro, corrija a causa (credencial da "
+            "origem, arquivo ou crédito da IA) e use Tentar novamente."
+        ),
+        AlertCode.HEARTBEAT_MISSING: (
+            "Abra a conciliação e use Tentar novamente; se repetir, confira a origem do "
+            "cliente e o crédito da IA."
+        ),
+        AlertCode.DECRYPT_FAILED: (
+            "Confira se o serviço alcança a chave no Cloud KMS e se o cliente tem a chave "
+            "de dados; não troque KEK_KEY_ID nem OMIE_ENCRYPTION_KEY sem o roteiro do runbook."
+        ),
+        AlertCode.ANTHROPIC_CREDIT: (
+            "Recarregue o crédito no console da Anthropic (Billing). Não é preciso "
+            "reiniciar nada: a próxima chamada volta a funcionar."
+        ),
+        AlertCode.LEGACY_FALLBACK: (
+            "Rode scripts/convert_credentials_to_connections.py com --verify até não sobrar "
+            "cliente pendente; até lá o fallback segue ligado."
+        ),
+        AlertCode.ACCOUNTING_FILE_DIVERGENT: (
+            "Não gere o arquivo por fora: compare a geração com a materialização e o layout "
+            "dela e trate como incidente; o download segue bloqueado."
+        ),
+        AlertCode.SYNTHETIC: (
+            "Nenhuma: é o teste do canal disparado pelo deploy. Se ele deixar de chegar, "
+            "confira o webhook de alertas."
+        ),
+    }
+)
+
+#: Uma linha de contexto do alerta: (rótulo, valor). SÓ IDs, códigos, datas e
+#: números — nunca nome, descrição ou texto livre (§4.5, §4.7).
+AlertContextLine = tuple[str, str]
+
+
+def _identity(value: str) -> str:
+    return value
+
+
 @dataclass(frozen=True)
 class Alert:
-    """Um alerta. SÓ IDs/códigos — NUNCA PII (descrição, nome, dado do arquivo)."""
+    """Um alerta. SÓ IDs/códigos — NUNCA PII (descrição, nome, dado do arquivo).
+
+    `context` são grupos de linhas de chave e valor (um grupo por item, por
+    exemplo uma sessão travada); `context_omitted` conta os itens que ficaram de
+    fora do teto de quem montou o alerta e vira a linha "e mais N".
+    """
 
     code: AlertCode
     message: str
     session_id: str | None = None
     client_id: str | None = None
+    context: tuple[tuple[AlertContextLine, ...], ...] = ()
+    context_omitted: int = 0
 
     def _fields(self) -> dict[str, str]:
         data = {"service": "adl", "code": self.code.value}
@@ -108,12 +167,38 @@ class Alert:
         return data
 
     def to_webhook_payload(self) -> dict[str, Any]:
-        # `text` torna o payload compatível com Slack/Discord/webhooks genéricos.
-        return {"text": f"{ALERT_PREFIX} {self.code.value}: {self.message}", **self._fields()}
+        # `text` torna o payload compatível com Slack/Discord/webhooks genéricos. As
+        # chaves de topo continuam as mesmas (só IDs): o contexto vai no texto.
+        return {"text": render_alert(self, escape=escape_mrkdwn), **self._fields()}
 
-    def summary_line(self) -> str:
-        extras = " ".join(f"{k}={v}" for k, v in self._fields().items())
-        return f"{ALERT_PREFIX} {self.code.value}: {self.message} ({extras})"
+
+def render_alert(alert: Alert, *, escape: Callable[[str], str] = _identity) -> str:
+    """A montagem ÚNICA do texto do alerta, usada pelo webhook E pelo e-mail.
+
+    Título (`[Hologram OS] <code>`), a mensagem, o contexto em linhas de chave e
+    valor (os IDs de topo primeiro, depois um bloco por grupo, depois "e mais N")
+    e a ação sugerida de `ALERT_ACTIONS`. `escape` é aplicado a todo texto abaixo
+    do título: o webhook passa `escape_mrkdwn` (o Slack interpreta `&`, `<` e `>`);
+    o e-mail, texto puro, não escapa.
+    """
+
+    def kv(label: str, value: str) -> str:
+        return f"{escape(label)}: {escape(value)}"
+
+    lines = [f"{ALERT_PREFIX} {alert.code.value}", escape(alert.message)]
+    top: list[AlertContextLine] = []
+    if alert.session_id is not None:
+        top.append(("sessão", alert.session_id))
+    if alert.client_id is not None:
+        top.append(("cliente", alert.client_id))
+    for group in (tuple(top), *alert.context):
+        if group:
+            lines.append("")
+            lines.extend(kv(label, value) for label, value in group)
+    if alert.context_omitted > 0:
+        lines.extend(["", escape(f"e mais {alert.context_omitted}")])
+    lines.extend(["", kv("Ação sugerida", ALERT_ACTIONS[alert.code])])
+    return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -185,7 +270,7 @@ async def _send_email(alert: Alert, settings: Settings) -> bool:
         msg["Subject"] = f"{ALERT_PREFIX} {alert.code.value}"
         msg["From"] = settings.ALERT_EMAIL_FROM
         msg["To"] = to_addr
-        msg.set_content(alert.summary_line())
+        msg.set_content(render_alert(alert))
         with smtplib.SMTP(host, settings.ALERT_SMTP_PORT, timeout=10) as server:
             server.starttls()
             if settings.ALERT_SMTP_USER:

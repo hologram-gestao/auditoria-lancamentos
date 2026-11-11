@@ -25,6 +25,7 @@ from sqlalchemy.orm import selectinload
 from app.db.models import (
     Client,
     OmieAccountCache,
+    ProcessingStage,
     ReconciliationAnomaly,
     ReconciliationFile,
     ReconciliationFileEntry,
@@ -472,6 +473,28 @@ class ReconciliationRepository:
             )
         )
 
+    async def mark_processing_stage(self, session_id: UUID, stage: ProcessingStage) -> bool:
+        """Grava a etapa do processamento e renova o heartbeat (86e3mpmcw).
+
+        Só casa sessão ainda em `processing`: a sessão cancelada (ou derrubada pelo
+        watchdog) no meio não volta a parecer viva. O `updated_at` é o heartbeat do
+        watchdog, então a etapa gravada também diz "o job está andando".
+
+        O CALLER abre uma transação curta e própria para isto, FORA do passo 4 do
+        job (ver `ProcessingStage`): escrever aqui com a transação do passo 4 aberta
+        em outra conexão esperaria o lock da linha.
+        """
+        result = await self._session.execute(
+            update(ReconciliationSession)
+            .where(
+                ReconciliationSession.id == session_id,
+                ReconciliationSession.status == ReconciliationStatus.PROCESSING.value,
+            )
+            .values(processing_stage=stage.value, updated_at=func.now())
+            .returning(ReconciliationSession.id)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def mark_session_error(
         self,
         session_id: UUID,
@@ -616,6 +639,8 @@ class ReconciliationRepository:
                 error_message=None,
                 error_code=None,
                 processed_at=None,
+                # 86e3mpmcw — a etapa da execução anterior não diz nada sobre esta.
+                processing_stage=None,
                 conciliated_count=0,
                 sem_omie_count=0,
                 omie_sem_arquivo_count=0,
