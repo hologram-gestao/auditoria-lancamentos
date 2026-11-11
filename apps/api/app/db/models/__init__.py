@@ -231,9 +231,13 @@ from app.db.models.reconciliation_omie_posting_installment import (
 from app.db.models.reconciliation_session import (
     CARD_DUE_DATE_COHERENT_CHECK,
     CARD_DUE_DATE_COHERENT_CK_LABEL,
+    PROCESSING_STAGE_CK_LABEL,
+    PROCESSING_STAGE_LENGTH,
+    ProcessingStage,
     ReconciliationSession,
     ReconciliationStatus,
     SessionAccountType,
+    processing_stage_check,
 )
 from app.db.models.title_context import (
     CONTEXT_TYPES_NOT_DELINQUENT,
@@ -336,6 +340,8 @@ __all__ = [
     "MOVEMENT_DESCRIPTION_PAIR_CONSTRAINT",
     "MOVEMENT_STATUS_CONSTRAINT",
     "PLATFORM_ROLES",
+    "PROCESSING_STAGE_CK_LABEL",
+    "PROCESSING_STAGE_LENGTH",
     "SCOPE_CONSISTENCY_CHECK",
     "SCOPE_CONSISTENCY_CONSTRAINT",
     "SYSTEM_ROLES",
@@ -422,6 +428,7 @@ __all__ = [
     "OmiePostingStatus",
     "OmiePostingStep",
     "Organization",
+    "ProcessingStage",
     "ProviderType",
     "ReconciliationAnomaly",
     "ReconciliationFile",
@@ -461,6 +468,7 @@ __all__ = [
     "new_file_category_code",
     "organization_id_server_default",
     "primary_assignment_index_predicate",
+    "processing_stage_check",
     "title_context_type_check",
     "title_status_check",
     "title_type_check",

@@ -88,6 +88,37 @@ class SessionAccountType(StrEnum):
     INVESTMENT = "investment"
 
 
+class ProcessingStage(StrEnum):
+    """Etapa do processamento em que a sessão está (ou parou) — 86e3mpmcw.
+
+    Gravada pelo job numa transação CURTA e própria ANTES de cada passo começar
+    (`processing/job.py::_mark_processing_stage`), nunca dentro do passo 4: lá a
+    qualificação e os contadores escrevem na linha da sessão, e uma escrita por
+    outra conexão esperaria o lock até o commit. A qualificação é parte de
+    `gravacao`. Sessão concluída ou em erro guarda a última etapa (diagnóstico do
+    watchdog); o reprocessamento zera. NULL = não registrada (sessão anterior à
+    coluna, ou que ainda não começou).
+    """
+
+    CARREGANDO = "carregando"
+    OMIE = "omie"
+    CRUZAMENTO = "cruzamento"
+    GRAVACAO = "gravacao"
+
+
+PROCESSING_STAGE_LENGTH = 20
+
+#: Rótulo (não o nome final) do CHECK — a `NAMING_CONVENTION` prefixa
+#: `ck_reconciliation_sessions_`.
+PROCESSING_STAGE_CK_LABEL = "processing_stage"
+
+
+def processing_stage_check() -> str:
+    """Predicado do CHECK da etapa — a MESMA string vai na migration (`a4c8e2f6b1d3`)."""
+    valores = ", ".join(f"'{member.value}'" for member in ProcessingStage)
+    return f"processing_stage IS NULL OR processing_stage IN ({valores})"
+
+
 #: 86e3n70p0 — sessão no modo "vencimento da fatura" SEM o vencimento não tem
 #: lote para cruzar. A criação recusa com 422; o banco garante o mesmo.
 CARD_DUE_DATE_COHERENT_CK_LABEL = "card_due_date_coherent"
@@ -130,6 +161,8 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=CARD_POSTING_DATE_MODE_CK_LABEL,
         ),
         CheckConstraint(text(CARD_DUE_DATE_COHERENT_CHECK), name=CARD_DUE_DATE_COHERENT_CK_LABEL),
+        # 86e3mpmcw — vocabulário fechado da etapa do processamento (nulável).
+        CheckConstraint(text(processing_stage_check()), name=PROCESSING_STAGE_CK_LABEL),
     )
 
     client_id: Mapped[UUID] = mapped_column(
@@ -202,6 +235,13 @@ class ReconciliationSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # anteriores à Sprint 4 e em toda sessão que não falhou.
     error_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 86e3mpmcw — a etapa (`ProcessingStage`) em que o processamento está ou parou.
+    # Cada gravação renova o `updated_at`, que é o heartbeat do watchdog: os 25
+    # minutos passam a contar da última etapa, não do início. Diagnóstico, não
+    # estado: nenhuma regra de negócio lê esta coluna.
+    processing_stage: Mapped[str | None] = mapped_column(
+        String(PROCESSING_STAGE_LENGTH), nullable=True
+    )
 
     # Soft-delete: NULL = sessão ativa; timestamp = descartada pela UI.
     # Toda query de leitura/listagem precisa filtrar `WHERE deleted_at IS

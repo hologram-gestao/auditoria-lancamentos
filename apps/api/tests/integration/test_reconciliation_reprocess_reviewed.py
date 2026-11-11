@@ -36,6 +36,7 @@ from app.db.models import (
     FileEntrySituation,
     FileEntryUserAction,
     OmiePostingStatus,
+    ProcessingStage,
     ReconciliationAnomaly,
     ReconciliationFileEntry,
     ReconciliationOmieEntry,
@@ -414,12 +415,19 @@ class TestReprocessReviewedSession:
         sess = await _seed_session(
             db_session, client=client, creator=admin, status=ReconciliationStatus.DONE.value
         )
+        # 86e3mpmcw — a etapa da execução anterior (diagnóstico) não pode sobreviver
+        # ao reprocessamento: o watchdog leria a etapa velha numa execução nova.
+        sess.processing_stage = ProcessingStage.GRAVACAO.value
+        await db_session.flush()
         await _login(client_with_db, admin.email)
 
         resp = await client_with_db.post(REPROCESS_URL.format(session_id=sess.id))
 
         assert resp.status_code == 200, resp.text
         assert stub_enqueue == [sess.id]
+        reloaded = await _reload_session(db_session, sess.id)
+        assert reloaded.status == ReconciliationStatus.PROCESSING.value
+        assert reloaded.processing_stage is None
 
     async def test_emite_conciliacao_reprocessada_so_com_ids_e_status_de_origem(
         self,

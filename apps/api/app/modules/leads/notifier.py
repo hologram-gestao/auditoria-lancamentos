@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 import httpx
 
 from app.core.logging import get_logger
+from app.core.mrkdwn import escape_mrkdwn
 
 if TYPE_CHECKING:
     from pydantic import SecretStr
@@ -59,11 +60,6 @@ class LeadNotifier(Protocol):
     async def notify(self, notice: LeadNotice) -> bool:
         """Devolve `True` só se o destino ACEITOU o aviso."""
         ...
-
-
-def escape_mrkdwn(value: str) -> str:
-    """Escapa os três caracteres de controle do mrkdwn do Slack (`&` primeiro)."""
-    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _truncate(value: str, limit: int) -> str:

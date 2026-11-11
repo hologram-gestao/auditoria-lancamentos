@@ -157,6 +157,20 @@
       deixaria subir em prod um serviço cujo único canal é o de teste — alerta
       real sem para onde ir. Só o sintético desvia; qualquer alerta novo nasce no
       plantão.
+    - **Alerta de plantão é acionável e tem UMA montagem** (86e3mpmcw). O texto sai
+      de `render_alert` ([apps/api/app/core/alerting.py](apps/api/app/core/alerting.py)),
+      o MESMO para o webhook (com `escape_mrkdwn`, que mora em `core/mrkdwn.py`) e
+      para o e-mail: título `[Hologram OS] <code>`, a mensagem-template, o contexto
+      em linhas de chave e valor (`Alert.context`, um grupo por item, e
+      `context_omitted` para o "e mais N") e a ação sugerida de `ALERT_ACTIONS`, uma
+      frase por `AlertCode`. Código novo sem ação reprova
+      `test_toda_alert_code_tem_acao`. Contexto é só ID, código, data e número,
+      nunca nome de cliente ou de conta nem texto livre (§4.7); as chaves de topo do
+      payload não mudaram. O watchdog
+      (`modules/reconciliations/stuck_sessions.py`) detalha até 5 sessões: ids,
+      conta, competência, etapa, minutos desde o último sinal e o link
+      `{FRONTEND_URL}/clientes/{cliente}/conciliacao/{sessão}` (o job de limpeza
+      recebe `FRONTEND_URL` no deploy).
 15. **Autorização por tenant e por organização (Sprint 5 + épico 86e36ec0q) — a
     regra mais fácil de furar sem perceber:**
     - **O tenant e a organização vêm SEMPRE da LINHA do usuário**, nunca de
@@ -1234,6 +1248,17 @@ _**Sanity-check antes de finalizar resposta:**_ antes de apertar enviar numa res
   - UNIQUE que a corrida alcança (duplo clique, duas abas): `ON CONFLICT DO NOTHING` para
     ação idempotente, SAVEPOINT + nome da constraint → 409 para escrita. Checar antes de
     inserir não protege nada sob concorrência.
+- **A etapa do processamento só é gravada na FRONTEIRA de um passo** (86e3mpmcw):
+  `reconciliation_sessions.processing_stage` (`ProcessingStage`: `carregando`,
+  `omie`, `cruzamento`, `gravacao`; CHECK copiado na migration `a4c8e2f6b1d3`) é
+  escrita pelo job numa transação curta e própria ANTES de cada passo, e renova o
+  `updated_at`, que é o heartbeat do watchdog (os 25 minutos contam da última etapa).
+  Nunca dentro do passo 4: a qualificação e os contadores escrevem na linha da
+  sessão, e o UPDATE por outra conexão esperaria o lock até o commit da própria
+  transação do job, que nunca vem (provado: com a gravação lá dentro, o teste
+  `test_stage_is_written_at_each_boundary_and_never_blocks_the_write_step` estoura o
+  timeout). Só casa sessão em `processing`; o reprocessamento zera; concluída e em
+  erro guardam a última (diagnóstico, nenhuma regra de negócio a lê).
 - **Busca ao digitar sobre dado do ERP nunca chama o ERP por tecla** (86e3qhhrd): o
   servidor lê a lista inteira uma vez por TTL para um cache em memória POR CLIENTE, com
   TRAVA por cliente no miss (várias teclas no primeiro acesso viram UMA leitura), e o
@@ -2010,6 +2035,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.118, 11/11/2026. **O alerta do watchdog passou a dizer qual conciliação parou, onde e o que fazer, e todo alerta ganhou a ação sugerida (86e3mpmcw, subtask 1 do épico 86e3mpmcr).** Em 07/10 o plantão recebeu só "1 sessao(oes) travada(s)", e saber cliente, conta e etapa pedia abrir o banco. Coluna nova `reconciliation_sessions.processing_stage` (migration `a4c8e2f6b1d3`, reversível, sem backfill, ciclo up/down/up limpo e `alembic check` sem operação) gravada pelo job na fronteira de cada passo (regra nova na §7 Backend); o watchdog virou módulo (`stuck_sessions.py`, o script só abre a transação e alerta) com uma CTE `FOR UPDATE SKIP LOCKED` que devolve o `updated_at` ANTERIOR, e os minutos sem sinal saem do relógio do banco; o alerta tem uma montagem só para webhook e e-mail, com `ALERT_ACTIONS` (regra nova na §3.14). `escape_mrkdwn` subiu do aviso de lead para `core/mrkdwn.py`. O `deploy-dev.yml` passa `FRONTEND_URL` (variável `WEB_PUBLIC_URL` do workflow) ao job de limpeza; o serviço da API continua recebendo a dele do manifesto. Prova do lock por mutação: com a gravação de `gravacao` dentro da transação do passo 4, o teste de integração estoura o timeout de 60 s. Sem rota, permissão nem campo cifrado: endpoints sensíveis (**137**), matriz (**29**) e pares de AAD (**18**) iguais._
 
 _Versão 1.117, 11/11/2026. **O modelo padrão da IA passou a `claude-sonnet-5-5`, a migração definitiva da retirada do `claude-sonnet-4-5` (86e3wg8et, subtask da ponte 86e3wg8ek).** O Sonnet 5.5 recusa com 400 o `tool_choice` forçado e o `thinking` `disabled`, então as três chamadas (extração, identificação do PDF dividido e qualificação) mudaram juntas: `tool_choice` `auto` (`TOOL_CALL_AUTO`), `strict: true` nas três tools com `additionalProperties: false` em todo objeto, e `thinking={"type": "between_tools"}` (`THINKING_BETWEEN_TOOLS`, sem `output_config.effort`: o padrão `high` é aceito). Só o 5.5 aceita `between_tools`: `client.thinking_for(model)` manda `disabled` para o `claude-sonnet-5`, que segue na tabela de tetos, e é isso que deixa voltar para a ponte pela variável `ANTHROPIC_MODEL_DEFAULT` sem redeploy (medido: uma rodada do código novo no Sonnet 5 com a mesma qualidade). A exigência da tool vai no FIM da mensagem do usuário (`prompts.tool_call_required_note`), nunca no `SYSTEM_PROMPT`. Resposta sem a tool tem UMA nova tentativa com o mesmo pedido (`client.check_tool_response` e o laço `client.call_until_tool`, fonte única das três; a qualificação soma os tokens de todas as tentativas; log `anthropic_tool_not_called` só com `stop_reason`, modelo e tentativa); `max_tokens` não repete; recusa vira `AnthropicRefusalError` (subclasse de `AnthropicParseError`, mesmo `PARSE_ERROR`) sem nova tentativa, com log só da categoria. Na qualificação, sem a tool depois das tentativas o lote LEVANTA em vez de devolver `[]`: quem pega é o `_run_semantic` do serviço (a Camada 1 cai inteira; histórico e outlier seguem), não o SAVEPOINT do job. Delta com a descrição da task: o modo estrito ACEITA campo opcional fora do `required` (doc oficial de structured outputs, conferida em 11/11; até 24 opcionais e 16 uniões por pedido), então nenhum campo virou obrigatório e anulável e nenhuma descrição de campo mudou; `test_tool_strict_schema.py` trava as regras do modo estrito. O SDK 0.97.0 não tipa `between_tools`, mas manda o corpo intacto (conferido com transporte falso). `KNOWN_MODEL_OUTPUT_CAPS` perdeu o 4.5 e ganhou `claude-sonnet-5-5: 128_000`; `ANTHROPIC_MODEL_FALLBACK`, sem uso, saiu. Medido na mesma sessão, 3 rodadas por modelo (fatura e extrato Cora, Nubank DM, CSV sintético de 320 linhas, lote de qualificação de 50 pares): qualidade igual nas 30 rodadas, zero resposta sem tool e zero nova tentativa no 5.5, custo estimado +0,6 % (a leitura de cache cai à metade e a saída sobe com uma frase curta antes da tool). Cloud Run conferido só por leitura em 11/11: nem o serviço nem os cinco jobs definem `ANTHROPIC_MODEL_\*`. Endpoints sensíveis (**137**), matriz (**29**) e pares de AAD (**18**) iguais, sem migration.\_
 
