@@ -23,6 +23,7 @@ import json
 from typing import Any
 from uuid import UUID
 
+from app.core.exceptions import AnthropicParseError
 from app.core.logging import get_logger
 from app.db.models import (
     MAX_CODE_CHARS,
@@ -32,7 +33,14 @@ from app.db.models import (
     GlossaryEntryKind,
     SessionAccountType,
 )
-from app.integrations.anthropic.client import THINKING_DISABLED, AnthropicClient
+from app.integrations.anthropic.client import (
+    THINKING_BETWEEN_TOOLS,
+    TOOL_CALL_ATTEMPTS,
+    TOOL_CALL_AUTO,
+    AnthropicClient,
+    check_tool_response,
+)
+from app.integrations.anthropic.prompts import tool_call_required_note
 from app.modules.glossary.schemas import GlossaryEntryPlain, GlossarySnapshot
 from app.modules.reconciliations.qualification.schemas import (
     QualificationPair,
@@ -71,6 +79,10 @@ _QUALIFY_TOOL: dict[str, Any] = {
         "'incoerente' quando categoria/fornecedor claramente não "
         "correspondem ao que o extrato descreve."
     ),
+    # 86e3wg8et: `strict` garante argumentos no schema sem o `tool_choice` forçado
+    # que o claude-sonnet-5-5 recusa; o modo estrito exige `additionalProperties`
+    # falso em todo objeto.
+    "strict": True,
     "cache_control": {"type": "ephemeral"},
     "input_schema": {
         "type": "object",
@@ -102,10 +114,12 @@ _QUALIFY_TOOL: dict[str, Any] = {
                         },
                     },
                     "required": ["pair_id", "status", "motivo"],
+                    "additionalProperties": False,
                 },
             },
         },
         "required": ["results"],
+        "additionalProperties": False,
     },
 }
 
@@ -417,16 +431,16 @@ async def _analyze_batch(
             }
         )
 
-    message = await sdk_client.messages.create(
-        model=anthropic_client._model,
-        max_tokens=_MAX_OUTPUT_TOKENS,
-        system=system_blocks,
-        tools=[_QUALIFY_TOOL],
-        tool_choice={"type": "tool", "name": QUALIFY_TOOL_NAME},
-        # Mesma ponte da extração (client.THINKING_DISABLED): sem pensamento,
-        # como no claude-sonnet-4-5, para não dividir os 8192 com o pensamento.
-        thinking=THINKING_DISABLED,
-        messages=[
+    request: dict[str, Any] = {
+        "model": anthropic_client._model,
+        "max_tokens": _MAX_OUTPUT_TOKENS,
+        "system": system_blocks,
+        "tools": [_QUALIFY_TOOL],
+        "tool_choice": TOOL_CALL_AUTO,
+        # Mesmo pensamento da extração (client.THINKING_BETWEEN_TOOLS): sem
+        # pensamento estendido, para não dividir os 8192 com ele.
+        "thinking": THINKING_BETWEEN_TOOLS,
+        "messages": [
             {
                 "role": "user",
                 "content": [
@@ -435,6 +449,7 @@ async def _analyze_batch(
                         "text": (
                             "Avalie a qualificação de cada par a seguir e responda "
                             "via tool report_qualification."
+                            + tool_call_required_note(QUALIFY_TOOL_NAME)
                         ),
                     },
                     {
@@ -444,7 +459,21 @@ async def _analyze_batch(
                 ],
             }
         ],
-    )
+    }
+
+    # 86e3wg8et: com `tool_choice` auto a tool não é garantida. Mesma política da
+    # extração (`check_tool_response`): uma nova tentativa com o mesmo pedido;
+    # recusa levanta sem tentar de novo.
+    message: Any = None
+    for attempt in range(1, TOOL_CALL_ATTEMPTS + 1):
+        message = await sdk_client.messages.create(**request)
+        if check_tool_response(
+            message,
+            tool_name=QUALIFY_TOOL_NAME,
+            model=anthropic_client._model,
+            attempt=attempt,
+        ):
+            break
 
     # Defesa contra truncamento silencioso: se o modelo bateu no teto de tokens,
     # o tool_use volta cortado e `results` vazio — os pares do lote viram "ok"
@@ -454,6 +483,12 @@ async def _analyze_batch(
 
     tokens = _extract_tokens(message)
     raw_items = _extract_tool_results(message)
+    if raw_items is None:
+        # Sem a tool depois das tentativas: o lote NÃO foi analisado. Devolver
+        # `[]` faria os pares passarem sem veredito, como se a análise tivesse
+        # rodado; levantar derruba a Camada 1 inteira pelo caminho de falha que
+        # já existe (`service._run_semantic`), e o histórico e o outlier seguem.
+        raise AnthropicParseError(f"Modelo não chamou a tool {QUALIFY_TOOL_NAME}.")
     parsed = _parse_results(raw_items, expected_pair_ids={p.pair_id for p in batch})
 
     log.info(
@@ -499,8 +534,12 @@ def _extract_tokens(message: Any) -> TokenUsage:
     )
 
 
-def _extract_tool_results(message: Any) -> list[dict[str, Any]]:
-    """Acha o bloco `tool_use` com `name=QUALIFY_TOOL_NAME` e devolve `results`."""
+def _extract_tool_results(message: Any) -> list[dict[str, Any]] | None:
+    """Acha o bloco `tool_use` com `name=QUALIFY_TOOL_NAME` e devolve `results`.
+
+    `None` quando não há tool utilizável (o caller levanta); lista, mesmo vazia,
+    quando a tool veio.
+    """
     for block in getattr(message, "content", []) or []:
         if (
             getattr(block, "type", None) == "tool_use"
@@ -512,7 +551,7 @@ def _extract_tool_results(message: Any) -> list[dict[str, Any]]:
                 if isinstance(results, list):
                     return [r for r in results if isinstance(r, dict)]
     log.warning("qualification_semantic_tool_missing")
-    return []
+    return None
 
 
 def _parse_results(

@@ -1597,6 +1597,24 @@ class AnthropicParseError(ParseError):
     )
 
 
+class AnthropicRefusalError(AnthropicParseError):
+    """422 — o modelo RECUSOU o pedido (`stop_reason == "refusal"`, 86e3wg8et).
+
+    Subclasse de `AnthropicParseError` de propósito: mesmo código (`PARSE_ERROR`)
+    e mesmo tratamento de quem já trata falha de extração, sem contrato novo. O
+    que muda é que recusa NÃO tem nova tentativa (o mesmo pedido seria recusado
+    de novo) e a mensagem não manda conferir senha do arquivo. O log leva só a
+    `stop_details.category` (vocabulário fechado da Anthropic), nunca o
+    `explanation`, que é texto livre.
+    """
+
+    default_user_message = (
+        "O serviço de extração não processou este arquivo. Confira se ele é um "
+        "extrato bancário ou uma fatura de cartão e tente novamente; se persistir, "
+        "fale com a equipe Hologram."
+    )
+
+
 class AccountsSyncError(AppError):
     """502 — falha ao sincronizar contas correntes com o Omie (S7).
 

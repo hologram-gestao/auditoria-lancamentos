@@ -15,7 +15,12 @@ Princípios (CLAUDE.md §3 + Doc §12):
     - **Duas chamadas, um caminho.** `extract_movements` (a extração) e
       `identify_document` (86e3ff8xd: banco e tipo de conta pela primeira página
       de um PDF dividido) passam pelo MESMO retry e pelo MESMO mapeamento de
-      erro (`_call_with_retry` → `_invoke`); mudam só tool, prompt e `max_tokens`.
+      erro (`_call_for_tool` → `_call_with_retry` → `_invoke`); mudam só tool,
+      prompt e `max_tokens`.
+    - **Tool sem `tool_choice` forçado** (86e3wg8et, claude-sonnet-5-5): `auto`,
+      `strict` na definição e a exigência na mensagem do usuário. Resposta sem a
+      tool tem UMA nova tentativa (`check_tool_response`); recusa
+      (`stop_reason == "refusal"`) vira `AnthropicRefusalError` sem nova tentativa.
 
 Estilo espelha `OmieClient`: tenacity para retry com backoff exponencial,
 exceção tipada por classe de erro, redactor do `app.core.logging` faz a
@@ -51,6 +56,7 @@ from app.core.exceptions import (
     AnthropicAuthError,
     AnthropicCreditError,
     AnthropicParseError,
+    AnthropicRefusalError,
     AnthropicTimeoutError,
 )
 from app.core.logging import get_logger
@@ -106,14 +112,63 @@ _MAX_OUTPUT_TOKENS = 32768
 # barata e rápida (~5 s) antes dos blocos.
 _IDENTIFY_MAX_OUTPUT_TOKENS = 256
 
-# Pensamento DESLIGADO de forma explícita nas chamadas com tool_choice forçado
-# (extração, identificação e qualificação). No claude-sonnet-4-5 omitir o
-# parâmetro já rodava sem pensamento; no claude-sonnet-5, omitir passa a rodar
-# pensamento adaptativo, que conta dentro do `max_tokens` (comeria os 256 da
-# identificação) e é cobrado como saída. Esta é a PONTE para o Sonnet 5: o
-# claude-sonnet-5-5 recusa `disabled` com 400, e a migração definitiva troca
-# por `between_tools` junto com o fim do tool_choice forçado.
-THINKING_DISABLED: Final[dict[str, str]] = {"type": "disabled"}
+# Pensamento no MÍNIMO nas três chamadas (extração, identificação e
+# qualificação). O claude-sonnet-5-5 pensa por padrão (adaptativo), o que conta
+# dentro do `max_tokens` (comeria os 256 da identificação) e é cobrado como
+# saída; `{"type": "disabled"}` ele recusa com 400. `between_tools` é o
+# desligado dele: sem pensamento estendido, aceito com effort `high` ou abaixo
+# (o padrão do modelo é `high`, por isso nenhum `output_config.effort` vai junto)
+# e sem nenhum outro campo no objeto. Só o claude-sonnet-5-5 o aceita: outro
+# modelo pela variável `ANTHROPIC_MODEL_DEFAULT` recebe 400 (86e3wg8et).
+THINKING_BETWEEN_TOOLS: Final[dict[str, str]] = {"type": "between_tools"}
+
+# O claude-sonnet-5-5 recusa `tool_choice` forçado (`tool`/`any`) com 400. Com
+# `auto` a chamada à tool não é garantida: a mensagem do usuário a exige
+# (`prompts.tool_call_required_note`) e, se a resposta vier sem ela, o MESMO
+# pedido vai uma segunda vez. Duas respostas sem a tool viram o erro de sempre.
+TOOL_CALL_AUTO: Final[dict[str, str]] = {"type": "auto"}
+TOOL_CALL_ATTEMPTS: Final[int] = 2
+
+
+def check_tool_response(message: Any, *, tool_name: str, model: str, attempt: int) -> bool:
+    """Decide o que fazer com uma resposta que deveria trazer a tool `tool_name`.
+
+    Fonte única para a extração, a identificação e a qualificação (86e3wg8et).
+
+    Returns:
+        `True` quando a resposta segue para o caller: trouxe o `tool_use` de
+        `tool_name`, ou parou por `max_tokens` (cada caller já trata o
+        truncamento; repetir o pedido truncaria de novo). `False` quando veio
+        sem a tool e merece UMA nova tentativa; loga `anthropic_tool_not_called`
+        com `stop_reason`, modelo e tentativa, nunca o texto da resposta (pode
+        ecoar descrição de transação, §3.3 e §4.5).
+
+    Raises:
+        AnthropicRefusalError: `stop_reason == "refusal"`. Sem nova tentativa;
+            o log leva só a `stop_details.category`, nunca o `explanation`.
+    """
+    stop_reason = getattr(message, "stop_reason", None)
+    if stop_reason == "refusal":
+        category = getattr(getattr(message, "stop_details", None), "category", None)
+        log.warning("anthropic_refusal", model=model, attempt=attempt, category=category)
+        raise AnthropicRefusalError(f"Modelo recusou o pedido (categoria {category}).")
+    if stop_reason == "max_tokens" or has_tool_use(message, tool_name):
+        return True
+    log.warning(
+        "anthropic_tool_not_called",
+        model=model,
+        attempt=attempt,
+        stop_reason=stop_reason,
+    )
+    return False
+
+
+def has_tool_use(message: Any, tool_name: str) -> bool:
+    """A resposta tem um bloco `tool_use` com o nome `tool_name`?"""
+    return any(
+        getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == tool_name
+        for block in (getattr(message, "content", None) or [])
+    )
 
 
 class _RetryableAnthropicError(Exception):
@@ -227,7 +282,7 @@ class AnthropicClient:
             document_kind: descrição curta usada no user prompt. Ex:
                 `"extrato bancário em PDF"`, `"fatura de cartão CSV"`.
             model: override opcional do modelo. `None` usa o default do
-                construtor (`ANTHROPIC_MODEL_DEFAULT`, hoje `claude-sonnet-5`).
+                construtor (`ANTHROPIC_MODEL_DEFAULT`, hoje `claude-sonnet-5-5`).
             part: `(índice, total)` quando `content` é um bloco de um arquivo
                 dividido (`parse_chunking`, `parse_pdf_pages`); entra como nota
                 no user prompt, e em modo bloco a validação aceita
@@ -250,7 +305,7 @@ class AnthropicClient:
         chosen_model = model or self._model
 
         started = time.monotonic()
-        message = await self._call_with_retry(
+        message = await self._call_for_tool(
             model=chosen_model,
             system_blocks=self._build_system_blocks(),
             user_content=user_content,
@@ -297,7 +352,7 @@ class AnthropicClient:
         """Identifica banco e tipo de conta pela PRIMEIRA página de um PDF (D2).
 
         Chamada curta antes dos blocos de um PDF dividido (`parse_pdf_pages`):
-        `document` base64 de uma página, tool `identify_document` forçada,
+        `document` base64 de uma página, tool `identify_document` exigida,
         `max_tokens` pequeno. Mesmo `_invoke` (retry, mapeamento de erro) da
         extração.
 
@@ -312,7 +367,7 @@ class AnthropicClient:
             {"type": "text", "text": IDENTIFY_USER_PROMPT},
         ]
         started = time.monotonic()
-        message = await self._call_with_retry(
+        message = await self._call_for_tool(
             model=self._model,
             system_blocks=[{"type": "text", "text": IDENTIFY_SYSTEM_PROMPT}],
             user_content=user_content,
@@ -342,7 +397,7 @@ class AnthropicClient:
         )
         return identity
 
-    async def _call_with_retry(
+    async def _call_for_tool(
         self,
         *,
         model: str,
@@ -350,6 +405,37 @@ class AnthropicClient:
         user_content: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         tool_name: str,
+        max_tokens: int,
+        bytes_in: int,
+    ) -> Any:
+        """Chamada que precisa da tool `tool_name`: até `TOOL_CALL_ATTEMPTS` pedidos.
+
+        Com `tool_choice` auto a resposta pode vir sem a tool; o MESMO pedido vai
+        de novo uma vez (`check_tool_response`). A segunda resposta sem a tool
+        segue para o caller, que levanta o `AnthropicParseError` de sempre
+        (`_tool_input`). Recusa levanta `AnthropicRefusalError` na primeira.
+        """
+        message: Any = None
+        for attempt in range(1, TOOL_CALL_ATTEMPTS + 1):
+            message = await self._call_with_retry(
+                model=model,
+                system_blocks=system_blocks,
+                user_content=user_content,
+                tools=tools,
+                max_tokens=max_tokens,
+                bytes_in=bytes_in,
+            )
+            if check_tool_response(message, tool_name=tool_name, model=model, attempt=attempt):
+                break
+        return message
+
+    async def _call_with_retry(
+        self,
+        *,
+        model: str,
+        system_blocks: list[dict[str, Any]],
+        user_content: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
         max_tokens: int,
         bytes_in: int,
     ) -> Any:
@@ -371,7 +457,6 @@ class AnthropicClient:
                         system_blocks=system_blocks,
                         user_content=user_content,
                         tools=tools,
-                        tool_name=tool_name,
                         max_tokens=max_tokens,
                         attempt_number=attempt.retry_state.attempt_number,
                     )
@@ -486,7 +571,6 @@ class AnthropicClient:
         system_blocks: list[dict[str, Any]],
         user_content: list[dict[str, Any]],
         tools: list[dict[str, Any]],
-        tool_name: str,
         max_tokens: int,
         attempt_number: int,
     ) -> Any:
@@ -497,8 +581,8 @@ class AnthropicClient:
                 max_tokens=max_tokens,
                 system=system_blocks,
                 tools=tools,
-                tool_choice={"type": "tool", "name": tool_name},
-                thinking=THINKING_DISABLED,
+                tool_choice=TOOL_CALL_AUTO,
+                thinking=THINKING_BETWEEN_TOOLS,
                 messages=[{"role": "user", "content": user_content}],
             )
         except APITimeoutError as exc:

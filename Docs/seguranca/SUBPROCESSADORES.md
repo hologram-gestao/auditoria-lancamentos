@@ -51,15 +51,17 @@ cruzamento com o ERP é código determinístico, sem IA (CLAUDE.md §5.6).
 **Para quê.** Transformar o arquivo do banco em linhas estruturadas, e apontar
 classificação suspeita para uma pessoa revisar. A IA não decide match nem classificação.
 
-**Modelo.** O padrão do código é `claude-sonnet-5` desde 29/10/2026 (antes,
-`claude-sonnet-4-5`, que a Anthropic retira da API em 30/11/2026), com `claude-opus-4-6`
-declarado como alternativa e sem uso no código (`apps/api/app/core/config.py:122-123`). As
-três chamadas (extração, identificação do PDF dividido e qualificação) vão com pensamento
-desligado. O pipeline de deploy não sobrescreve essas variáveis, mas uma variável
-`ANTHROPIC_MODEL_DEFAULT` no serviço ou nos jobs do Cloud Run sobrescreveria. Na conferência
-de 29/10/2026 o `gcloud` desta máquina estava sem autenticação válida, então segue **a
-confirmar** se ela existe no `auditoria-api-dev` e nos cinco jobs; o log da API na subida
-mostra o modelo em uso (`parse_output_cap_ok`, campo `model`).
+**Modelo.** O padrão do código é `claude-sonnet-5-5` desde 11/11/2026
+(`apps/api/app/core/config.py`, `ANTHROPIC_MODEL_DEFAULT`); antes, `claude-sonnet-5`
+(29/10/2026) e `claude-sonnet-4-5`, que a Anthropic retira da API em 30/11/2026. Não há
+modelo alternativo declarado: a variável de fallback, que estava sem uso, saiu. As três
+chamadas (extração, identificação do PDF dividido e qualificação) vão com o pensamento
+no mínimo do modelo (`between_tools`) e com a resposta pela tool, sem texto livre
+aproveitado. O pipeline de deploy não sobrescreve a variável, e uma
+`ANTHROPIC_MODEL_DEFAULT` no serviço ou nos jobs do Cloud Run sobrescreveria: na
+conferência de 11/11/2026, só leitura, nem o `auditoria-api-dev` nem os cinco jobs a
+definem. O log da API na subida mostra o modelo em uso (`parse_output_cap_ok`, campo
+`model`).
 
 **Termos, conferidos em 05/10/2026:**
 
@@ -86,15 +88,15 @@ mostra o modelo em uso (`parse_output_cap_ok`, campo `model`).
   Mythos 5 e 5.1). Fonte:
   [API and data retention](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention).
 - **Prompt caching.** A plataforma marca o prompt de sistema e o glossário com
-  `cache_control: ephemeral` (`client.py:405`, `semantic.py:392` e `semantic.py:416`).
+  `cache_control: ephemeral` (`client.py:499`, `semantic.py:406` e `semantic.py:430`).
   Pela mesma página, o cache guarda só representações internas e hashes, em memória,
   pelo tempo de vida do cache, e não o texto. Detalhes em
   [Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
 - **Onde roda.** Dado em repouso: "Currently, `"us"` is the only available workspace
   geo." Inferência: o padrão é `"global"`, que pode rodar em qualquer geografia; a única
   restrição oferecida é `"us"`, e o parâmetro só existe nos modelos 4.6 em diante: o
-  `claude-sonnet-5`, modelo em uso, o aceita (o `claude-sonnet-4-5`, padrão anterior,
-  respondia 400). O código continua sem passar `inference_geo`.
+  `claude-sonnet-5-5`, modelo em uso, o aceita. O código continua sem passar
+  `inference_geo`.
   Não há região na América do Sul. Fonte:
   [Data residency](https://platform.claude.com/docs/en/manage-claude/data-residency).
   Para a LGPD, isso é transferência internacional de dados.

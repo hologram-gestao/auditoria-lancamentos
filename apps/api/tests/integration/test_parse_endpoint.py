@@ -177,11 +177,11 @@ class _IdentifyToolUseBlock:
 
 
 class _FakeMessagesByTool(_FakeMessages):
-    """Responde conforme a tool forçada: identificação ou extração."""
+    """Responde conforme a tool do pedido: identificação ou extração."""
 
     async def create(self, **kwargs: Any) -> Any:
         self.calls.append(kwargs)
-        if kwargs["tool_choice"]["name"] == IDENTIFY_DOCUMENT_TOOL_NAME:
+        if kwargs["tools"][0]["name"] == IDENTIFY_DOCUMENT_TOOL_NAME:
             return _Message([_IdentifyToolUseBlock()])
         return self.side_effect
 
@@ -573,14 +573,14 @@ class TestParseIntegration:
             files={"file": ("extrato.pdf", _multipage_pdf_bytes(6), "application/pdf")},
         )
         assert resp.status_code == 200, resp.text
-        tools = [call["tool_choice"]["name"] for call in fake.messages.calls]
+        tools = [call["tools"][0]["name"] for call in fake.messages.calls]
         assert tools.count(IDENTIFY_DOCUMENT_TOOL_NAME) == 1
         assert tools.count(EXTRACT_MOVEMENTS_TOOL_NAME) == 3
         assert tools[0] == IDENTIFY_DOCUMENT_TOOL_NAME  # identificação ANTES dos blocos
         extract_prompts = [
             call["messages"][0]["content"][-1]["text"]
             for call in fake.messages.calls
-            if call["tool_choice"]["name"] == EXTRACT_MOVEMENTS_TOOL_NAME
+            if call["tools"][0]["name"] == EXTRACT_MOVEMENTS_TOOL_NAME
         ]
         assert sorted("bloco 1 de 3" in text for text in extract_prompts) == [False, False, True]
         assert all('banco "Banco do Brasil"' in text for text in extract_prompts)

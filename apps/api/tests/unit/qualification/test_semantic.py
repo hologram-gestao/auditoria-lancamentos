@@ -14,8 +14,11 @@ from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
+import pytest
 from pydantic import SecretStr
+from structlog.testing import capture_logs
 
+from app.core.exceptions import AnthropicParseError, AnthropicRefusalError
 from app.integrations.anthropic.client import AnthropicClient
 from app.modules.reconciliations.qualification.schemas import QualificationPair
 from app.modules.reconciliations.qualification.semantic import (
@@ -51,15 +54,26 @@ class _Usage:
         self.cache_read_input_tokens = cache_read_input_tokens
 
 
+class _StopDetails:
+    def __init__(self, category: str | None, explanation: str) -> None:
+        self.type = "refusal"
+        self.category = category
+        self.explanation = explanation
+
+
 class _Message:
     def __init__(
         self,
         *,
         blocks: list[Any],
         usage: _Usage | None = None,
+        stop_reason: str | None = None,
+        stop_details: _StopDetails | None = None,
     ) -> None:
         self.content = blocks
         self.usage = usage
+        self.stop_reason = stop_reason
+        self.stop_details = stop_details
 
 
 class _FakeMessages:
@@ -101,7 +115,7 @@ def _build_client(*, side_effect: list[Any]) -> AnthropicClient:
     """Constrói AnthropicClient com fake SDK injetado."""
     return AnthropicClient(
         api_key=SecretStr("fake"),
-        model="claude-sonnet-4-5",
+        model="claude-sonnet-5-5",
         timeout=10.0,
         anthropic_client=_FakeAnthropic(side_effect=side_effect),
     )
@@ -197,15 +211,68 @@ async def test_analyze_pairs_drops_invalid_status() -> None:
     assert results == []
 
 
-async def test_analyze_pairs_missing_tool_use_returns_empty_for_batch() -> None:
-    # Modelo respondeu free-text sem tool — caller trata todos como "ok"
-    # (ausência = não flagar). Não levanta.
+async def test_analyze_pairs_sem_tool_tenta_de_novo_e_levanta() -> None:
+    # 86e3wg8et: com `tool_choice` auto a tool pode não vir. Devolver `[]` faria
+    # o lote passar sem veredito como se tivesse sido analisado (falso negativo
+    # mudo): depois de UMA nova tentativa, levanta. O caller (`_run_semantic`)
+    # derruba a Camada 1 pelo caminho de falha que já existe.
     p1 = _pair()
-    response = _Message(blocks=[], usage=_Usage())
-    client = _build_client(side_effect=[response])
+    response = _Message(blocks=[], usage=_Usage(), stop_reason="end_turn")
+    fake = _FakeAnthropic(side_effect=[response, response])
+    client = AnthropicClient(
+        api_key=SecretStr("fake"), model="claude-sonnet-5-5", timeout=10.0, anthropic_client=fake
+    )
+
+    with capture_logs() as logs, pytest.raises(AnthropicParseError, match="Modelo não chamou"):
+        await analyze_pairs([p1], anthropic_client=client)
+
+    assert len(fake.messages.calls) == 2
+    events = [e["event"] for e in logs]
+    assert events.count("anthropic_tool_not_called") == 2
+    assert "qualification_semantic_tool_missing" in events
+
+
+async def test_analyze_pairs_sem_tool_na_primeira_e_tool_na_segunda() -> None:
+    p1 = _pair()
+    fake = _FakeAnthropic(
+        side_effect=[
+            _Message(blocks=[], stop_reason="end_turn"),
+            _tool_response([{"pair_id": p1.pair_id, "status": "incoerente", "motivo": "x"}]),
+        ]
+    )
+    client = AnthropicClient(
+        api_key=SecretStr("fake"), model="claude-sonnet-5-5", timeout=10.0, anthropic_client=fake
+    )
+
     results, _tokens, calls = await analyze_pairs([p1], anthropic_client=client)
-    assert results == []
+
+    assert [r.status for r in results] == ["incoerente"]
+    assert len(fake.messages.calls) == 2
+    assert fake.messages.calls[0] == fake.messages.calls[1]
     assert calls == 1
+
+
+async def test_analyze_pairs_refusal_nao_tenta_de_novo() -> None:
+    p1 = _pair()
+    fake = _FakeAnthropic(
+        side_effect=[
+            _Message(
+                blocks=[],
+                stop_reason="refusal",
+                stop_details=_StopDetails("cyber", "texto livre da recusa"),
+            )
+        ]
+    )
+    client = AnthropicClient(
+        api_key=SecretStr("fake"), model="claude-sonnet-5-5", timeout=10.0, anthropic_client=fake
+    )
+
+    with capture_logs() as logs, pytest.raises(AnthropicRefusalError):
+        await analyze_pairs([p1], anthropic_client=client)
+
+    assert len(fake.messages.calls) == 1
+    assert [e.get("category") for e in logs if e["event"] == "anthropic_refusal"] == ["cyber"]
+    assert "texto livre da recusa" not in repr(logs)
 
 
 async def test_analyze_pairs_truncates_long_motivo() -> None:
@@ -228,7 +295,7 @@ async def test_analyze_pairs_uses_max_output_tokens_8192() -> None:
     )
     client = AnthropicClient(
         api_key=SecretStr("fake"),
-        model="claude-sonnet-4-5",
+        model="claude-sonnet-5-5",
         timeout=10.0,
         anthropic_client=fake,
     )
@@ -237,24 +304,28 @@ async def test_analyze_pairs_uses_max_output_tokens_8192() -> None:
     assert _MAX_OUTPUT_TOKENS == 8192
 
 
-async def test_analyze_pairs_desliga_pensamento_e_mantem_tool_forcada() -> None:
-    # Ponte para o claude-sonnet-5 (86e3wg8ek): sem `thinking` explícito o
-    # modelo rodaria pensamento adaptativo dentro dos 8192 do lote.
+async def test_analyze_pairs_between_tools_auto_e_strict() -> None:
+    # 86e3wg8et (claude-sonnet-5-5): `disabled` e `tool_choice` forçado são 400.
+    # `between_tools` mantém o lote sem pensamento estendido dentro dos 8192.
     p1 = _pair()
     fake = _FakeAnthropic(
         side_effect=[_tool_response([{"pair_id": p1.pair_id, "status": "ok", "motivo": "ok"}])]
     )
     client = AnthropicClient(
         api_key=SecretStr("fake"),
-        model="claude-sonnet-5",
+        model="claude-sonnet-5-5",
         timeout=10.0,
         anthropic_client=fake,
     )
     await analyze_pairs([p1], anthropic_client=client)
     call = fake.messages.calls[0]
-    assert call["thinking"] == {"type": "disabled"}
-    assert call["tool_choice"] == {"type": "tool", "name": QUALIFY_TOOL_NAME}
-    assert call["model"] == "claude-sonnet-5"
+    assert call["thinking"] == {"type": "between_tools"}
+    assert call["tool_choice"] == {"type": "auto"}
+    assert "output_config" not in call
+    assert call["tools"][0]["strict"] is True
+    assert call["model"] == "claude-sonnet-5-5"
+    instruction = call["messages"][0]["content"][0]["text"]
+    assert "obrigatoriamente uma chamada à tool `report_qualification`" in instruction
 
 
 async def test_investment_account_injects_aplicacao_rule() -> None:
@@ -266,7 +337,7 @@ async def test_investment_account_injects_aplicacao_rule() -> None:
     )
     client = AnthropicClient(
         api_key=SecretStr("fake"),
-        model="claude-sonnet-4-5",
+        model="claude-sonnet-5-5",
         timeout=10.0,
         anthropic_client=fake,
     )
@@ -287,7 +358,7 @@ async def test_checking_account_does_not_inject_aplicacao_rule() -> None:
     )
     client = AnthropicClient(
         api_key=SecretStr("fake"),
-        model="claude-sonnet-4-5",
+        model="claude-sonnet-5-5",
         timeout=10.0,
         anthropic_client=fake,
     )
