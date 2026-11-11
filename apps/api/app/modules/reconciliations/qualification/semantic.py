@@ -10,8 +10,9 @@ Princípios de segurança (CLAUDE.md §3):
       o caller (`service.qualify_session`) cifra antes de persistir.
 
 Erros:
-    - Anthropic 5xx persistente → propaga `AnthropicTimeoutError`. Caller
-      no orquestrador converte em "qualification_failed" e segue (não
+    - Anthropic 5xx persistente → propaga `AnthropicTimeoutError`; crédito
+      esgotado → `AnthropicCreditError`, com o alerta de plantão (86e3mpmcx).
+      O caller (`service._run_semantic`) descarta a Camada 1 e segue (não
       derruba a sessão).
     - Tool input mal-formado → ignora aquele item específico (log warning),
       sem derrubar o lote inteiro.
@@ -33,12 +34,7 @@ from app.db.models import (
     GlossaryEntryKind,
     SessionAccountType,
 )
-from app.integrations.anthropic.client import (
-    TOOL_CALL_AUTO,
-    AnthropicClient,
-    call_until_tool,
-    thinking_for,
-)
+from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.anthropic.prompts import tool_call_required_note
 from app.modules.glossary.schemas import GlossaryEntryPlain, GlossarySnapshot
 from app.modules.reconciliations.qualification.schemas import (
@@ -379,24 +375,11 @@ async def _analyze_batch(
 ) -> tuple[list[SemanticResult], TokenUsage]:
     """Chama o Claude para UM lote (≤ 50 pares) via tool use estruturado.
 
-    Reusa o `_invoke`/`_get_client` privados do `AnthropicClient` indo
-    direto na API pública `messages.create` — o `AnthropicClient` atual
-    só expõe `extract_movements`. Para a qualificação precisamos de uma
-    chamada custom; portanto montamos system+tool aqui e chamamos o SDK
-    via `anthropic_client._get_client()._injected_client or AsyncAnthropic`.
-
-    O acesso ao client interno é justificável: é o ponto de extensão
-    natural pra uma 2ª feature que reusa autenticação + retry policy
-    sem duplicar setup. Refatoração futura: extrair um método público
-    `call_tool` no `AnthropicClient`.
+    Monta system e tool aqui e chama `AnthropicClient.call_tool` (86e3mpmcx): o
+    MESMO caminho da extração, com retry de 429/5xx/conexão, mapeamento de
+    timeout e de autenticação e o crédito esgotado virando `AnthropicCreditError`
+    com o alerta de plantão. `thinking` e `tool_choice` auto vêm do client.
     """
-    # Defensivo: o cliente real é construído lazily. Em testes injetamos
-    # via construtor — esse atalho expõe o mesmo SDK. Acesso a `_*` é
-    # justificável: é ponto de extensão natural pra uma 2ª feature que
-    # reusa autenticação + retry policy sem duplicar setup. Refator futuro:
-    # extrair método público `call_tool` no `AnthropicClient`.
-    sdk_client = anthropic_client._get_client()
-
     user_payload = _build_user_payload(batch)
     system_blocks: list[dict[str, Any]] = [
         {
@@ -430,44 +413,29 @@ async def _analyze_batch(
             }
         )
 
-    request: dict[str, Any] = {
-        "model": anthropic_client._model,
-        "max_tokens": _MAX_OUTPUT_TOKENS,
-        "system": system_blocks,
-        "tools": [_QUALIFY_TOOL],
-        "tool_choice": TOOL_CALL_AUTO,
-        # Mesmo pensamento da extração (`client.thinking_for`): sem pensamento
-        # estendido, para não dividir os 8192 com ele.
-        "thinking": thinking_for(anthropic_client._model),
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            "Avalie a qualificação de cada par a seguir e responda "
-                            "via tool report_qualification."
-                            + tool_call_required_note(QUALIFY_TOOL_NAME)
-                        ),
-                    },
-                    {
-                        "type": "text",
-                        "text": json.dumps(user_payload, ensure_ascii=False),
-                    },
-                ],
-            }
-        ],
-    }
+    user_content: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": (
+                "Avalie a qualificação de cada par a seguir e responda "
+                "via tool report_qualification." + tool_call_required_note(QUALIFY_TOOL_NAME)
+            ),
+        },
+        {
+            "type": "text",
+            "text": json.dumps(user_payload, ensure_ascii=False),
+        },
+    ]
 
     # 86e3wg8et: com `tool_choice` auto a tool não é garantida. Mesma regra e
-    # mesmo laço da extração (`client.call_until_tool`): uma nova tentativa com o
-    # mesmo pedido; recusa levanta sem tentar de novo.
-    async def send() -> Any:
-        return await sdk_client.messages.create(**request)
-
-    messages = await call_until_tool(
-        send, tool_name=QUALIFY_TOOL_NAME, model=anthropic_client._model
+    # mesmo laço da extração (`client.call_until_tool`, dentro do `call_tool`):
+    # uma nova tentativa com o mesmo pedido; recusa levanta sem tentar de novo.
+    messages = await anthropic_client.call_tool(
+        system_blocks=system_blocks,
+        user_content=user_content,
+        tools=[_QUALIFY_TOOL],
+        tool_name=QUALIFY_TOOL_NAME,
+        max_tokens=_MAX_OUTPUT_TOKENS,
     )
     message = messages[-1]
 

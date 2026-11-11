@@ -34,6 +34,7 @@ from app.core.crypto_service import (
     AAD_FILE_ENTRY_DESCRIPTION,
     field_locator,
 )
+from app.core.exceptions import AppError
 from app.core.logging import get_logger
 from app.db.models import (
     AnomalyDetectedBy,
@@ -345,6 +346,14 @@ async def _run_semantic(
             client_id=client_id,
             glossary_block=glossary_block,
         )
+    except AppError as exc:
+        # Erro nosso (crédito esgotado, timeout, auth, parse, recusa): só o
+        # código vai para o log, sem traceback. A cadeia da exceção carrega a
+        # resposta crua da Anthropic (`raise ... from exc`), texto livre de
+        # terceiro que nunca entra no log (§3.3, §4.5). O alerta de crédito já
+        # saiu no `AnthropicClient` (86e3mpmcx); a sessão segue sem os vereditos.
+        log.warning("qualification_semantic_failed", pairs=len(pairs), error_code=exc.code.value)
+        return [], TokenUsage(), 0
     except Exception:
         log.exception("qualification_semantic_failed", pairs=len(pairs))
         return [], TokenUsage(), 0

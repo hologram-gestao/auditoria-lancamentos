@@ -171,6 +171,16 @@
       conta, competência, etapa, minutos desde o último sinal e o link
       `{FRONTEND_URL}/clientes/{cliente}/conciliacao/{sessão}` (o job de limpeza
       recebe `FRONTEND_URL` no deploy).
+    - **Sem crédito na Anthropic, nada vai para erro e o plantão é avisado**
+      (86e3mpmcx). O envio do arquivo falha com 502 (`AnthropicCreditError`) ANTES
+      de criar a sessão; a conciliação em processamento termina em revisão SEM os
+      vereditos da IA (a qualificação nunca derruba a sessão) e não vai para erro.
+      Nos dois casos sai `anthropic_credit`, um por processo a cada 15 min, porque
+      as TRÊS chamadas da IA passam pelo `AnthropicClient` (`call_tool` é o caminho
+      da qualificação; o SDK direto não reconhece o crédito) e todo `AnthropicClient`
+      de produção nasce com `alert_settings`. Nenhuma ação no GCP: recarregar no
+      console da Anthropic basta. Erro nosso da qualificação loga só o `code`
+      (a cadeia carrega o texto da Anthropic).
 15. **Autorização por tenant e por organização (Sprint 5 + épico 86e36ec0q) — a
     regra mais fácil de furar sem perceber:**
     - **O tenant e a organização vêm SEMPRE da LINHA do usuário**, nunca de
@@ -2035,6 +2045,8 @@ Evite "você já sabe" — o usuário pode voltar à entrega depois de dias.
 - Mantenha cada seção sob 400 linhas. Se crescer demais, extraia para `Docs/` e linke daqui.
 
 ---
+
+_Versão 1.119, 11/11/2026. **Sem crédito na Anthropic, a conciliação em processamento passou a avisar o plantão (86e3mpmcx, subtask 2 do épico 86e3mpmcr).** Em 07/10 a conta ficou sem crédito e o `anthropic_credit` nunca saiu: o job criava o `AnthropicClient` da qualificação sem `alert_settings`, e a qualificação chamava `messages.create` direto, então o 400 subia cru, sem retry, sem reconhecimento do crédito, e o `_run_semantic` o engolia com o texto da Anthropic no traceback. Nasceu `AnthropicClient.call_tool` (o `_call_for_tool` passou a devolver todas as tentativas; extração e identificação usam a última) e o `semantic.py` não toca mais `_get_client()` nem `_model`; a qualificação ganhou a nova tentativa em 429/5xx/conexão e o mapeamento de timeout, auth e crédito. O job passa `alert_settings=settings`. Pela decisão do Pedro de 11/11 a sessão segue para revisão sem os vereditos e não vai para erro; o `_run_semantic` loga só o `error_code` para erro nosso. A ação do `ANTHROPIC_CREDIT` em `ALERT_ACTIONS` ganhou a frase dos vereditos e do reprocessamento, e a mensagem-template deixou de dizer que o parsing e a qualificação "param". Regra nova na §3.14. Prova por mutação: sem o `alert_settings` no job, o teste de integração reprova sem alerta. Sem rota, permissão, migration nem campo cifrado: endpoints sensíveis (**137**), matriz (**29**) e pares de AAD (**18**) iguais._
 
 _Versão 1.118, 11/11/2026. **O alerta do watchdog passou a dizer qual conciliação parou, onde e o que fazer, e todo alerta ganhou a ação sugerida (86e3mpmcw, subtask 1 do épico 86e3mpmcr).** Em 07/10 o plantão recebeu só "1 sessao(oes) travada(s)", e saber cliente, conta e etapa pedia abrir o banco. Coluna nova `reconciliation_sessions.processing_stage` (migration `a4c8e2f6b1d3`, reversível, sem backfill, ciclo up/down/up limpo e `alembic check` sem operação) gravada pelo job na fronteira de cada passo (regra nova na §7 Backend); o watchdog virou módulo (`stuck_sessions.py`, o script só abre a transação e alerta) com uma CTE `FOR UPDATE SKIP LOCKED` que devolve o `updated_at` ANTERIOR, e os minutos sem sinal saem do relógio do banco; o alerta tem uma montagem só para webhook e e-mail, com `ALERT_ACTIONS` (regra nova na §3.14). `escape_mrkdwn` subiu do aviso de lead para `core/mrkdwn.py`. O `deploy-dev.yml` passa `FRONTEND_URL` (variável `WEB_PUBLIC_URL` do workflow) ao job de limpeza; o serviço da API continua recebendo a dele do manifesto. Prova do lock por mutação: com a gravação de `gravacao` dentro da transação do passo 4, o teste de integração estoura o timeout de 60 s. Sem rota, permissão nem campo cifrado: endpoints sensíveis (**137**), matriz (**29**) e pares de AAD (**18**) iguais._
 
