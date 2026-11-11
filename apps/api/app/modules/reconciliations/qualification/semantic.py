@@ -333,7 +333,8 @@ async def analyze_pairs(
             - `calls`: número de chamadas (= len(pairs) // 50 + 1).
 
     Raises:
-        AnthropicAuthError / AnthropicTimeoutError / AnthropicParseError:
+        AnthropicAuthError / AnthropicTimeoutError / AnthropicCreditError /
+        AnthropicParseError (e a subclasse AnthropicRefusalError):
             propagados quando todo o lote falha. Caller decide se descarta
             a Camada 1 ou aborta a sessão. Falha individual de parsing de
             um item NÃO levanta — só não emite resultado pra aquele item.
