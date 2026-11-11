@@ -16,6 +16,28 @@ Diretrizes do system prompt:
 
 from __future__ import annotations
 
+from app.integrations.anthropic.tools import (
+    EXTRACT_MOVEMENTS_TOOL_NAME,
+    IDENTIFY_DOCUMENT_TOOL_NAME,
+)
+
+# Exigência da tool na MENSAGEM DO USUÁRIO (86e3wg8et). O claude-sonnet-5-5 recusa
+# `tool_choice` forçado com 400, e com `auto` a chamada não é garantida. Fica aqui,
+# no fim do pedido, e NUNCA no `SYSTEM_PROMPT`: aquele é cacheado e cada mudança
+# nele foi medida contra arquivos reais (86e3w4k20, 86e3tpu7r). Usada pela
+# extração, pela identificação e pela qualificação; o nome da tool vem da
+# definição, nunca escrito à mão.
+TOOL_CALL_REQUIRED_NOTE_TEMPLATE = """ \
+A resposta é obrigatoriamente uma chamada à tool `{tool_name}`, com todo o \
+resultado nos argumentos dela; não responda em texto livre.\
+"""
+
+
+def tool_call_required_note(tool_name: str) -> str:
+    """A frase que exige a chamada à tool `tool_name`, começando com espaço."""
+    return TOOL_CALL_REQUIRED_NOTE_TEMPLATE.format(tool_name=tool_name)
+
+
 SYSTEM_PROMPT = """\
 Você é um extrator estruturado de extratos bancários e faturas de cartão de \
 crédito brasileiros. Sua única tarefa é chamar a tool `extract_movements` com \
@@ -181,7 +203,7 @@ conseguir identificar o banco, use "Desconhecido". Se for fatura de cartão, \
 informe também `closing_balance` (o TOTAL A PAGAR desta fatura) e \
 `invoice_due_date` (o VENCIMENTO), como impressos, nunca inventados nem \
 calculados: omita o que a página não mostrar. Fora do cartão, omita os dois.\
-"""
+""" + tool_call_required_note(IDENTIFY_DOCUMENT_TOOL_NAME)
 
 
 def build_user_prompt(
@@ -206,4 +228,4 @@ def build_user_prompt(
     if identity is not None:
         bank_name, account_type = identity
         prompt += IDENTITY_NOTE_TEMPLATE.format(bank_name=bank_name, account_type=account_type)
-    return prompt
+    return prompt + tool_call_required_note(EXTRACT_MOVEMENTS_TOOL_NAME)

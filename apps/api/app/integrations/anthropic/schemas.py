@@ -1,7 +1,9 @@
 """DTOs Pydantic do parsing IA.
 
-Estrutura espelha o `EXTRACT_MOVEMENTS_TOOL` (ver `tools.py`) — o modelo é
-forçado a emitir exatamente este schema via `tool_choice`.
+Estrutura espelha o `EXTRACT_MOVEMENTS_TOOL` (ver `tools.py`) — o modelo emite
+este schema pela tool com `strict: true` (86e3wg8et: sem `tool_choice` forçado,
+que o claude-sonnet-5-5 recusa). A validação daqui continua sendo a última
+palavra: `strict` garante a forma, não as regras de domínio.
 
 Decisões:
     - **`Decimal` em todos os valores monetários** (CLAUDE.md §3.4). NUNCA float.

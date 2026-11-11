@@ -34,6 +34,7 @@ from app.core.exceptions import (
     AnthropicAuthError,
     AnthropicCreditError,
     AnthropicParseError,
+    AnthropicRefusalError,
     AnthropicTimeoutError,
 )
 from app.integrations.anthropic.client import AnthropicClient
@@ -77,12 +78,28 @@ class _TextBlock:
         self.text = text
 
 
+class _StopDetails:
+    """Espelha `stop_details` de uma recusa: categoria e explicação livre."""
+
+    def __init__(self, category: str | None, explanation: str) -> None:
+        self.type = "refusal"
+        self.category = category
+        self.explanation = explanation
+
+
 class _Message:
     """Mensagem com `.content` lista de blocks — formato consumido pelo client."""
 
-    def __init__(self, blocks: list[Any], *, stop_reason: str | None = None) -> None:
+    def __init__(
+        self,
+        blocks: list[Any],
+        *,
+        stop_reason: str | None = None,
+        stop_details: _StopDetails | None = None,
+    ) -> None:
         self.content = blocks
         self.stop_reason = stop_reason
+        self.stop_details = stop_details
 
 
 class _FakeMessages:
@@ -314,19 +331,17 @@ class TestExtractMovementsHappyPath:
         assert stmt.bank_name == "Sicredi"
         assert stmt.transactions[0].amount == Decimal("-500.00")
         assert stmt.transactions[1].amount == Decimal("734.56")
-        # SDK foi chamado com tool_choice forçado e schema correto
+        # SDK foi chamado com tool_choice auto (o 5.5 recusa o forçado) e o schema
         assert len(fake.messages.calls) == 1
         kwargs = fake.messages.calls[0]
-        assert kwargs["tool_choice"] == {
-            "type": "tool",
-            "name": EXTRACT_MOVEMENTS_TOOL_NAME,
-        }
+        assert kwargs["tool_choice"] == {"type": "auto"}
+        assert kwargs["tools"] == [EXTRACT_MOVEMENTS_TOOL]
         assert kwargs["model"] == "claude-test"
 
-    async def test_pensamento_desligado_explicito(self) -> None:
-        # Ponte para o claude-sonnet-5 (86e3wg8ek): omitir `thinking` passaria a
-        # rodar pensamento adaptativo, que divide o `max_tokens` com a resposta.
-        # O literal fica no teste de propósito: é o contrato com a API.
+    async def test_request_sem_tool_choice_forcado_com_strict_e_between_tools(self) -> None:
+        # 86e3wg8et (claude-sonnet-5-5): `tool_choice` forçado e `thinking`
+        # `disabled` são 400 nesse modelo. Os literais ficam no teste de propósito:
+        # são o contrato com a API.
         fake = _FakeAnthropic(side_effect=_ok_message())
         client = _make_client(fake)
 
@@ -336,11 +351,17 @@ class TestExtractMovementsHappyPath:
             document_kind="extrato em PDF",
         )
 
-        assert fake.messages.calls[0]["thinking"] == {"type": "disabled"}
-        assert fake.messages.calls[0]["tool_choice"] == {
-            "type": "tool",
-            "name": EXTRACT_MOVEMENTS_TOOL_NAME,
-        }
+        call = fake.messages.calls[0]
+        assert call["thinking"] == {"type": "between_tools"}
+        assert call["tool_choice"] == {"type": "auto"}
+        assert "output_config" not in call
+        assert all(tool["strict"] is True for tool in call["tools"])
+        # A exigência da tool vai na mensagem do usuário, no fim, e nunca no
+        # system prompt (cacheado e medido contra arquivos reais).
+        last_text = call["messages"][0]["content"][-1]["text"]
+        assert last_text.endswith("não responda em texto livre.")
+        assert "obrigatoriamente uma chamada à tool `extract_movements`" in last_text
+        assert "obrigatoriamente" not in SYSTEM_PROMPT
 
     async def test_pdf_sent_as_base64_document(self) -> None:
         fake = _FakeAnthropic(side_effect=_ok_message())
@@ -397,18 +418,116 @@ class TestExtractMovementsHappyPath:
 
 
 class TestToolUseEdgeCases:
-    async def test_no_tool_use_raises_parse_error(self) -> None:
-        """Modelo respondeu free-text — fallback que NUNCA deveria acontecer
-        com tool_choice forçado, mas garantimos a mensagem clara."""
-        fake = _FakeAnthropic(side_effect=_Message([_TextBlock("desculpa, não sei extrair")]))
+    async def test_no_tool_use_tenta_de_novo_e_depois_parse_error(self) -> None:
+        """Sem `tool_choice` forçado (86e3wg8et) a resposta pode vir sem a tool:
+        o MESMO pedido vai uma segunda vez, e a segunda sem a tool é o erro de
+        sempre. O log nunca leva o texto da resposta (§3.3, §4.5)."""
+        echo = "PIX FORNECEDOR SIGILOSO 123"
+        fake = _FakeAnthropic(side_effect=_Message([_TextBlock(echo)], stop_reason="end_turn"))
         client = _make_client(fake)
 
-        with pytest.raises(AnthropicParseError, match="Modelo não chamou"):
+        with (
+            capture_logs() as logs,
+            pytest.raises(AnthropicParseError, match="Modelo não chamou") as exc_info,
+        ):
             await client.extract_movements(
                 content=b"%PDF-",
                 mime_type="application/pdf",
                 document_kind="x",
             )
+
+        assert not isinstance(exc_info.value, AnthropicRefusalError)
+        assert len(fake.messages.calls) == 2
+        assert fake.messages.calls[0] == fake.messages.calls[1]
+        missed = [e for e in logs if e["event"] == "anthropic_tool_not_called"]
+        assert [(e["attempt"], e["stop_reason"], e["model"]) for e in missed] == [
+            (1, "end_turn", "claude-test"),
+            (2, "end_turn", "claude-test"),
+        ]
+        assert echo not in repr(logs)
+
+    async def test_no_tool_use_na_primeira_e_tool_na_segunda_extrai(self) -> None:
+        fake = _FakeAnthropic(
+            side_effect=[
+                _Message([_TextBlock("vou extrair")], stop_reason="end_turn"),
+                _ok_message(),
+            ]
+        )
+        client = _make_client(fake)
+
+        with capture_logs() as logs:
+            stmt = await client.extract_movements(
+                content=b"%PDF-", mime_type="application/pdf", document_kind="x"
+            )
+
+        assert stmt.bank_name == "Sicredi"
+        assert len(fake.messages.calls) == 2
+        assert [e["attempt"] for e in logs if e["event"] == "anthropic_tool_not_called"] == [1]
+
+    async def test_refusal_nao_tenta_de_novo_e_vira_erro_tipado(self) -> None:
+        explanation = "explicação livre que pode citar o documento"
+        fake = _FakeAnthropic(
+            side_effect=_Message(
+                [],
+                stop_reason="refusal",
+                stop_details=_StopDetails("general_harms", explanation),
+            )
+        )
+        client = _make_client(fake)
+
+        with capture_logs() as logs, pytest.raises(AnthropicRefusalError) as exc_info:
+            await client.extract_movements(
+                content=b"%PDF-", mime_type="application/pdf", document_kind="x"
+            )
+
+        assert len(fake.messages.calls) == 1
+        assert isinstance(exc_info.value, AnthropicParseError)
+        assert "senha" not in exc_info.value.user_message
+        refusals = [e for e in logs if e["event"] == "anthropic_refusal"]
+        assert [(e["category"], e["attempt"]) for e in refusals] == [("general_harms", 1)]
+        assert not [e for e in logs if e["event"] == "anthropic_tool_not_called"]
+        assert explanation not in repr(logs)
+
+    async def test_tool_use_com_input_que_nao_e_dict_conta_como_sem_tool(self) -> None:
+        bad = _ToolUseBlock(name=EXTRACT_MOVEMENTS_TOOL_NAME, payload={})
+        bad.input = "texto"  # type: ignore[assignment]
+        fake = _FakeAnthropic(side_effect=[_Message([bad], stop_reason="tool_use"), _ok_message()])
+        client = _make_client(fake)
+
+        stmt = await client.extract_movements(
+            content=b"%PDF-", mime_type="application/pdf", document_kind="x"
+        )
+
+        assert stmt.bank_name == "Sicredi"
+        assert len(fake.messages.calls) == 2
+
+    async def test_claude_sonnet_5_pela_variavel_desliga_com_disabled(self) -> None:
+        # O Sonnet 5 recusa `between_tools`: voltar para a ponte pela variável de
+        # ambiente precisa mandar `disabled`, sem redeploy.
+        fake = _FakeAnthropic(side_effect=_ok_message())
+        client = _make_client(fake)
+
+        await client.extract_movements(
+            content=b"%PDF-",
+            mime_type="application/pdf",
+            document_kind="x",
+            model="claude-sonnet-5",
+        )
+
+        assert fake.messages.calls[0]["thinking"] == {"type": "disabled"}
+        assert fake.messages.calls[0]["tool_choice"] == {"type": "auto"}
+
+    async def test_max_tokens_sem_tool_nao_tenta_de_novo(self) -> None:
+        fake = _FakeAnthropic(side_effect=_Message([], stop_reason="max_tokens"))
+        client = _make_client(fake)
+
+        with pytest.raises(AnthropicParseError) as exc_info:
+            await client.extract_movements(
+                content=b"%PDF-", mime_type="application/pdf", document_kind="x"
+            )
+
+        assert len(fake.messages.calls) == 1
+        assert "período menor" in exc_info.value.user_message
 
     async def test_max_tokens_stop_reason_raises_truncation_error(self) -> None:
         """Report #3: extrato grande estoura o teto de tokens → `stop_reason`
@@ -668,7 +787,7 @@ def _identity_message(payload: dict[str, Any] | None = None) -> _Message:
 
 @pytest.mark.unit
 class TestIdentifyDocument:
-    async def test_payload_so_a_primeira_pagina_tool_forcada_e_max_tokens_pequeno(self) -> None:
+    async def test_payload_so_a_primeira_pagina_tool_exigida_e_max_tokens_pequeno(self) -> None:
         fake = _FakeAnthropic(side_effect=_identity_message())
         client = _make_client(fake)
         first_page = b"%PDF-1.7 primeira pagina"
@@ -679,18 +798,19 @@ class TestIdentifyDocument:
         call = fake.messages.calls[0]
         assert call["model"] == "claude-test"
         assert call["tools"] == [IDENTIFY_DOCUMENT_TOOL]
-        assert call["tool_choice"] == {"type": "tool", "name": IDENTIFY_DOCUMENT_TOOL_NAME}
+        assert call["tool_choice"] == {"type": "auto"}
+        assert call["tools"][0]["strict"] is True
         assert call["max_tokens"] <= 1024
         # Sem pensamento: com os 256 tokens da identificação, o pensamento
-        # adaptativo do claude-sonnet-5 truncaria a resposta (86e3wg8ek).
-        assert call["thinking"] == {"type": "disabled"}
+        # adaptativo do claude-sonnet-5-5 truncaria a resposta (86e3wg8et).
+        assert call["thinking"] == {"type": "between_tools"}
         assert "identify_document" in call["system"][0]["text"]
         assert call["system"][0]["text"] != SYSTEM_PROMPT
         content = call["messages"][0]["content"]
         assert content[0]["type"] == "document"
         assert content[0]["source"]["media_type"] == "application/pdf"
         assert base64.b64decode(content[0]["source"]["data"]) == first_page
-        assert "identify_document" in content[-1]["text"]
+        assert "obrigatoriamente uma chamada à tool `identify_document`" in content[-1]["text"]
 
     async def test_tool_input_invalido_vira_parse_error(self) -> None:
         fake = _FakeAnthropic(
