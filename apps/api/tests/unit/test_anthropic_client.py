@@ -488,6 +488,35 @@ class TestToolUseEdgeCases:
         assert not [e for e in logs if e["event"] == "anthropic_tool_not_called"]
         assert explanation not in repr(logs)
 
+    async def test_tool_use_com_input_que_nao_e_dict_conta_como_sem_tool(self) -> None:
+        bad = _ToolUseBlock(name=EXTRACT_MOVEMENTS_TOOL_NAME, payload={})
+        bad.input = "texto"  # type: ignore[assignment]
+        fake = _FakeAnthropic(side_effect=[_Message([bad], stop_reason="tool_use"), _ok_message()])
+        client = _make_client(fake)
+
+        stmt = await client.extract_movements(
+            content=b"%PDF-", mime_type="application/pdf", document_kind="x"
+        )
+
+        assert stmt.bank_name == "Sicredi"
+        assert len(fake.messages.calls) == 2
+
+    async def test_claude_sonnet_5_pela_variavel_desliga_com_disabled(self) -> None:
+        # O Sonnet 5 recusa `between_tools`: voltar para a ponte pela variável de
+        # ambiente precisa mandar `disabled`, sem redeploy.
+        fake = _FakeAnthropic(side_effect=_ok_message())
+        client = _make_client(fake)
+
+        await client.extract_movements(
+            content=b"%PDF-",
+            mime_type="application/pdf",
+            document_kind="x",
+            model="claude-sonnet-5",
+        )
+
+        assert fake.messages.calls[0]["thinking"] == {"type": "disabled"}
+        assert fake.messages.calls[0]["tool_choice"] == {"type": "auto"}
+
     async def test_max_tokens_sem_tool_nao_tenta_de_novo(self) -> None:
         fake = _FakeAnthropic(side_effect=_Message([], stop_reason="max_tokens"))
         client = _make_client(fake)

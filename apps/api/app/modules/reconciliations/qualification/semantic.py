@@ -34,11 +34,10 @@ from app.db.models import (
     SessionAccountType,
 )
 from app.integrations.anthropic.client import (
-    THINKING_BETWEEN_TOOLS,
-    TOOL_CALL_ATTEMPTS,
     TOOL_CALL_AUTO,
     AnthropicClient,
-    check_tool_response,
+    call_until_tool,
+    thinking_for,
 )
 from app.integrations.anthropic.prompts import tool_call_required_note
 from app.modules.glossary.schemas import GlossaryEntryPlain, GlossarySnapshot
@@ -437,9 +436,9 @@ async def _analyze_batch(
         "system": system_blocks,
         "tools": [_QUALIFY_TOOL],
         "tool_choice": TOOL_CALL_AUTO,
-        # Mesmo pensamento da extração (client.THINKING_BETWEEN_TOOLS): sem
-        # pensamento estendido, para não dividir os 8192 com ele.
-        "thinking": THINKING_BETWEEN_TOOLS,
+        # Mesmo pensamento da extração (`client.thinking_for`): sem pensamento
+        # estendido, para não dividir os 8192 com ele.
+        "thinking": thinking_for(anthropic_client._model),
         "messages": [
             {
                 "role": "user",
@@ -461,27 +460,25 @@ async def _analyze_batch(
         ],
     }
 
-    # 86e3wg8et: com `tool_choice` auto a tool não é garantida. Mesma política da
-    # extração (`check_tool_response`): uma nova tentativa com o mesmo pedido;
-    # recusa levanta sem tentar de novo.
-    message: Any = None
-    for attempt in range(1, TOOL_CALL_ATTEMPTS + 1):
-        message = await sdk_client.messages.create(**request)
-        if check_tool_response(
-            message,
-            tool_name=QUALIFY_TOOL_NAME,
-            model=anthropic_client._model,
-            attempt=attempt,
-        ):
-            break
+    # 86e3wg8et: com `tool_choice` auto a tool não é garantida. Mesma regra e
+    # mesmo laço da extração (`client.call_until_tool`): uma nova tentativa com o
+    # mesmo pedido; recusa levanta sem tentar de novo.
+    async def send() -> Any:
+        return await sdk_client.messages.create(**request)
 
-    # Defesa contra truncamento silencioso: se o modelo bateu no teto de tokens,
-    # o tool_use volta cortado e `results` vazio — os pares do lote viram "ok"
-    # sem análise. Logamos pra que isso seja VISÍVEL, não um falso-negativo mudo.
+    messages = await call_until_tool(
+        send, tool_name=QUALIFY_TOOL_NAME, model=anthropic_client._model
+    )
+    message = messages[-1]
+
+    # Truncamento: a resposta parou no teto de tokens (sem nova tentativa: o mesmo
+    # pedido truncaria de novo). Se o tool_use veio cortado, sem `results`, o lote
+    # cai no `raise` abaixo; o log deixa o motivo visível.
     if getattr(message, "stop_reason", None) == "max_tokens":
         log.warning("qualification_semantic_truncated", batch_size=len(batch))
 
-    tokens = _extract_tokens(message)
+    # Tokens de TODAS as tentativas: a resposta sem a tool também foi cobrada.
+    tokens = _sum_tokens([_extract_tokens(m) for m in messages])
     raw_items = _extract_tool_results(message)
     if raw_items is None:
         # Sem a tool depois das tentativas: o lote NÃO foi analisado. Devolver
@@ -520,6 +517,15 @@ def _build_user_payload(batch: list[QualificationPair]) -> list[dict[str, Any]]:
         }
         for p in batch
     ]
+
+
+def _sum_tokens(usages: list[TokenUsage]) -> TokenUsage:
+    """Soma o `usage` de várias respostas do mesmo lote."""
+    return TokenUsage(
+        input_tokens=sum(u.input_tokens for u in usages),
+        output_tokens=sum(u.output_tokens for u in usages),
+        cached_input_tokens=sum(u.cached_input_tokens for u in usages),
+    )
 
 
 def _extract_tokens(message: Any) -> TokenUsage:

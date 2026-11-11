@@ -236,20 +236,65 @@ async def test_analyze_pairs_sem_tool_na_primeira_e_tool_na_segunda() -> None:
     p1 = _pair()
     fake = _FakeAnthropic(
         side_effect=[
-            _Message(blocks=[], stop_reason="end_turn"),
-            _tool_response([{"pair_id": p1.pair_id, "status": "incoerente", "motivo": "x"}]),
+            _Message(
+                blocks=[],
+                stop_reason="end_turn",
+                usage=_Usage(input_tokens=1000, output_tokens=30, cache_read_input_tokens=900),
+            ),
+            _tool_response(
+                [{"pair_id": p1.pair_id, "status": "incoerente", "motivo": "x"}],
+                usage=_Usage(input_tokens=1000, output_tokens=200, cache_read_input_tokens=900),
+            ),
         ]
     )
     client = AnthropicClient(
         api_key=SecretStr("fake"), model="claude-sonnet-5-5", timeout=10.0, anthropic_client=fake
     )
 
-    results, _tokens, calls = await analyze_pairs([p1], anthropic_client=client)
+    results, tokens, calls = await analyze_pairs([p1], anthropic_client=client)
 
     assert [r.status for r in results] == ["incoerente"]
     assert len(fake.messages.calls) == 2
     assert fake.messages.calls[0] == fake.messages.calls[1]
     assert calls == 1
+    # A resposta sem a tool também foi cobrada: os tokens somam as duas.
+    assert (tokens.input_tokens, tokens.output_tokens, tokens.cached_input_tokens) == (
+        2000,
+        230,
+        1800,
+    )
+
+
+async def test_analyze_pairs_truncado_sem_results_levanta_sem_nova_tentativa() -> None:
+    p1 = _pair()
+    truncated = _Message(
+        blocks=[_ToolUseBlock(name=QUALIFY_TOOL_NAME, payload={})], stop_reason="max_tokens"
+    )
+    fake = _FakeAnthropic(side_effect=[truncated])
+    client = AnthropicClient(
+        api_key=SecretStr("fake"), model="claude-sonnet-5-5", timeout=10.0, anthropic_client=fake
+    )
+
+    with capture_logs() as logs, pytest.raises(AnthropicParseError):
+        await analyze_pairs([p1], anthropic_client=client)
+
+    assert len(fake.messages.calls) == 1
+    assert "qualification_semantic_truncated" in [e["event"] for e in logs]
+
+
+async def test_analyze_pairs_no_claude_sonnet_5_desliga_pensamento_com_disabled() -> None:
+    # Voltar para a ponte pela variável de ambiente: o Sonnet 5 recusa
+    # `between_tools` e desliga com `disabled`.
+    p1 = _pair()
+    fake = _FakeAnthropic(
+        side_effect=[_tool_response([{"pair_id": p1.pair_id, "status": "ok", "motivo": "ok"}])]
+    )
+    client = AnthropicClient(
+        api_key=SecretStr("fake"), model="claude-sonnet-5", timeout=10.0, anthropic_client=fake
+    )
+    await analyze_pairs([p1], anthropic_client=client)
+    assert fake.messages.calls[0]["thinking"] == {"type": "disabled"}
+    assert fake.messages.calls[0]["tool_choice"] == {"type": "auto"}
 
 
 async def test_analyze_pairs_refusal_nao_tenta_de_novo() -> None:

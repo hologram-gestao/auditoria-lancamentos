@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import base64
 import time
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
 from anthropic import (
@@ -118,9 +119,23 @@ _IDENTIFY_MAX_OUTPUT_TOKENS = 256
 # saída; `{"type": "disabled"}` ele recusa com 400. `between_tools` é o
 # desligado dele: sem pensamento estendido, aceito com effort `high` ou abaixo
 # (o padrão do modelo é `high`, por isso nenhum `output_config.effort` vai junto)
-# e sem nenhum outro campo no objeto. Só o claude-sonnet-5-5 o aceita: outro
-# modelo pela variável `ANTHROPIC_MODEL_DEFAULT` recebe 400 (86e3wg8et).
+# e sem nenhum outro campo no objeto (86e3wg8et).
 THINKING_BETWEEN_TOOLS: Final[dict[str, str]] = {"type": "between_tools"}
+
+# Só o claude-sonnet-5-5 aceita `between_tools`; o claude-sonnet-5 (a ponte de
+# 86e3wg8ek, ainda na tabela de tetos) o recusa com 400 e desliga o pensamento
+# com `disabled`. Esta tabela é o que deixa voltar para a ponte pela variável
+# `ANTHROPIC_MODEL_DEFAULT`, sem redeploy. `tool_choice` auto e `strict` valem
+# nos dois.
+_THINKING_BY_MODEL: Final[dict[str, dict[str, str]]] = {
+    "claude-sonnet-5": {"type": "disabled"},
+}
+
+
+def thinking_for(model: str) -> dict[str, str]:
+    """O parâmetro `thinking` que desliga o pensamento estendido em `model`."""
+    return _THINKING_BY_MODEL.get(model, THINKING_BETWEEN_TOOLS)
+
 
 # O claude-sonnet-5-5 recusa `tool_choice` forçado (`tool`/`any`) com 400. Com
 # `auto` a chamada à tool não é garantida: a mensagem do usuário a exige
@@ -164,11 +179,35 @@ def check_tool_response(message: Any, *, tool_name: str, model: str, attempt: in
 
 
 def has_tool_use(message: Any, tool_name: str) -> bool:
-    """A resposta tem um bloco `tool_use` com o nome `tool_name`?"""
+    """A resposta tem um bloco `tool_use` de `tool_name` com `input` dict?
+
+    `input` que não é dict conta como sem a tool: merece a nova tentativa em vez
+    de cair direto no erro do `_tool_input`.
+    """
     return any(
-        getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == tool_name
+        getattr(block, "type", None) == "tool_use"
+        and getattr(block, "name", None) == tool_name
+        and isinstance(getattr(block, "input", None), dict)
         for block in (getattr(message, "content", None) or [])
     )
+
+
+async def call_until_tool(
+    send: Callable[[], Awaitable[Any]], *, tool_name: str, model: str
+) -> list[Any]:
+    """Faz o pedido até `TOOL_CALL_ATTEMPTS` vezes, pela regra de `check_tool_response`.
+
+    Fonte única do laço para a extração, a identificação e a qualificação.
+    `send` faz UM pedido (o mesmo a cada vez). Devolve TODAS as respostas, na
+    ordem: a última é a que vale; as anteriores servem para contar tokens.
+    """
+    messages: list[Any] = []
+    for attempt in range(1, TOOL_CALL_ATTEMPTS + 1):
+        message = await send()
+        messages.append(message)
+        if check_tool_response(message, tool_name=tool_name, model=model, attempt=attempt):
+            break
+    return messages
 
 
 class _RetryableAnthropicError(Exception):
@@ -415,9 +454,9 @@ class AnthropicClient:
         segue para o caller, que levanta o `AnthropicParseError` de sempre
         (`_tool_input`). Recusa levanta `AnthropicRefusalError` na primeira.
         """
-        message: Any = None
-        for attempt in range(1, TOOL_CALL_ATTEMPTS + 1):
-            message = await self._call_with_retry(
+
+        async def send() -> Any:
+            return await self._call_with_retry(
                 model=model,
                 system_blocks=system_blocks,
                 user_content=user_content,
@@ -425,9 +464,9 @@ class AnthropicClient:
                 max_tokens=max_tokens,
                 bytes_in=bytes_in,
             )
-            if check_tool_response(message, tool_name=tool_name, model=model, attempt=attempt):
-                break
-        return message
+
+        messages = await call_until_tool(send, tool_name=tool_name, model=model)
+        return messages[-1]
 
     async def _call_with_retry(
         self,
@@ -582,7 +621,7 @@ class AnthropicClient:
                 system=system_blocks,
                 tools=tools,
                 tool_choice=TOOL_CALL_AUTO,
-                thinking=THINKING_BETWEEN_TOOLS,
+                thinking=thinking_for(model),
                 messages=[{"role": "user", "content": user_content}],
             )
         except APITimeoutError as exc:
