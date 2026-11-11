@@ -1,8 +1,13 @@
 """Definição do tool use `extract_movements` para a Anthropic API.
 
-Princípio (Doc §12 + PLANO §S9): forçamos o modelo a emitir o schema exato via
-`tool_choice = {"type": "tool", "name": "extract_movements"}`. A resposta fica
-em `message.content[i].input` quando `type == "tool_use"`.
+Princípio (Doc §12 + PLANO §S9): o modelo emite o schema exato via tool use.
+Desde o claude-sonnet-5-5 (86e3wg8et) o `tool_choice` forçado é recusado com
+400: a chamada vai com `tool_choice` auto, a mensagem do usuário exige a tool e
+cada definição leva `strict: true`, que garante argumentos válidos contra o
+`input_schema` (todo objeto com `additionalProperties: false`, exigência do modo
+estrito; campo opcional continua fora do `required`, o que o modo estrito
+aceita). A resposta fica em `message.content[i].input` quando
+`type == "tool_use"`.
 
 Mantemos o schema separado dos prompts para:
     - Reuso em testes (validação JSON Schema do shape esperado).
@@ -39,6 +44,7 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
         "Datas no formato ISO 8601 (YYYY-MM-DD). Preserva a descrição original. "
         "Não inventa transações; não filtra nenhuma linha."
     ),
+    "strict": True,
     "cache_control": {"type": "ephemeral"},
     "input_schema": {
         "type": "object",
@@ -151,6 +157,7 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
                         },
                     },
                     "required": ["date", "description", "amount"],
+                    "additionalProperties": False,
                 },
             },
         },
@@ -163,6 +170,7 @@ EXTRACT_MOVEMENTS_TOOL: dict[str, Any] = {
             "closing_balance",
             "transactions",
         ],
+        "additionalProperties": False,
     },
 }
 
@@ -178,6 +186,7 @@ IDENTIFY_DOCUMENT_TOOL: dict[str, Any] = {
         "ou fatura de cartão a partir da primeira página do documento. Não "
         "extrai movimentações."
     ),
+    "strict": True,
     "input_schema": {
         "type": "object",
         "properties": {
@@ -216,5 +225,6 @@ IDENTIFY_DOCUMENT_TOOL: dict[str, Any] = {
             },
         },
         "required": ["bank_name", "account_type"],
+        "additionalProperties": False,
     },
 }
