@@ -12,11 +12,11 @@ Princípios (CLAUDE.md §3 + Doc §12):
     - **HTTP 400 por crédito esgotado** vira `AnthropicCreditError` e dispara o
       alerta de plantão `AlertCode.ANTHROPIC_CREDIT` (deduplicado por processo):
       antes caía no 4xx genérico e virava "arquivo inválido" (86e39yzxc).
-    - **Duas chamadas, um caminho.** `extract_movements` (a extração) e
+    - **Três chamadas, um caminho.** `extract_movements` (a extração),
       `identify_document` (86e3ff8xd: banco e tipo de conta pela primeira página
-      de um PDF dividido) passam pelo MESMO retry e pelo MESMO mapeamento de
-      erro (`_call_for_tool` → `_call_with_retry` → `_invoke`); mudam só tool,
-      prompt e `max_tokens`.
+      de um PDF dividido) e `call_tool` (86e3mpmcx: a qualificação) passam pelo
+      MESMO retry e pelo MESMO mapeamento de erro (`_call_for_tool` →
+      `_call_with_retry` → `_invoke`); mudam só tool, prompt e `max_tokens`.
     - **Tool sem `tool_choice` forçado** (86e3wg8et, claude-sonnet-5-5): `auto`,
       `strict` na definição e a exigência na mensagem do usuário. Resposta sem a
       tool tem UMA nova tentativa (`check_tool_response`); recusa
@@ -344,7 +344,7 @@ class AnthropicClient:
         chosen_model = model or self._model
 
         started = time.monotonic()
-        message = await self._call_for_tool(
+        messages = await self._call_for_tool(
             model=chosen_model,
             system_blocks=self._build_system_blocks(),
             user_content=user_content,
@@ -353,6 +353,7 @@ class AnthropicClient:
             max_tokens=self._max_output_tokens,
             bytes_in=len(content),
         )
+        message = messages[-1]
         duration_ms = round((time.monotonic() - started) * 1000)
 
         # Truncamento: se o modelo bateu no teto de tokens, o `tool_use` volta
@@ -406,7 +407,7 @@ class AnthropicClient:
             {"type": "text", "text": IDENTIFY_USER_PROMPT},
         ]
         started = time.monotonic()
-        message = await self._call_for_tool(
+        messages = await self._call_for_tool(
             model=self._model,
             system_blocks=[{"type": "text", "text": IDENTIFY_SYSTEM_PROMPT}],
             user_content=user_content,
@@ -415,6 +416,7 @@ class AnthropicClient:
             max_tokens=_IDENTIFY_MAX_OUTPUT_TOKENS,
             bytes_in=len(content),
         )
+        message = messages[-1]
         duration_ms = round((time.monotonic() - started) * 1000)
         if getattr(message, "stop_reason", None) == "max_tokens":
             raise AnthropicParseError("Identificação truncada: stop_reason=max_tokens.")
@@ -436,6 +438,42 @@ class AnthropicClient:
         )
         return identity
 
+    async def call_tool(
+        self,
+        *,
+        system_blocks: list[dict[str, Any]],
+        user_content: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_name: str,
+        max_tokens: int,
+    ) -> list[Any]:
+        """Chamada pública com tool, no modelo do construtor (86e3mpmcx).
+
+        É o caminho da qualificação (`qualification/semantic.py`): o MESMO
+        `_call_for_tool` → `_call_with_retry` → `_invoke` da extração e da
+        identificação, com o retry de 429/5xx/conexão, o mapeamento de timeout e
+        de autenticação e o reconhecimento do crédito esgotado com o alerta de
+        plantão. `thinking` (`thinking_for`) e `tool_choice` auto vêm do `_invoke`.
+
+        Returns:
+            TODAS as respostas, na ordem (`call_until_tool`): a última é a que
+            vale; as anteriores servem para somar tokens.
+
+        Raises:
+            AnthropicAuthError / AnthropicTimeoutError / AnthropicCreditError /
+            AnthropicParseError / AnthropicRefusalError: como em `extract_movements`.
+        """
+        return await self._call_for_tool(
+            model=self._model,
+            system_blocks=system_blocks,
+            user_content=user_content,
+            tools=tools,
+            tool_name=tool_name,
+            max_tokens=max_tokens,
+            # Só para o log do 5xx persistente: o tamanho do texto enviado.
+            bytes_in=sum(len(str(block.get("text", "")).encode()) for block in user_content),
+        )
+
     async def _call_for_tool(
         self,
         *,
@@ -446,13 +484,14 @@ class AnthropicClient:
         tool_name: str,
         max_tokens: int,
         bytes_in: int,
-    ) -> Any:
+    ) -> list[Any]:
         """Chamada que precisa da tool `tool_name`: até `TOOL_CALL_ATTEMPTS` pedidos.
 
         Com `tool_choice` auto a resposta pode vir sem a tool; o MESMO pedido vai
         de novo uma vez (`check_tool_response`). A segunda resposta sem a tool
         segue para o caller, que levanta o `AnthropicParseError` de sempre
         (`_tool_input`). Recusa levanta `AnthropicRefusalError` na primeira.
+        Devolve todas as respostas; a extração e a identificação usam a última.
         """
 
         async def send() -> Any:
@@ -465,8 +504,7 @@ class AnthropicClient:
                 bytes_in=bytes_in,
             )
 
-        messages = await call_until_tool(send, tool_name=tool_name, model=model)
-        return messages[-1]
+        return await call_until_tool(send, tool_name=tool_name, model=model)
 
     async def _call_with_retry(
         self,
@@ -694,7 +732,10 @@ class AnthropicClient:
         await send_alert(
             Alert(
                 code=AlertCode.ANTHROPIC_CREDIT,
-                message="Conta da Anthropic sem crédito: parsing e qualificação param até recarregar.",
+                message=(
+                    "Conta da Anthropic sem crédito: o envio de arquivos falha e a "
+                    "qualificação das conciliações não roda até recarregar."
+                ),
             ),
             self._alert_settings,
         )

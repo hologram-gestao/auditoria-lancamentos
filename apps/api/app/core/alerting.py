@@ -116,7 +116,9 @@ ALERT_ACTIONS: Mapping[AlertCode, str] = MappingProxyType(
         ),
         AlertCode.ANTHROPIC_CREDIT: (
             "Recarregue o crédito no console da Anthropic (Billing). Não é preciso "
-            "reiniciar nada: a próxima chamada volta a funcionar."
+            "reiniciar nada: a próxima chamada volta a funcionar. Conciliações processadas "
+            "sem crédito ficaram sem os vereditos da IA; reprocessar refaz a análise (e "
+            "descarta a revisão já feita)."
         ),
         AlertCode.LEGACY_FALLBACK: (
             "Rode scripts/convert_credentials_to_connections.py com --verify até não sobrar "
